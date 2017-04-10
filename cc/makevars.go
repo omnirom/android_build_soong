@@ -17,6 +17,7 @@ package cc
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"android/soong/android"
@@ -69,6 +70,8 @@ func makeVarsProvider(ctx android.MakeVarsContext) {
 
 	ctx.Strict("CFI_EXTRA_CFLAGS", strings.Join(cfiCflags, " "))
 	ctx.Strict("CFI_EXTRA_LDFLAGS", strings.Join(cfiLdflags, " "))
+	ctx.Strict("SDCLANG_CFI_EXTRA_CFLAGS", strings.Join(sdclangCfiCflags, " "))
+	ctx.Strict("SDCLANG_CFI_EXTRA_LDFLAGS", strings.Join(sdclangCfiLdflags, " "))
 
 	ctx.Strict("INTEGER_OVERFLOW_EXTRA_CFLAGS", strings.Join(intOverflowCflags, " "))
 
@@ -125,6 +128,12 @@ func makeVarsProvider(ctx android.MakeVarsContext) {
 	makeVarsToolchain(ctx, "", deviceTargets[0])
 	if len(deviceTargets) > 1 {
 		makeVarsToolchain(ctx, "2ND_", deviceTargets[1])
+	}
+
+	if config.SDClang {
+		ctx.Strict("SDCLANG", strconv.FormatBool(config.SDClang))
+		ctx.Strict("SDCLANG_PATH", "${config.SDClangBin}")
+		ctx.Strict("SDCLANG_COMMON_FLAGS", "${config.SDClangFlags}")
 	}
 }
 
