@@ -239,6 +239,7 @@ type builderFlags struct {
 	aidlFlags   string
 	toolchain   config.Toolchain
 	clang       bool
+	sdclang     bool
 	tidy        bool
 	coverage    bool
 	sAbiDump    bool
@@ -375,7 +376,12 @@ func TransformSourceToObj(ctx android.ModuleContext, subdir string, srcFiles and
 				panic("unrecoginzied ccCmd")
 			}
 
-			ccCmd = "${config.ClangBin}/" + ccCmd
+			if flags.sdclang {
+				ccCmd = "${config.SDClangBin}/" + ccCmd
+				extraFlags = " ${config.SDClangFlags}"
+			} else {
+				ccCmd = "${config.ClangBin}/" + ccCmd
+			}
 		} else {
 			ccCmd = gccCmd(flags.toolchain, ccCmd)
 		}
@@ -559,7 +565,12 @@ func TransformObjToDynamicBinary(ctx android.ModuleContext,
 
 	var ldCmd string
 	if flags.clang {
-		ldCmd = "${config.ClangBin}/clang++"
+		if flags.sdclang {
+			ldCmd = "${config.SDClangBin}/clang++"
+			extraFlags = " ${config.SDClangFlags}"
+		} else {
+			ldCmd = "${config.ClangBin}/clang++"
+		}
 	} else {
 		ldCmd = gccCmd(flags.toolchain, "g++")
 	}
@@ -697,7 +708,12 @@ func TransformObjsToObj(ctx android.ModuleContext, objFiles android.Paths,
 
 	var ldCmd string
 	if flags.clang {
-		ldCmd = "${config.ClangBin}/clang++"
+		if flags.sdclang {
+			ldCmd = "${config.SDClangBin}/clang++"
+			extraFlags = " ${config.SDClangFlags}"
+		} else {
+			ldCmd = "${config.ClangBin}/clang++"
+		}
 	} else {
 		ldCmd = gccCmd(flags.toolchain, "g++")
 	}
