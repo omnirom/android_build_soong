@@ -20,6 +20,8 @@ import (
 	"runtime"
 	"strings"
 
+	"lineage/soong/android"
+
 	"github.com/google/blueprint/proptools"
 )
 
@@ -136,6 +138,8 @@ type variableProperties struct {
 		Device_support_hwfde_perf struct {
 			Cflags []string
 		}
+		// include Omnirom variables
+		Omnirom android.Product_variables
 	} `android:"arch_variant"`
 }
 
@@ -260,6 +264,9 @@ type productVariables struct {
 	Target_init_vendor_lib *bool `json:",omitempty"`
 
 	Target_legacy_mutex_handle *bool `json:",omitempty"`
+
+	// include Omnirom variables
+	Omnirom android.ProductVariables
 }
 
 func boolPtr(v bool) *bool {
