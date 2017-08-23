@@ -20,6 +20,8 @@ import (
 	"runtime"
 	"strings"
 
+	"omnirom/soong/android"
+
 	"github.com/google/blueprint/proptools"
 )
 
@@ -127,6 +129,8 @@ type variableProperties struct {
 		Healthd_enable_op_fastchg struct {
 			Cflags []string
 		}
+		// include Omnirom variables
+		Omnirom android.Product_variables
 	} `android:"arch_variant"`
 }
 
@@ -293,6 +297,8 @@ type productVariables struct {
 
         //Omni//
         Healthd_enable_op_fastchg  *bool `json:",omitempty"`
+	// include Omnirom variables
+	Omnirom android.ProductVariables
 }
 
 func boolPtr(v bool) *bool {
