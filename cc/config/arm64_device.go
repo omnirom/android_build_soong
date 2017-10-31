@@ -91,7 +91,8 @@ func init() {
 		"kryo",
 		"exynos-m1",
 		"exynos-m2",
-		"denver64")
+		"denver64",
+		"kryo300")
 
 	// Clang supports specific Kryo targeting
 	replaceFirst(arm64ClangCpuVariantCflags["kryo"], "-mcpu=cortex-a57", "-mcpu=kryo")
