@@ -93,17 +93,10 @@ const (
 func init() {
 	android.RegisterArchVariants(android.Arm64,
 		"armv8_a",
-		"cortex_a53",
+		"cortex-a53",
+		"cortex-a73",
 		"kryo",
 		"denver64")
-
-	replaceFirst := func(slice []string, from, to string) {
-		if slice[0] != from {
-			panic(fmt.Errorf("Expected %q, found %q", from, to))
-		}
-
-		slice[0] = to
-	}
 
 	// Clang supports specific Kryo targeting
 	replaceFirst(arm64ClangCpuVariantCflags["kryo"], "-mcpu=cortex-a57", "-mcpu=kryo")
@@ -137,12 +130,14 @@ var (
 	arm64CpuVariantCflagsVar = map[string]string{
 		"":           "",
 		"cortex-a53": "${config.Arm64CortexA53Cflags}",
+		"cortex-a73": "${config.Arm64CortexA53Cflags}",
 		"kryo":       "${config.Arm64KryoCflags}",
 	}
 
 	arm64ClangCpuVariantCflagsVar = map[string]string{
 		"":           "",
 		"cortex-a53": "${config.Arm64ClangCortexA53Cflags}",
+		"cortex-a73": "${config.Arm64ClangCortexA53Cflags}",
 		"kryo":       "${config.Arm64ClangKryoCflags}",
 	}
 )
