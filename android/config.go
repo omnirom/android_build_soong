@@ -555,7 +555,7 @@ func (c *deviceConfig) TargetUsesQCOMBsp() bool {
 }
 
 func (c *deviceConfig) TargetUsesNoTrebleCamera() bool {
-       return Bool(c.config.ProductVariables.TargetUsesNoTrebleCamera)
+	return Bool(c.config.ProductVariables.TargetUsesNoTrebleCamera)
 }
 
 func (c *config) IntegerOverflowDisabledForPath(path string) bool {
@@ -563,4 +563,8 @@ func (c *config) IntegerOverflowDisabledForPath(path string) bool {
 		return false
 	}
 	return prefixInList(path, *c.ProductVariables.IntegerOverflowExcludePaths)
+}
+
+func (c *deviceConfig) TargetHeaderPathDir() string {
+	return String(c.config.ProductVariables.TargetHeaderPath)
 }
