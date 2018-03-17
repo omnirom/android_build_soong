@@ -558,6 +558,10 @@ func (c *deviceConfig) TargetUsesNoTrebleCamera() bool {
 	return Bool(c.config.ProductVariables.TargetUsesNoTrebleCamera)
 }
 
+func (c *deviceConfig) TargetStoresMetadataInBuffer() bool {
+	return Bool(c.config.ProductVariables.TargetStoresMetadataInBuffer)
+}
+
 func (c *config) IntegerOverflowDisabledForPath(path string) bool {
 	if c.ProductVariables.IntegerOverflowExcludePaths == nil {
 		return false

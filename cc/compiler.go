@@ -346,6 +346,11 @@ func (compiler *baseCompiler) compilerFlags(ctx ModuleContext, flags Flags) Flag
 		if (Bool(ctx.AConfig().ProductVariables.TargetUsesNoTrebleCamera)) {
 			flags.CppFlags = append(flags.CppFlags, "-DTARGET_USES_NON_TREBLE_CAMERA")
 		}
+		if (Bool(ctx.AConfig().ProductVariables.TargetStoresMetadataInBuffer)) {
+			flags.CppFlags = append(flags.CppFlags, "-DSTORE_METADATA_IN_BUFFER=\"true\"")
+		} else {
+			flags.CppFlags = append(flags.CppFlags, "-DSTORE_METADATA_IN_BUFFER=\"false\"")
+		}
 		if ctx.Device() {
 			if Bool(compiler.Properties.Rtti) {
 				flags.CppFlags = append(flags.CppFlags, "-frtti")

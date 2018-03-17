@@ -173,6 +173,8 @@ type productVariables struct {
 
 	TargetUsesNoTrebleCamera *bool `json:",omitempty"`
 
+	TargetStoresMetadataInBuffer *bool `json:",omitempty"`
+
 	DeviceKernelHeaders []string `json:",omitempty"`
 }
 
@@ -206,6 +208,7 @@ func (v *productVariables) SetDefaultConfig() {
 		Malloc_not_svelte:          boolPtr(false),
 		Safestack:                  boolPtr(false),
 		BoardUsesQTIHardware:      boolPtr(false),
+		TargetStoresMetadataInBuffer: boolPtr(true),
 	}
 
 	if runtime.GOOS == "linux" {
