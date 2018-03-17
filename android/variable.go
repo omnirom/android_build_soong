@@ -173,6 +173,8 @@ type productVariables struct {
 
 	TargetUsesNoTrebleCamera *bool `json:",omitempty"`
 
+        TargetUsesNativeWfd *bool `json:",omitempty"`
+
 	DeviceKernelHeaders []string `json:",omitempty"`
 }
 
