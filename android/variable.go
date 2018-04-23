@@ -94,6 +94,10 @@ type variableProperties struct {
 		Pdk struct {
 			Enabled *bool
 		}
+
+                Uses_generic_camera_parameter_library struct {
+		        Srcs []string
+	        }
 	} `android:"arch_variant"`
 }
 
@@ -174,6 +178,9 @@ type productVariables struct {
 	TargetUsesNoTrebleCamera *bool `json:",omitempty"`
 
 	DeviceKernelHeaders []string `json:",omitempty"`
+
+	Uses_generic_camera_parameter_library  *bool `json:",omitempty"`
+	Specific_camera_library  *string `json:",omitempty"`
 }
 
 func boolPtr(v bool) *bool {
