@@ -25,8 +25,8 @@ import (
 )
 
 func init() {
-	pctx.SourcePathVariable("lexCmd", "prebuilts/misc/${config.HostPrebuiltTag}/flex/flex-2.5.39")
-	pctx.SourcePathVariable("yaccCmd", "prebuilts/build-tools/${config.HostPrebuiltTag}/bin/bison")
+	pctx.SourcePathVariable("lexCmd", "${config.FlexExec}")
+	pctx.SourcePathVariable("yaccCmd", "${config.BisonExec}")
 	pctx.SourcePathVariable("yaccDataDir", "prebuilts/build-tools/common/bison")
 
 	pctx.HostBinToolVariable("aidlCmd", "aidl-cpp")
@@ -36,14 +36,12 @@ var (
 	yacc = pctx.AndroidStaticRule("yacc",
 		blueprint.RuleParams{
 			Command:     "BISON_PKGDATADIR=$yaccDataDir $yaccCmd -d $yaccFlags --defines=$hFile -o $out $in",
-			CommandDeps: []string{"$yaccCmd"},
 		},
 		"yaccFlags", "hFile")
 
 	lex = pctx.AndroidStaticRule("lex",
 		blueprint.RuleParams{
 			Command:     "$lexCmd -o$out $in",
-			CommandDeps: []string{"$lexCmd"},
 		})
 
 	aidl = pctx.AndroidStaticRule("aidl",
