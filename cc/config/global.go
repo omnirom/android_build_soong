@@ -233,7 +233,7 @@ func init() {
 		if override := ctx.Config().Getenv("FLEX_EXEC"); override != "" {
 			return override + " "
 		}
-		return "prebuilts/misc/${HostPrebuiltTag}/flex/flex-2.5.39"
+		return "prebuilts/build-tools/${HostPrebuiltTag}/bin/flex"
 	})
 
 	pctx.VariableFunc("BisonExec", func(ctx android.PackageVarContext) string {
