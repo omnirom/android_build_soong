@@ -124,6 +124,9 @@ type variableProperties struct {
 			Static_libs  []string
 			Srcs         []string
 		}
+		Healthd_enable_op_fastchg struct {
+			Cflags []string
+		}
 	} `android:"arch_variant"`
 }
 
@@ -287,6 +290,9 @@ type productVariables struct {
 	ProductHiddenAPIStubsTest   []string `json:",omitempty"`
 
 	TargetFSConfigGen []string `json:",omitempty"`
+
+        //Omni//
+        Healthd_enable_op_fastchg  *bool `json:",omitempty"`
 }
 
 func boolPtr(v bool) *bool {
