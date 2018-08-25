@@ -131,6 +131,10 @@ type variableProperties struct {
 			Srcs         []string `android:"arch_variant"`
 			Exclude_srcs []string `android:"arch_variant"`
 		} `android:"arch_variant"`
+
+		Healthd_enable_op_fastchg struct {
+			Cflags []string
+		}
 	} `android:"arch_variant"`
 }
 
@@ -336,6 +340,8 @@ type productVariables struct {
 	InstallExtraFlattenedApexes *bool `json:",omitempty"`
 
 	BoardUsesRecoveryAsBoot *bool `json:",omitempty"`
+    //Omni//
+    Healthd_enable_op_fastchg  *bool `json:",omitempty"`
 }
 
 func boolPtr(v bool) *bool {
