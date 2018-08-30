@@ -751,6 +751,7 @@ func SourceAbiDiff(ctx android.ModuleContext, inputDump android.Path, referenceD
 		"libunwindstack",
 		"libvixl-arm64",
 		"libvixl-arm",
+		"libc++",
 	}
 	if config.SDClang && !inList("-advice-only", localAbiCheckAllowFlags) &&
 		inList(ctx.ModuleName(), sdclangAbiCheckIgnoreList) {
