@@ -117,7 +117,11 @@ type variableProperties struct {
 
 		Healthd_enable_op_fastchg struct {
 			Cflags []string
-                }
+		}
+
+		Target_init_vendor_lib struct {
+			Cflags []string
+		}
 
 		Device_support_hwfde struct {
 			Cflags []string
@@ -247,7 +251,9 @@ type productVariables struct {
 
 	VendorVars map[string]map[string]string `json:",omitempty"`
 
-        Healthd_enable_op_fastchg  *bool `json:",omitempty"`
+	Healthd_enable_op_fastchg  *bool `json:",omitempty"`
+
+	Target_init_vendor_lib *string `json:",omitempty"`
 }
 
 func boolPtr(v bool) *bool {
