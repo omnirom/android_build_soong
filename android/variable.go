@@ -253,7 +253,7 @@ type productVariables struct {
 
 	Healthd_enable_op_fastchg  *bool `json:",omitempty"`
 
-	Target_init_vendor_lib *string `json:",omitempty"`
+	Target_init_vendor_lib *bool `json:",omitempty"`
 }
 
 func boolPtr(v bool) *bool {
