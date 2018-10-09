@@ -132,6 +132,10 @@ type variableProperties struct {
 		Device_support_hwfde_perf struct {
 			Cflags []string
 		}
+
+		Target_process_sdk_version_override struct {
+			Cppflags []string
+		}
 	} `android:"arch_variant"`
 }
 
@@ -254,6 +258,8 @@ type productVariables struct {
 	Healthd_enable_op_fastchg  *bool `json:",omitempty"`
 
 	Target_init_vendor_lib *bool `json:",omitempty"`
+
+	Target_process_sdk_version_override *string `json:",omitempty"`
 }
 
 func boolPtr(v bool) *bool {
