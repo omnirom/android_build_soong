@@ -119,6 +119,10 @@ type variableProperties struct {
 			Cflags []string
 		}
 
+		Healthd_enable_huawei_fastchg struct {
+			Cflags []string
+		}
+
 		Target_init_vendor_lib struct {
 			Cflags []string
 		}
@@ -252,6 +256,8 @@ type productVariables struct {
 	VendorVars map[string]map[string]string `json:",omitempty"`
 
 	Healthd_enable_op_fastchg  *bool `json:",omitempty"`
+
+	Healthd_enable_huawei_fastchg  *bool `json:",omitempty"`
 
 	Target_init_vendor_lib *bool `json:",omitempty"`
 }
