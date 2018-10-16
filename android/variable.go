@@ -115,6 +115,10 @@ type variableProperties struct {
 			Srcs         []string
 		}
 
+		Has_hwc_huawei struct {
+		Cflags []string
+		}
+
 		Healthd_enable_op_fastchg struct {
 			Cflags []string
 		}
@@ -254,6 +258,8 @@ type productVariables struct {
 	PgoAdditionalProfileDirs []string `json:",omitempty"`
 
 	VendorVars map[string]map[string]string `json:",omitempty"`
+
+	Has_hwc_huawei  *bool `json:",omitempty"`
 
 	Healthd_enable_op_fastchg  *bool `json:",omitempty"`
 
