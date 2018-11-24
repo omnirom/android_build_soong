@@ -123,6 +123,10 @@ type variableProperties struct {
 			Cflags []string
 		}
 
+		Target_legacy_mutex_handle struct {
+			Cflags []string
+		}
+
 		Device_support_hwfde struct {
 			Cflags []string
 			Header_libs  []string
@@ -254,6 +258,8 @@ type productVariables struct {
 	Healthd_enable_op_fastchg  *bool `json:",omitempty"`
 
 	Target_init_vendor_lib *bool `json:",omitempty"`
+
+	Target_legacy_mutex_handle *bool `json:",omitempty"`
 }
 
 func boolPtr(v bool) *bool {
