@@ -365,7 +365,7 @@ func setSdclangVars() {
 	// Override SDCLANG if the varialbe is set in the environment
 	if sdclang := android.SdclangEnv["SDCLANG"]; sdclang != "" {
 		if override, err := strconv.ParseBool(sdclang); err == nil {
-			SDClang = override
+			SDClang = override && useSdclang()
 		}
 	}
 
@@ -450,4 +450,34 @@ func replaceFirst(slice []string, from, to string) {
 		panic(fmt.Errorf("Expected %q, found %q", from, to))
 	}
 	slice[0] = to
+}
+
+func useSdclang() bool {
+	var outDir string
+	outDir = android.SdclangEnv["OUT_DIR"]
+	if outDir == "" {
+		outDir = android.SdclangEnv["ANDROID_BUILD_TOP"] + "/out"
+	}
+
+
+	varFile := filepath.Join(outDir, "/soong/soong.variables")
+	//fmt.Println(varFile)
+	var varConfig interface{}
+	if file, err := os.Open(varFile); err == nil {
+		decoder := json.NewDecoder(file)
+		// Parse the config file
+		if err := decoder.Decode(&varConfig); err == nil {
+			config := varConfig.(map[string]interface{})
+			// Retrieve the Carbon block
+			if dev, ok := config["Carbon"]; ok {
+				devConfig := dev.(map[string]interface{})
+				// Get value of TARGET_USE_SDCLANG
+				if _, ok := devConfig["Target_use_sdclang"]; ok {
+					return devConfig["Target_use_sdclang"].(bool)
+				}
+			}
+		}
+		file.Close()
+	}
+	return false
 }
