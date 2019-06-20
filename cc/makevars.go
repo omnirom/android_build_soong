@@ -65,7 +65,7 @@ func makeStringOfWarningAllowedProjects() string {
 }
 
 func makeVarsProvider(ctx android.MakeVarsContext) {
-	sdclangMakeVars(ctx)
+        if config.UseSdclang() { sdclangMakeVars(ctx) }
 	ctx.Strict("LLVM_RELEASE_VERSION", "${config.ClangShortVersion}")
 	ctx.Strict("LLVM_PREBUILTS_VERSION", "${config.ClangVersion}")
 	ctx.Strict("LLVM_PREBUILTS_BASE", "${config.ClangBase}")

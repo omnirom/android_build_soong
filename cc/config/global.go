@@ -187,7 +187,7 @@ func init() {
 	pctx.PrefixedExistentPathsForSourcesVariable("CommonNativehelperInclude", "-I",
 		[]string{"libnativehelper/include_jni"})
 
-	if useSdclang() { setSdclangVars() }
+	if UseSdclang() { setSdclangVars() }
 
 	pctx.SourcePathVariable("ClangDefaultBase", ClangDefaultBase)
 	pctx.VariableFunc("ClangBase", func(ctx android.PackageVarContext) string {
@@ -365,7 +365,7 @@ func setSdclangVars() {
 	// Override SDCLANG if the varialbe is set in the environment
 	if sdclang := android.SdclangEnv["SDCLANG"]; sdclang != "" {
 		if override, err := strconv.ParseBool(sdclang); err == nil {
-			SDClang = override && useSdclang()
+			SDClang = override && UseSdclang()
 		}
 	}
 
@@ -452,7 +452,7 @@ func replaceFirst(slice []string, from, to string) {
 	slice[0] = to
 }
 
-func useSdclang() bool {
+func UseSdclang() bool {
 	var outDir string
 	outDir = android.SdclangEnv["OUT_DIR"]
 	if outDir == "" {
