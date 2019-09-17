@@ -506,6 +506,10 @@ func (c *config) PlatformSecurityPatch() string {
 	return String(c.productVariables.Platform_security_patch)
 }
 
+func (c *config) PlatformSecurityPatchOmni() string {
+        return String(c.productVariables.Platform_security_patch_omni)
+}
+
 func (c *config) PlatformPreviewSdkVersion() string {
 	return String(c.productVariables.Platform_preview_sdk_version)
 }
