@@ -134,9 +134,6 @@ type variableProperties struct {
 			Exclude_srcs []string `android:"arch_variant"`
 		} `android:"arch_variant"`
 
-		Healthd_enable_op_fastchg struct {
-			Cflags []string
-		}
 		Device_support_hwfde struct {
 			Cflags []string
 			Header_libs  []string
