@@ -1179,7 +1179,7 @@ func TestAndroidAppImport(t *testing.T) {
 	// Check cert signing flag.
 	signedApk := variant.Output("signed/foo.apk")
 	signingFlag := signedApk.Args["certificates"]
-	expected := "build/make/target/product/security/platform.x509.pem build/make/target/product/security/platform.pk8"
+	expected := "build/target/product/security/platform.x509.pem build/target/product/security/platform.pk8"
 	if expected != signingFlag {
 		t.Errorf("Incorrect signing flags, expected: %q, got: %q", expected, signingFlag)
 	}
@@ -1263,7 +1263,7 @@ func TestAndroidAppImport_DefaultDevCert(t *testing.T) {
 	// Check cert signing flag.
 	signedApk := variant.Output("signed/foo.apk")
 	signingFlag := signedApk.Args["certificates"]
-	expected := "build/make/target/product/security/testkey.x509.pem build/make/target/product/security/testkey.pk8"
+	expected := "build/target/product/security/testkey.x509.pem build/target/product/security/testkey.pk8"
 	if expected != signingFlag {
 		t.Errorf("Incorrect signing flags, expected: %q, got: %q", expected, signingFlag)
 	}
