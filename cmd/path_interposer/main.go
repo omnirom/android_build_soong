@@ -53,7 +53,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	disableError := false
+	disableError := true
 	if e, ok := os.LookupEnv("TEMPORARY_DISABLE_PATH_RESTRICTIONS"); ok {
 		disableError = e == "1" || e == "y" || e == "yes" || e == "on" || e == "true"
 	}
