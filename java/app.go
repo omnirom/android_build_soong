@@ -765,14 +765,14 @@ func MergePropertiesFromVariant(ctx android.BaseModuleContext,
 		return
 	}
 
-	err := proptools.ExtendMatchingProperties([]interface{}{dst}, src.Interface(), nil, proptools.OrderAppend)
-	if err != nil {
-		if propertyErr, ok := err.(*proptools.ExtendPropertyError); ok {
-			ctx.PropertyErrorf(propertyErr.Property, "%s", propertyErr.Err.Error())
-		} else {
-			panic(err)
-		}
-	}
+//	err := proptools.ExtendMatchingProperties([]interface{}{dst}, src.Interface(), nil, proptools.OrderAppend)
+//	if err != nil {
+//		if propertyErr, ok := err.(*proptools.ExtendPropertyError); ok {
+//			ctx.PropertyErrorf(propertyErr.Property, "%s", propertyErr.Err.Error())
+//		} else {
+//			panic(err)
+//		}
+//	}
 }
 
 func (a *AndroidAppImport) DepsMutator(ctx android.BottomUpMutatorContext) {
