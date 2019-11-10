@@ -878,6 +878,13 @@ func (c *deviceConfig) ProductServicesPath() string {
 	return "product_services"
 }
 
+func (c *deviceConfig) ProductOverlayPath() string {
+	if c.config.productVariables.ProductOverlayPath != nil {
+		return *c.config.productVariables.ProductOverlayPath
+	}
+	return "product/vendor_overlay/" + String(c.config.productVariables.Platform_vndk_version)
+}
+
 func (c *deviceConfig) BtConfigIncludeDir() string {
 	return String(c.config.productVariables.BtConfigIncludeDir)
 }
