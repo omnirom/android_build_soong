@@ -165,6 +165,7 @@ var BannerVars = []string{
 	"BUILD_ID",
 	"OUT_DIR",
 	"SOONG_SDK_SNAPSHOT_TARGET_BUILD_RELEASE",
+	"ROM_BUILDTYPE",
 }
 
 func Banner(make_vars map[string]string) string {
