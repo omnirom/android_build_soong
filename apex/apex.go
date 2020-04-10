@@ -627,6 +627,7 @@ func makeApexAvailableBaseline() map[string][]string {
 		"android.hidl.manager-V1.0-java",
 		"android.hidl.manager-V1.1-java",
 		"android.hidl.manager-V1.2-java",
+		"vendor.qti.hardware.fstman-V1.0-java",
 		"bouncycastle-unbundled",
 		"dnsresolver_aidl_interface-V2-java",
 		"error_prone_annotations",
