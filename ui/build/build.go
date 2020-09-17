@@ -143,7 +143,7 @@ func Build(ctx Context, config Config, what int) {
 	ctx.Verboseln("Starting build with args:", config.Arguments())
 	ctx.Verboseln("Environment:", config.Environment().Environ())
 
-	if totalRAM := config.TotalRAM(); totalRAM != 0 {
+	/*if totalRAM := config.TotalRAM(); totalRAM != 0 {
 		ram := float32(totalRAM) / (1024 * 1024 * 1024)
 		ctx.Verbosef("Total RAM: %.3vGB", ram)
 
@@ -161,7 +161,7 @@ func Build(ctx Context, config Config, what int) {
 			ctx.Printf("Warning: high -j%d count compared to %.3vGB of RAM", config.Parallel(), ram)
 			ctx.Println("If you run into segfaults or other errors, try a lower -j value")
 		}
-	}
+	}*/
 
 	ctx.BeginTrace(metrics.Total, "total")
 	defer ctx.EndTrace()
