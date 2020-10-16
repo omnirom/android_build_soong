@@ -97,6 +97,10 @@ var Configuration = map[string]PathConfig{
 	"zip":     Allowed,
 	"nproc":   Allowed,
 	"perl":    Allowed,
+	"xgettext":    Allowed,
+	"msgmerge":    Allowed,
+	"msgfmt":  Allowed,
+	"m4":      Allowed,
 
 	// Host toolchain is removed. In-tree toolchain should be used instead.
 	// GCC also can't find cc1 with this implementation.
