@@ -33,6 +33,23 @@
       "message": "buildDir seems to be outDir but srcDir is gone",
       "revId": "fdd937889d3884c5b4f96f7458a72170db7cf1f3",
       "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55"
+    },
+    {
+      "unresolved": false,
+      "key": {
+        "uuid": "c231b289_ddab5599",
+        "filename": "/PATCHSET_LEVEL",
+        "patchSetId": 1
+      },
+      "lineNbr": 0,
+      "author": {
+        "id": 1000026
+      },
+      "writtenOn": "2022-08-21T21:44:46Z",
+      "side": 1,
+      "message": "commit f7e36d80ffad32796c679f4f051655914413ec56\nAuthor: Lukacs T. Berki \u003clberki@google.com\u003e\nDate:   Mon Aug 16 17:05:09 2021 +0200\n\n    Remove Srcdir() from BootstrapConfig.\n    \n    It was always \".\".\n    \n    Test: Presubmits.\n    Change-Id: I5381002b3f2986122f1b335a88119cead0a86d75\n",
+      "revId": "fdd937889d3884c5b4f96f7458a72170db7cf1f3",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55"
     }
   ]
 }
