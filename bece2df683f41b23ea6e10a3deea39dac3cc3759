@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "unresolved": false,
+      "key": {
+        "uuid": "2b2a407e_3df0908a",
+        "filename": "/PATCHSET_LEVEL",
+        "patchSetId": 2
+      },
+      "lineNbr": 0,
+      "author": {
+        "id": 1000026
+      },
+      "writtenOn": "2022-08-21T21:48:26Z",
+      "side": 1,
+      "message": "using \tret :\u003d SourcePath{basePath{p, \"\"}, \".\"}\nas in pathForSource",
+      "revId": "bece2df683f41b23ea6e10a3deea39dac3cc3759",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55"
+    }
+  ]
+}
