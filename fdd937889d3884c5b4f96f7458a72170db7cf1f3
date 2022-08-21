@@ -16,6 +16,23 @@
       "message": "build/soong/android/paths.go:1087:50: ctx.Config().srcDir undefined (type Config has no field or method srcDir)\nbuild/soong/android/paths.go:1093:46: ctx.Config().buildDir undefined (type Config has no field or method buildDir)\n",
       "revId": "fdd937889d3884c5b4f96f7458a72170db7cf1f3",
       "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55"
+    },
+    {
+      "unresolved": false,
+      "key": {
+        "uuid": "3d850c41_2d8b6b20",
+        "filename": "/PATCHSET_LEVEL",
+        "patchSetId": 1
+      },
+      "lineNbr": 0,
+      "author": {
+        "id": 1000026
+      },
+      "writtenOn": "2022-08-21T21:44:20Z",
+      "side": 1,
+      "message": "buildDir seems to be outDir but srcDir is gone",
+      "revId": "fdd937889d3884c5b4f96f7458a72170db7cf1f3",
+      "serverId": "56841c99-7c94-43d4-bf0b-cb4707e66d55"
     }
   ]
 }
