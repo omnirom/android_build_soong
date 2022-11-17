@@ -2223,6 +2223,20 @@ func (c *Module) DepsMutator(actx android.BottomUpMutatorContext) {
 	variantNdkLibs := []string{}
 	variantLateNdkLibs := []string{}
 	if ctx.Os() == android.Android {
+		rewriteHeaderLibs := func(list []string) (newHeaderLibs []string) {
+			newHeaderLibs = []string{}
+			for _, entry := range list {
+				if entry == "qti_kernel_headers" {
+					newHeaderLibs = append(newHeaderLibs, "device_kernel_headers")
+					continue
+				}
+				newHeaderLibs = append(newHeaderLibs, entry)
+			}
+			return newHeaderLibs
+		}
+
+		deps.HeaderLibs = rewriteHeaderLibs(deps.HeaderLibs)
+
 		deps.SharedLibs, variantNdkLibs = RewriteLibs(c, &snapshotInfo, actx, ctx.Config(), deps.SharedLibs)
 		deps.LateSharedLibs, variantLateNdkLibs = RewriteLibs(c, &snapshotInfo, actx, ctx.Config(), deps.LateSharedLibs)
 		deps.ReexportSharedLibHeaders, _ = RewriteLibs(c, &snapshotInfo, actx, ctx.Config(), deps.ReexportSharedLibHeaders)
