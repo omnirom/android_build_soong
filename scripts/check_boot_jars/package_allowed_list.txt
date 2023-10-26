@@ -255,6 +255,7 @@ com\.google\.i18n\.phonenumbers
 org\.chromium\.arc
 org\.chromium\.arc\..*
 
-# OmniROm adds
+# OmniROM adds
 omnirom\.platform
 org\.omnirom\.omnilib
+org\.omnirom\.omnilib\..*
