@@ -145,7 +145,6 @@ type EarlyModuleContext interface {
 	DeviceSpecific() bool
 	SocSpecific() bool
 	ProductSpecific() bool
-    ProductOverlaySpecific() bool
 	SystemExtSpecific() bool
 	Platform() bool
 
@@ -837,9 +836,6 @@ type commonProperties struct {
 	// (or /system/system_ext if system_ext partition does not exist).
 	System_ext_specific *bool
 
-	// When set to true, it is installed into  /product/vendor_overlay
-	Product_overlay_specific *bool
-
 	// Whether this module is installed to recovery partition
 	Recovery *bool
 
@@ -1128,7 +1124,6 @@ const (
 	deviceSpecificModule
 	socSpecificModule
 	productSpecificModule
-	productOverlaySpecificModule
 	systemExtSpecificModule
 )
 
@@ -1142,8 +1137,6 @@ func (k moduleKind) String() string {
 		return "soc-specific"
 	case productSpecificModule:
 		return "product-specific"
-	case productOverlaySpecificModule:
-		return "productoverlay-specific"
 	case systemExtSpecificModule:
 		return "systemext-specific"
 	default:
@@ -1921,7 +1914,7 @@ func (m *ModuleBase) HostCrossSupported() bool {
 }
 
 func (m *ModuleBase) Platform() bool {
-	return !m.DeviceSpecific() && !m.SocSpecific() && !m.ProductSpecific() && !m.ProductOverlaySpecific() && !m.SystemExtSpecific()
+	return !m.DeviceSpecific() && !m.SocSpecific() && !m.ProductSpecific() && !m.SystemExtSpecific()
 }
 
 func (m *ModuleBase) DeviceSpecific() bool {
@@ -1979,10 +1972,6 @@ func (m *ModuleBase) PartitionTag(config DeviceConfig) string {
 		}
 	}
 	return partition
-}
-
-func (m *ModuleBase) ProductOverlaySpecific() bool {
-	return Bool(m.commonProperties.Product_overlay_specific)
 }
 
 func (m *ModuleBase) Enabled() bool {
@@ -2266,7 +2255,6 @@ func determineModuleKind(m *ModuleBase, ctx blueprint.EarlyModuleContext) module
 	var socSpecific = Bool(m.commonProperties.Vendor) || Bool(m.commonProperties.Proprietary) || Bool(m.commonProperties.Soc_specific)
 	var deviceSpecific = Bool(m.commonProperties.Device_specific)
 	var productSpecific = Bool(m.commonProperties.Product_specific)
-	var productOverlaySpecific = Bool(m.commonProperties.Product_overlay_specific)
 	var systemExtSpecific = Bool(m.commonProperties.System_ext_specific)
 
 	msg := "conflicting value set here"
@@ -2283,12 +2271,12 @@ func determineModuleKind(m *ModuleBase, ctx blueprint.EarlyModuleContext) module
 		}
 	}
 
-	if (productSpecific || productOverlaySpecific) && systemExtSpecific {
+	if productSpecific && systemExtSpecific {
 		ctx.PropertyErrorf("product_specific", "a module cannot be specific to product and system_ext at the same time.")
 		ctx.PropertyErrorf("system_ext_specific", msg)
 	}
 
-	if (socSpecific || deviceSpecific) && (productSpecific || productOverlaySpecific || systemExtSpecific) {
+	if (socSpecific || deviceSpecific) && (productSpecific || systemExtSpecific) {
 		if productSpecific {
 			ctx.PropertyErrorf("product_specific", "a module cannot be specific to SoC or device and product at the same time.")
 		} else {
@@ -2311,8 +2299,6 @@ func determineModuleKind(m *ModuleBase, ctx blueprint.EarlyModuleContext) module
 
 	if productSpecific {
 		return productSpecificModule
-	} else if productOverlaySpecific {
-		return productOverlaySpecificModule
 	} else if systemExtSpecific {
 		return systemExtSpecificModule
 	} else if deviceSpecific {
@@ -2571,10 +2557,6 @@ func (e *earlyModuleContext) SocSpecific() bool {
 
 func (e *earlyModuleContext) ProductSpecific() bool {
 	return e.kind == productSpecificModule
-}
-
-func (e *earlyModuleContext) ProductOverlaySpecific() bool {
-    return e.kind == productOverlaySpecificModule
 }
 
 func (e *earlyModuleContext) SystemExtSpecific() bool {
@@ -3213,7 +3195,6 @@ func (m *ModuleBase) MakeAsPlatform() {
 	m.commonProperties.Proprietary = boolPtr(false)
 	m.commonProperties.Soc_specific = boolPtr(false)
 	m.commonProperties.Product_specific = boolPtr(false)
-	m.commonProperties.Product_overlay_specific = boolPtr(false)
 	m.commonProperties.System_ext_specific = boolPtr(false)
 }
 
@@ -3241,10 +3222,6 @@ func (m *moduleContext) InstallInTestcases() bool {
 func (m *moduleContext) InstallInSanitizerDir() bool {
 	return m.module.InstallInSanitizerDir()
 }
-
-//func (m *moduleContext) ProductOverlaySpecific() bool {
-//	return m.module.productOverlaySpecificModule()
-//}
 
 func (m *moduleContext) InstallInRamdisk() bool {
 	return m.module.InstallInRamdisk()
