@@ -1973,7 +1973,8 @@ func validatePathInternal(allowNinjaVariables bool, pathComponents ...string) (s
 		}
 
 		path := filepath.Clean(path)
-		if path == ".." || strings.HasPrefix(path, "../") || strings.HasPrefix(path, "/") {
+		// TODO support abs out dir
+		if path == ".." || strings.HasPrefix(path, "../") /*|| strings.HasPrefix(path, "/")*/ {
 			return "", fmt.Errorf("Path is outside directory: %s", path)
 		}
 
