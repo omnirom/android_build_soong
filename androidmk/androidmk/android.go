@@ -767,6 +767,7 @@ func exportCflags(ctx variableAssignmentContext) error {
 	ctx.mkvalue = ctx.mkvalue.Clone()
 	ctx.mkvalue.ReplaceLiteral(`\"`, `"`)
 	return includeVariableNow(bpVariable{"export_cflags", bpparser.ListType}, ctx)
+}
 
 func protoOutputParams(ctx variableAssignmentContext) error {
 	// The Soong replacement for LOCAL_PROTO_JAVA_OUTPUT_PARAMS doesn't need ","
