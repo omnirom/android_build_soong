@@ -767,6 +767,7 @@ func exportCflags(ctx variableAssignmentContext) error {
 	ctx.mkvalue = ctx.mkvalue.Clone()
 	ctx.mkvalue.ReplaceLiteral(`\"`, `"`)
 	return includeVariableNow(bpVariable{"export_cflags", bpparser.ListType}, ctx)
+}
 
 func protoOutputParams(ctx variableAssignmentContext) error {
 	// The Soong replacement for LOCAL_PROTO_JAVA_OUTPUT_PARAMS doesn't need ","
@@ -787,7 +788,6 @@ func protoLocalIncludeDirs(ctx variableAssignmentContext) error {
 		return err
 	}
 	return fmt.Errorf("Currently LOCAL_PROTOC_FLAGS only support with value '--proto_path=$(LOCAL_PATH)/...'")
->>>>>>> 1e3dc33a632e180258596e21d2553a0c3d74ef37
 }
 
 func proguardEnabled(ctx variableAssignmentContext) error {
