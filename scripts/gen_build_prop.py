@@ -578,6 +578,7 @@ def build_product_prop(args):
   # TODO(b/117892318): don't allow duplicates so that the ordering doesn't matter
   variables = [
     "ADDITIONAL_PRODUCT_PROPERTIES",
+    "OMNI_PRODUCT_PROPERTIES",
     "PRODUCT_PRODUCT_PROPERTIES",
   ]
 
