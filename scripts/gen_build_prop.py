@@ -41,9 +41,12 @@ def get_build_flavor(product_config):
 
 def get_build_keys(product_config):
   default_cert = product_config.get("DefaultAppCertificate", "")
-  if default_cert == "" or default_cert == os.path.join(TEST_KEY_DIR, "testKey"):
+  if "ROM_BUILDTYPE" in product_config:
+    return "release-keys"
+  elif default_cert == "":
+    return "dev-keys"
+  elif default_cert == os.path.join(TEST_KEY_DIR, "testKey"):
     return "test-keys"
-  return "dev-keys"
 
 def override_config(config):
   if "PRODUCT_BUILD_PROP_OVERRIDES" in config:
