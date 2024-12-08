@@ -19,6 +19,8 @@ import (
 	"strings"
 
 	"android/soong/android"
+
+	"github.com/google/blueprint/proptools"
 )
 
 //
@@ -50,13 +52,13 @@ type objectLinker struct {
 
 type ObjectLinkerProperties struct {
 	// list of static library modules that should only provide headers for this module.
-	Static_libs []string `android:"arch_variant,variant_prepend"`
+	Static_libs proptools.Configurable[[]string] `android:"arch_variant,variant_prepend"`
 
 	// list of shared library modules should only provide headers for this module.
-	Shared_libs []string `android:"arch_variant,variant_prepend"`
+	Shared_libs proptools.Configurable[[]string] `android:"arch_variant,variant_prepend"`
 
 	// list of modules that should only provide headers for this module.
-	Header_libs []string `android:"arch_variant,variant_prepend"`
+	Header_libs proptools.Configurable[[]string] `android:"arch_variant,variant_prepend"`
 
 	// list of default libraries that will provide headers for this module.  If unset, generally
 	// defaults to libc, libm, and libdl.  Set to [] to prevent using headers from the defaults.
@@ -116,9 +118,9 @@ func (object *objectLinker) linkerProps() []interface{} {
 func (*objectLinker) linkerInit(ctx BaseModuleContext) {}
 
 func (object *objectLinker) linkerDeps(ctx DepsContext, deps Deps) Deps {
-	deps.HeaderLibs = append(deps.HeaderLibs, object.Properties.Header_libs...)
-	deps.SharedLibs = append(deps.SharedLibs, object.Properties.Shared_libs...)
-	deps.StaticLibs = append(deps.StaticLibs, object.Properties.Static_libs...)
+	deps.HeaderLibs = append(deps.HeaderLibs, object.Properties.Header_libs.GetOrDefault(ctx, nil)...)
+	deps.SharedLibs = append(deps.SharedLibs, object.Properties.Shared_libs.GetOrDefault(ctx, nil)...)
+	deps.StaticLibs = append(deps.StaticLibs, object.Properties.Static_libs.GetOrDefault(ctx, nil)...)
 	deps.ObjFiles = append(deps.ObjFiles, object.Properties.Objs...)
 
 	deps.SystemSharedLibs = object.Properties.System_shared_libs
@@ -201,8 +203,9 @@ func (object *objectLinker) link(ctx ModuleContext,
 	return outputFile
 }
 
-func (object *objectLinker) linkerSpecifiedDeps(specifiedDeps specifiedDeps) specifiedDeps {
-	specifiedDeps.sharedLibs = append(specifiedDeps.sharedLibs, object.Properties.Shared_libs...)
+func (object *objectLinker) linkerSpecifiedDeps(ctx android.ConfigurableEvaluatorContext, module *Module, specifiedDeps specifiedDeps) specifiedDeps {
+	eval := module.ConfigurableEvaluator(ctx)
+	specifiedDeps.sharedLibs = append(specifiedDeps.sharedLibs, object.Properties.Shared_libs.GetOrDefault(eval, nil)...)
 
 	// Must distinguish nil and [] in system_shared_libs - ensure that [] in
 	// either input list doesn't come out as nil.
@@ -220,7 +223,7 @@ func (object *objectLinker) unstrippedOutputFilePath() android.Path {
 }
 
 func (object *objectLinker) strippedAllOutputFilePath() android.Path {
-	panic("Not implemented.")
+	return nil
 }
 
 func (object *objectLinker) nativeCoverage() bool {

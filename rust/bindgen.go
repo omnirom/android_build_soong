@@ -29,7 +29,7 @@ var (
 	defaultBindgenFlags = []string{""}
 
 	// bindgen should specify its own Clang revision so updating Clang isn't potentially blocked on bindgen failures.
-	bindgenClangVersion = "clang-r510928"
+	bindgenClangVersion = "clang-r530567"
 
 	_ = pctx.VariableFunc("bindgenClangVersion", func(ctx android.PackageVarContext) string {
 		if override := ctx.Config().Getenv("LLVM_BINDGEN_PREBUILTS_VERSION"); override != "" {
@@ -285,7 +285,7 @@ func (b *bindgenDecorator) GenerateSource(ctx ModuleContext, deps PathDeps) andr
 	if isCpp {
 		cflags = append(cflags, "-x c++")
 		// Add any C++ only flags.
-		cflags = append(cflags, esc(b.ClangProperties.Cppflags)...)
+		cflags = append(cflags, esc(b.ClangProperties.Cppflags.GetOrDefault(ctx, nil))...)
 	} else {
 		cflags = append(cflags, "-x c")
 	}
@@ -364,7 +364,7 @@ func NewRustBindgen(hod android.HostOrDeviceSupported) (*Module, *bindgenDecorat
 		ClangProperties:    cc.RustBindgenClangProperties{},
 	}
 
-	module := NewSourceProviderModule(hod, bindgen, false, true)
+	module := NewSourceProviderModule(hod, bindgen, false, false)
 
 	android.AddLoadHook(module, func(ctx android.LoadHookContext) {
 		type stub_props struct {
@@ -393,8 +393,8 @@ func (b *bindgenDecorator) SourceProviderDeps(ctx DepsContext, deps Deps) Deps {
 		deps.StaticLibs = append(deps.StaticLibs, String(b.Properties.Static_inline_library))
 	}
 
-	deps.SharedLibs = append(deps.SharedLibs, b.ClangProperties.Shared_libs...)
-	deps.StaticLibs = append(deps.StaticLibs, b.ClangProperties.Static_libs...)
-	deps.HeaderLibs = append(deps.HeaderLibs, b.ClangProperties.Header_libs...)
+	deps.SharedLibs = append(deps.SharedLibs, b.ClangProperties.Shared_libs.GetOrDefault(ctx, nil)...)
+	deps.StaticLibs = append(deps.StaticLibs, b.ClangProperties.Static_libs.GetOrDefault(ctx, nil)...)
+	deps.HeaderLibs = append(deps.HeaderLibs, b.ClangProperties.Header_libs.GetOrDefault(ctx, nil)...)
 	return deps
 }

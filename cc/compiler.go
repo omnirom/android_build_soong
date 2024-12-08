@@ -37,7 +37,7 @@ type BaseCompilerProperties struct {
 	// list of source files used to compile the C/C++ module.  May be .c, .cpp, or .S files.
 	// srcs may reference the outputs of other modules that produce source files like genrule
 	// or filegroup using the syntax ":module".
-	Srcs []string `android:"path,arch_variant"`
+	Srcs proptools.Configurable[[]string] `android:"path,arch_variant"`
 
 	// list of source files that should not be compiled with clang-tidy.
 	Tidy_disabled_srcs []string `android:"path,arch_variant"`
@@ -47,13 +47,13 @@ type BaseCompilerProperties struct {
 
 	// list of source files that should not be used to build the C/C++ module.
 	// This is most useful in the arch/multilib variants to remove non-common files
-	Exclude_srcs []string `android:"path,arch_variant"`
+	Exclude_srcs proptools.Configurable[[]string] `android:"path,arch_variant"`
 
 	// list of module-specific flags that will be used for C and C++ compiles.
 	Cflags proptools.Configurable[[]string] `android:"arch_variant"`
 
 	// list of module-specific flags that will be used for C++ compiles
-	Cppflags []string `android:"arch_variant"`
+	Cppflags proptools.Configurable[[]string] `android:"arch_variant"`
 
 	// list of module-specific flags that will be used for C compiles
 	Conlyflags []string `android:"arch_variant"`
@@ -229,7 +229,7 @@ type BaseCompilerProperties struct {
 	} `android:"arch_variant"`
 
 	// Stores the original list of source files before being cleared by library reuse
-	OriginalSrcs []string `blueprint:"mutated"`
+	OriginalSrcs proptools.Configurable[[]string] `blueprint:"mutated"`
 
 	// Build and link with OpenMP
 	Openmp *bool `android:"arch_variant"`
@@ -300,7 +300,7 @@ func (compiler *baseCompiler) compilerDeps(ctx DepsContext, deps Deps) Deps {
 	deps.AidlLibs = append(deps.AidlLibs, compiler.Properties.Aidl.Libs...)
 
 	android.ProtoDeps(ctx, &compiler.Proto)
-	if compiler.hasSrcExt(".proto") {
+	if compiler.hasSrcExt(ctx, ".proto") {
 		deps = protoDeps(ctx, deps, &compiler.Proto, Bool(compiler.Properties.Proto.Static))
 	}
 
@@ -363,12 +363,15 @@ func (compiler *baseCompiler) compilerFlags(ctx ModuleContext, flags Flags, deps
 	tc := ctx.toolchain()
 	modulePath := ctx.ModuleDir()
 
-	compiler.srcsBeforeGen = android.PathsForModuleSrcExcludes(ctx, compiler.Properties.Srcs, compiler.Properties.Exclude_srcs)
+	srcs := compiler.Properties.Srcs.GetOrDefault(ctx, nil)
+	exclude_srcs := compiler.Properties.Exclude_srcs.GetOrDefault(ctx, nil)
+	compiler.srcsBeforeGen = android.PathsForModuleSrcExcludes(ctx, srcs, exclude_srcs)
 	compiler.srcsBeforeGen = append(compiler.srcsBeforeGen, deps.GeneratedSources...)
 
 	cflags := compiler.Properties.Cflags.GetOrDefault(ctx, nil)
+	cppflags := compiler.Properties.Cppflags.GetOrDefault(ctx, nil)
 	CheckBadCompilerFlags(ctx, "cflags", cflags)
-	CheckBadCompilerFlags(ctx, "cppflags", compiler.Properties.Cppflags)
+	CheckBadCompilerFlags(ctx, "cppflags", cppflags)
 	CheckBadCompilerFlags(ctx, "conlyflags", compiler.Properties.Conlyflags)
 	CheckBadCompilerFlags(ctx, "asflags", compiler.Properties.Asflags)
 	CheckBadCompilerFlags(ctx, "vendor.cflags", compiler.Properties.Target.Vendor.Cflags)
@@ -381,7 +384,7 @@ func (compiler *baseCompiler) compilerFlags(ctx ModuleContext, flags Flags, deps
 	esc := proptools.NinjaAndShellEscapeList
 
 	flags.Local.CFlags = append(flags.Local.CFlags, esc(cflags)...)
-	flags.Local.CppFlags = append(flags.Local.CppFlags, esc(compiler.Properties.Cppflags)...)
+	flags.Local.CppFlags = append(flags.Local.CppFlags, esc(cppflags)...)
 	flags.Local.ConlyFlags = append(flags.Local.ConlyFlags, esc(compiler.Properties.Conlyflags)...)
 	flags.Local.AsFlags = append(flags.Local.AsFlags, esc(compiler.Properties.Asflags)...)
 	flags.Local.YasmFlags = append(flags.Local.YasmFlags, esc(compiler.Properties.Asflags)...)
@@ -539,12 +542,10 @@ func (compiler *baseCompiler) compilerFlags(ctx ModuleContext, flags Flags, deps
 		flags.Global.CommonFlags = append(flags.Global.CommonFlags, "${config.ExternalCflags}")
 	}
 
-	if tc.Bionic() {
-		if Bool(compiler.Properties.Rtti) {
-			flags.Local.CppFlags = append(flags.Local.CppFlags, "-frtti")
-		} else {
-			flags.Local.CppFlags = append(flags.Local.CppFlags, "-fno-rtti")
-		}
+	if Bool(compiler.Properties.Rtti) {
+		flags.Local.CppFlags = append(flags.Local.CppFlags, "-frtti")
+	} else {
+		flags.Local.CppFlags = append(flags.Local.CppFlags, "-fno-rtti")
 	}
 
 	flags.Global.AsFlags = append(flags.Global.AsFlags, "${config.CommonGlobalAsflags}")
@@ -604,11 +605,11 @@ func (compiler *baseCompiler) compilerFlags(ctx ModuleContext, flags Flags, deps
 		flags.Global.CFlags = append(flags.Global.CFlags, "-DANDROID_STRICT")
 	}
 
-	if compiler.hasSrcExt(".proto") {
+	if compiler.hasSrcExt(ctx, ".proto") {
 		flags = protoFlags(ctx, flags, &compiler.Proto)
 	}
 
-	if compiler.hasSrcExt(".y") || compiler.hasSrcExt(".yy") {
+	if compiler.hasSrcExt(ctx, ".y") || compiler.hasSrcExt(ctx, ".yy") {
 		flags.Local.CommonFlags = append(flags.Local.CommonFlags,
 			"-I"+android.PathForModuleGen(ctx, "yacc", ctx.ModuleDir()).String())
 	}
@@ -618,7 +619,7 @@ func (compiler *baseCompiler) compilerFlags(ctx ModuleContext, flags Flags, deps
 		ctx.ModuleErrorf("aidl.libs and (aidl.include_dirs or aidl.local_include_dirs) can't be set at the same time. For aidl headers, please only use aidl.libs prop")
 	}
 
-	if compiler.hasAidl(deps) {
+	if compiler.hasAidl(ctx, deps) {
 		flags.aidlFlags = append(flags.aidlFlags, compiler.Properties.Aidl.Flags...)
 		if len(compiler.Properties.Aidl.Local_include_dirs) > 0 {
 			localAidlIncludeDirs := android.PathsForModuleSrc(ctx, compiler.Properties.Aidl.Local_include_dirs)
@@ -647,7 +648,7 @@ func (compiler *baseCompiler) compilerFlags(ctx ModuleContext, flags Flags, deps
 		}
 		flags.aidlFlags = append(flags.aidlFlags, "--min_sdk_version="+aidlMinSdkVersion)
 
-		if compiler.hasSrcExt(".aidl") {
+		if compiler.hasSrcExt(ctx, ".aidl") {
 			flags.Local.CommonFlags = append(flags.Local.CommonFlags,
 				"-I"+android.PathForModuleGen(ctx, "aidl").String())
 		}
@@ -657,16 +658,16 @@ func (compiler *baseCompiler) compilerFlags(ctx ModuleContext, flags Flags, deps
 		}
 	}
 
-	if compiler.hasSrcExt(".rscript") || compiler.hasSrcExt(".fs") {
+	if compiler.hasSrcExt(ctx, ".rscript") || compiler.hasSrcExt(ctx, ".fs") {
 		flags = rsFlags(ctx, flags, &compiler.Properties)
 	}
 
-	if compiler.hasSrcExt(".sysprop") {
+	if compiler.hasSrcExt(ctx, ".sysprop") {
 		flags.Local.CommonFlags = append(flags.Local.CommonFlags,
 			"-I"+android.PathForModuleGen(ctx, "sysprop", "include").String())
 	}
 
-	if len(compiler.Properties.Srcs) > 0 {
+	if len(srcs) > 0 {
 		module := ctx.ModuleDir() + "/Android.bp:" + ctx.ModuleName()
 		if inList("-Wno-error", flags.Local.CFlags) || inList("-Wno-error", flags.Local.CppFlags) {
 			addToModuleList(ctx, modulesUsingWnoErrorKey, module)
@@ -707,18 +708,18 @@ func (compiler *baseCompiler) compilerFlags(ctx ModuleContext, flags Flags, deps
 	return flags
 }
 
-func (compiler *baseCompiler) hasSrcExt(ext string) bool {
+func (compiler *baseCompiler) hasSrcExt(ctx BaseModuleContext, ext string) bool {
 	for _, src := range compiler.srcsBeforeGen {
 		if src.Ext() == ext {
 			return true
 		}
 	}
-	for _, src := range compiler.Properties.Srcs {
+	for _, src := range compiler.Properties.Srcs.GetOrDefault(ctx, nil) {
 		if filepath.Ext(src) == ext {
 			return true
 		}
 	}
-	for _, src := range compiler.Properties.OriginalSrcs {
+	for _, src := range compiler.Properties.OriginalSrcs.GetOrDefault(ctx, nil) {
 		if filepath.Ext(src) == ext {
 			return true
 		}
@@ -746,8 +747,8 @@ func ndkPathDeps(ctx ModuleContext) android.Paths {
 	return nil
 }
 
-func (compiler *baseCompiler) hasAidl(deps PathDeps) bool {
-	return len(deps.AidlLibraryInfos) > 0 || compiler.hasSrcExt(".aidl")
+func (compiler *baseCompiler) hasAidl(ctx BaseModuleContext, deps PathDeps) bool {
+	return len(deps.AidlLibraryInfos) > 0 || compiler.hasSrcExt(ctx, ".aidl")
 }
 
 func (compiler *baseCompiler) compile(ctx ModuleContext, flags Flags, deps PathDeps) Objects {
@@ -796,24 +797,21 @@ type RustBindgenClangProperties struct {
 	// be added to the include path using -I
 	Local_include_dirs []string `android:"arch_variant,variant_prepend"`
 
-	// list of Rust static libraries.
-	Static_rlibs []string `android:"arch_variant,variant_prepend"`
-
 	// list of static libraries that provide headers for this binding.
-	Static_libs []string `android:"arch_variant,variant_prepend"`
+	Static_libs proptools.Configurable[[]string] `android:"arch_variant,variant_prepend"`
 
 	// list of shared libraries that provide headers for this binding.
-	Shared_libs []string `android:"arch_variant"`
+	Shared_libs proptools.Configurable[[]string] `android:"arch_variant"`
 
 	// List of libraries which export include paths required for this module
-	Header_libs []string `android:"arch_variant,variant_prepend"`
+	Header_libs proptools.Configurable[[]string] `android:"arch_variant,variant_prepend"`
 
 	// list of clang flags required to correctly interpret the headers.
 	Cflags proptools.Configurable[[]string] `android:"arch_variant"`
 
 	// list of c++ specific clang flags required to correctly interpret the headers.
 	// This is provided primarily to make sure cppflags defined in cc_defaults are pulled in.
-	Cppflags []string `android:"arch_variant"`
+	Cppflags proptools.Configurable[[]string] `android:"arch_variant"`
 
 	// C standard version to use. Can be a specific version (such as "gnu11"),
 	// "experimental" (which will use draft versions like C1x when available),

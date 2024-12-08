@@ -2,10 +2,10 @@
 <<$includeDirs := getIncludeDirs .Ctx .M>>
 <<$cflags := getCflagsProperty .Ctx .M>>
 <<$deps := mapLibraries .Ctx .M (concat5
-(getLinkerProperties .M).Whole_static_libs
-(getLinkerProperties .M).Static_libs
-(getLinkerProperties .M).Shared_libs
-(getLinkerProperties .M).Header_libs
+(getWholeStaticLibsProperty .Ctx .M)
+(getStaticLibsProperty .Ctx .M)
+(getSharedLibsProperty .Ctx .M)
+(getHeaderLibsProperty .Ctx .M)
 (getExtraLibs .M)
 ) .Pprop.LibraryMapping>>
 <<$moduleType := getModuleType .M>>
