@@ -224,7 +224,7 @@ func partitionSpecificFsProps(ctx android.EarlyModuleContext, fsProps *filesyste
 		fsProps.Gen_aconfig_flags_pb = proptools.BoolPtr(true)
 		// Identical to that of the aosp_shared_system_image
 		if partitionVars.ProductFsverityGenerateMetadata {
-			fsProps.Fsverity.Inputs = []string{
+			fsProps.Fsverity.Inputs = proptools.NewSimpleConfigurable([]string{
 				"etc/boot-image.prof",
 				"etc/dirty-image-objects",
 				"etc/preloaded-classes",
@@ -232,8 +232,8 @@ func partitionSpecificFsProps(ctx android.EarlyModuleContext, fsProps *filesyste
 				"framework/*",
 				"framework/*/*",     // framework/{arch}
 				"framework/oat/*/*", // framework/oat/{arch}
-			}
-			fsProps.Fsverity.Libs = []string{":framework-res{.export-package.apk}"}
+			})
+			fsProps.Fsverity.Libs = proptools.NewSimpleConfigurable([]string{":framework-res{.export-package.apk}"})
 		}
 		// Most of the symlinks and directories listed here originate from create_root_structure.mk,
 		// but the handwritten generic system image also recreates them:
@@ -377,12 +377,12 @@ func partitionSpecificFsProps(ctx android.EarlyModuleContext, fsProps *filesyste
 		})
 	case "system_ext":
 		if partitionVars.ProductFsverityGenerateMetadata {
-			fsProps.Fsverity.Inputs = []string{
+			fsProps.Fsverity.Inputs = proptools.NewSimpleConfigurable([]string{
 				"framework/*",
 				"framework/*/*",     // framework/{arch}
 				"framework/oat/*/*", // framework/oat/{arch}
-			}
-			fsProps.Fsverity.Libs = []string{":framework-res{.export-package.apk}"}
+			})
+			fsProps.Fsverity.Libs = proptools.NewSimpleConfigurable([]string{":framework-res{.export-package.apk}"})
 		}
 	case "product":
 		fsProps.Gen_aconfig_flags_pb = proptools.BoolPtr(true)
