@@ -15,11 +15,11 @@
 package aconfig
 
 import (
+	"android/soong/android"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
-
-	"android/soong/android"
 
 	"github.com/google/blueprint"
 )
@@ -185,6 +185,13 @@ func (module *DeclarationsModule) GenerateAndroidBuildActions(ctx android.Module
 				defaultPermission = confPerm
 			}
 		}
+		var allowReadWrite bool
+		if requireAllReadOnly, ok := ctx.Config().GetBuildFlag("RELEASE_ACONFIG_REQUIRE_ALL_READ_ONLY"); ok {
+			// The build flag (RELEASE_ACONFIG_REQUIRE_ALL_READ_ONLY) is the negation of the aconfig flag
+			// (allow-read-write) for historical reasons.
+			// Bool build flags are always "" for false, and generally "true" for true.
+			allowReadWrite = requireAllReadOnly == ""
+		}
 		inputFiles := make([]android.Path, len(declarationFiles))
 		copy(inputFiles, declarationFiles)
 		inputFiles = append(inputFiles, valuesFiles[config]...)
@@ -194,6 +201,7 @@ func (module *DeclarationsModule) GenerateAndroidBuildActions(ctx android.Module
 			"declarations":       android.JoinPathsWithPrefix(declarationFiles, "--declarations "),
 			"values":             joinAndPrefix(" --values ", values[config]),
 			"default-permission": optionalVariable(" --default-permission ", defaultPermission),
+			"allow-read-write":   optionalVariable(" --allow-read-write ", strconv.FormatBool(allowReadWrite)),
 		}
 		if len(module.properties.Container) > 0 {
 			args["container"] = "--container " + module.properties.Container

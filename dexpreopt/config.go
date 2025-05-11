@@ -191,6 +191,10 @@ type ModuleConfig struct {
 	ForceCreateAppImage bool
 
 	PresignedPrebuilt bool
+
+	// ApexPartition is the partition in which the dexpreopt files of apex system server jars (if any) are installed.
+	// This is a noop unless the module is apex system server jar.
+	ApexPartition string
 }
 
 type globalSoongConfigSingleton struct{}
@@ -456,6 +460,12 @@ func (d dex2oatDependencyTag) AllowDisabledModuleDependency(target android.Modul
 	// the binary, but we also need to disable the check for dependencies on
 	// disabled modules.
 	return target.IsReplacedByPrebuilt()
+}
+
+func (d dex2oatDependencyTag) AllowDisabledModuleDependencyProxy(
+	ctx android.OtherModuleProviderContext, target android.ModuleProxy) bool {
+	return android.OtherModuleProviderOrDefault(
+		ctx, target, android.CommonModuleInfoKey).ReplacedByPrebuilt
 }
 
 // Dex2oatDepTag represents the dependency onto the dex2oatd module. It is added to any module that

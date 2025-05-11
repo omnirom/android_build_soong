@@ -31,22 +31,31 @@ func MinApiForArch(ctx android.EarlyModuleContext,
 	case android.Arm64, android.X86_64:
 		return android.FirstLp64Version
 	case android.Riscv64:
-		apiLevel, err := android.ApiLevelFromUser(ctx, "VanillaIceCream")
-		if err != nil {
-			panic(err)
-		}
-		return apiLevel
+		return android.FutureApiLevel
 	default:
 		panic(fmt.Errorf("Unknown arch %q", arch))
 	}
 }
 
+// Native API levels cannot be less than the MinApiLevelForArch. This function
+// sets the lower bound of the API level with the MinApiLevelForArch.
+func nativeClampedApiLevel(ctx android.BaseModuleContext,
+	apiLevel android.ApiLevel) android.ApiLevel {
+
+	min := MinApiForArch(ctx, ctx.Arch().ArchType)
+
+	if apiLevel.LessThan(min) {
+		return min
+	}
+
+	return apiLevel
+}
+
 func nativeApiLevelFromUser(ctx android.BaseModuleContext,
 	raw string) (android.ApiLevel, error) {
 
-	min := MinApiForArch(ctx, ctx.Arch().ArchType)
 	if raw == "minimum" {
-		return min, nil
+		return MinApiForArch(ctx, ctx.Arch().ArchType), nil
 	}
 
 	value, err := android.ApiLevelFromUser(ctx, raw)
@@ -54,15 +63,12 @@ func nativeApiLevelFromUser(ctx android.BaseModuleContext,
 		return android.NoneApiLevel, err
 	}
 
-	if value.LessThan(min) {
-		return min, nil
-	}
-
-	return value, nil
+	return nativeClampedApiLevel(ctx, value), nil
 }
 
 func nativeApiLevelOrPanic(ctx android.BaseModuleContext,
 	raw string) android.ApiLevel {
+
 	value, err := nativeApiLevelFromUser(ctx, raw)
 	if err != nil {
 		panic(err.Error())

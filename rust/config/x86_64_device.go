@@ -29,6 +29,7 @@ var (
 
 	x86_64ArchVariantRustFlags = map[string][]string{
 		"":                            []string{},
+		"alderlake":                   []string{"-C target-cpu=alderlake"},
 		"broadwell":                   []string{"-C target-cpu=broadwell"},
 		"goldmont":                    []string{"-C target-cpu=goldmont"},
 		"goldmont-plus":               []string{"-C target-cpu=goldmont-plus"},

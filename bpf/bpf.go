@@ -109,41 +109,41 @@ type bpf struct {
 
 var _ android.ImageInterface = (*bpf)(nil)
 
-func (bpf *bpf) ImageMutatorBegin(ctx android.BaseModuleContext) {}
+func (bpf *bpf) ImageMutatorBegin(ctx android.ImageInterfaceContext) {}
 
-func (bpf *bpf) VendorVariantNeeded(ctx android.BaseModuleContext) bool {
+func (bpf *bpf) VendorVariantNeeded(ctx android.ImageInterfaceContext) bool {
 	return proptools.Bool(bpf.properties.Vendor)
 }
 
-func (bpf *bpf) ProductVariantNeeded(ctx android.BaseModuleContext) bool {
+func (bpf *bpf) ProductVariantNeeded(ctx android.ImageInterfaceContext) bool {
 	return false
 }
 
-func (bpf *bpf) CoreVariantNeeded(ctx android.BaseModuleContext) bool {
+func (bpf *bpf) CoreVariantNeeded(ctx android.ImageInterfaceContext) bool {
 	return !proptools.Bool(bpf.properties.Vendor)
 }
 
-func (bpf *bpf) RamdiskVariantNeeded(ctx android.BaseModuleContext) bool {
+func (bpf *bpf) RamdiskVariantNeeded(ctx android.ImageInterfaceContext) bool {
 	return false
 }
 
-func (bpf *bpf) VendorRamdiskVariantNeeded(ctx android.BaseModuleContext) bool {
+func (bpf *bpf) VendorRamdiskVariantNeeded(ctx android.ImageInterfaceContext) bool {
 	return false
 }
 
-func (bpf *bpf) DebugRamdiskVariantNeeded(ctx android.BaseModuleContext) bool {
+func (bpf *bpf) DebugRamdiskVariantNeeded(ctx android.ImageInterfaceContext) bool {
 	return false
 }
 
-func (bpf *bpf) RecoveryVariantNeeded(ctx android.BaseModuleContext) bool {
+func (bpf *bpf) RecoveryVariantNeeded(ctx android.ImageInterfaceContext) bool {
 	return false
 }
 
-func (bpf *bpf) ExtraImageVariations(ctx android.BaseModuleContext) []string {
+func (bpf *bpf) ExtraImageVariations(ctx android.ImageInterfaceContext) []string {
 	return nil
 }
 
-func (bpf *bpf) SetImageVariation(ctx android.BaseModuleContext, variation string) {
+func (bpf *bpf) SetImageVariation(ctx android.ImageInterfaceContext, variation string) {
 	bpf.properties.VendorInternal = variation == "vendor"
 }
 

@@ -37,6 +37,21 @@ message Mapping {
 
   // type is the type of the mapping, either ELF or R8.
   optional Type type = 3;
+
+  // LocationType is the place where to look for the file with the given
+  // identifier.
+  Enum LocationType {
+    // ZIP denotes the file with the given identifier is in the distribuited
+    // symbols.zip or proguard_dict.zip files, or the local disc.
+    ZIP = 0;
+    // AB denotes the file with the given identifier is in the AB artifacts but
+    // not in a symbols.zip or proguard_dict.zip.
+    AB = 1;
+  }
+
+  // location_type is the Location Type that dictates where to search for the
+  // file with the given identifier. Defaults to ZIP if not present.
+  optional LocationType location_type = 4;
 }
 
 message Mappings {

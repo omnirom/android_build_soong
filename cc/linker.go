@@ -85,7 +85,7 @@ type BaseLinkerProperties struct {
 
 	// list of header libraries to re-export include directories from. Entries must be
 	// present in header_libs.
-	Export_header_lib_headers []string `android:"arch_variant"`
+	Export_header_lib_headers proptools.Configurable[[]string] `android:"arch_variant,variant_prepend"`
 
 	// list of generated headers to re-export include directories from. Entries must be
 	// present in generated_headers.
@@ -235,13 +235,16 @@ type BaseLinkerProperties struct {
 	// Generate compact dynamic relocation table, default true.
 	Pack_relocations *bool `android:"arch_variant"`
 
-	// local file name to pass to the linker as --version-script
+	// local file name to pass to the linker as --version-script.  Not supported on darwin, and will fail to build
+	// if provided to the darwin variant of a module.
 	Version_script *string `android:"path,arch_variant"`
 
-	// local file name to pass to the linker as --dynamic-list
+	// local file name to pass to the linker as --dynamic-list.  Not supported on darwin, and will fail to build
+	// if provided to the darwin variant of a module.
 	Dynamic_list *string `android:"path,arch_variant"`
 
-	// local files to pass to the linker as --script
+	// local files to pass to the linker as --script.  Not supported on darwin or windows, and will fail to build
+	// if provided to the darwin or windows variant of a module.
 	Linker_scripts []string `android:"path,arch_variant"`
 
 	// list of static libs that should not be used to build this module
@@ -302,7 +305,7 @@ func (linker *baseLinker) linkerDeps(ctx DepsContext, deps Deps) Deps {
 	deps.SharedLibs = append(deps.SharedLibs, linker.Properties.Shared_libs.GetOrDefault(ctx, nil)...)
 	deps.RuntimeLibs = append(deps.RuntimeLibs, linker.Properties.Runtime_libs...)
 
-	deps.ReexportHeaderLibHeaders = append(deps.ReexportHeaderLibHeaders, linker.Properties.Export_header_lib_headers...)
+	deps.ReexportHeaderLibHeaders = append(deps.ReexportHeaderLibHeaders, linker.Properties.Export_header_lib_headers.GetOrDefault(ctx, nil)...)
 	deps.ReexportStaticLibHeaders = append(deps.ReexportStaticLibHeaders, linker.Properties.Export_static_lib_headers...)
 	deps.ReexportSharedLibHeaders = append(deps.ReexportSharedLibHeaders, linker.Properties.Export_shared_lib_headers...)
 	deps.ReexportGeneratedHeaders = append(deps.ReexportGeneratedHeaders, linker.Properties.Export_generated_headers...)
@@ -560,7 +563,7 @@ func (linker *baseLinker) linkerFlags(ctx ModuleContext, flags Flags) Flags {
 
 		if versionScript.Valid() {
 			if ctx.Darwin() {
-				ctx.PropertyErrorf("version_script", "Not supported on Darwin")
+				ctx.AddMissingDependencies([]string{"version_script_not_supported_on_darwin"})
 			} else {
 				flags.Local.LdFlags = append(flags.Local.LdFlags,
 					config.VersionScriptFlagPrefix+versionScript.String())
@@ -578,7 +581,7 @@ func (linker *baseLinker) linkerFlags(ctx ModuleContext, flags Flags) Flags {
 		dynamicList := android.OptionalPathForModuleSrc(ctx, linker.Properties.Dynamic_list)
 		if dynamicList.Valid() {
 			if ctx.Darwin() {
-				ctx.PropertyErrorf("dynamic_list", "Not supported on Darwin")
+				ctx.AddMissingDependencies([]string{"dynamic_list_not_supported_on_darwin"})
 			} else {
 				flags.Local.LdFlags = append(flags.Local.LdFlags,
 					"-Wl,--dynamic-list,"+dynamicList.String())
@@ -587,13 +590,17 @@ func (linker *baseLinker) linkerFlags(ctx ModuleContext, flags Flags) Flags {
 		}
 
 		linkerScriptPaths := android.PathsForModuleSrc(ctx, linker.Properties.Linker_scripts)
-		if len(linkerScriptPaths) > 0 && (ctx.Darwin() || ctx.Windows()) {
-			ctx.PropertyErrorf("linker_scripts", "Only supported for ELF files")
-		} else {
-			for _, linkerScriptPath := range linkerScriptPaths {
-				flags.Local.LdFlags = append(flags.Local.LdFlags,
-					"-Wl,--script,"+linkerScriptPath.String())
-				flags.LdFlagsDeps = append(flags.LdFlagsDeps, linkerScriptPath)
+		if len(linkerScriptPaths) > 0 {
+			if ctx.Darwin() {
+				ctx.AddMissingDependencies([]string{"linker_scripts_not_supported_on_darwin"})
+			} else if ctx.Windows() {
+				ctx.PropertyErrorf("linker_scripts", "Only supported for ELF files")
+			} else {
+				for _, linkerScriptPath := range linkerScriptPaths {
+					flags.Local.LdFlags = append(flags.Local.LdFlags,
+						"-Wl,--script,"+linkerScriptPath.String())
+					flags.LdFlagsDeps = append(flags.LdFlagsDeps, linkerScriptPath)
+				}
 			}
 		}
 	}

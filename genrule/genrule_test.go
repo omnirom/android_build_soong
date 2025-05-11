@@ -24,6 +24,7 @@ import (
 
 	"android/soong/android"
 
+	"github.com/google/blueprint"
 	"github.com/google/blueprint/proptools"
 )
 
@@ -694,8 +695,12 @@ func TestGenruleDefaults(t *testing.T) {
 	expectedCmd := "cp in1 __SBOX_SANDBOX_DIR__/out/out"
 	android.AssertStringEquals(t, "cmd", expectedCmd, gen.rawCommands[0])
 
+	srcsFileProvider, ok := android.OtherModuleProvider(result.TestContext, gen, blueprint.SrcsFileProviderKey)
+	if !ok {
+		t.Fatal("Expected genrule to have a SrcsFileProviderData, but did not")
+	}
 	expectedSrcs := []string{"in1"}
-	android.AssertDeepEquals(t, "srcs", expectedSrcs, gen.properties.ResolvedSrcs)
+	android.AssertDeepEquals(t, "srcs", expectedSrcs, srcsFileProvider.SrcPaths)
 }
 
 func TestGenruleAllowMissingDependencies(t *testing.T) {

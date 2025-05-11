@@ -42,7 +42,7 @@ type rawBinary struct {
 
 	properties rawBinaryProperties
 
-	output     android.OutputPath
+	output     android.Path
 	installDir android.InstallPath
 }
 
@@ -71,7 +71,7 @@ func (r *rawBinary) installFileName() string {
 
 func (r *rawBinary) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	inputFile := android.PathForModuleSrc(ctx, proptools.String(r.properties.Src))
-	outputFile := android.PathForModuleOut(ctx, r.installFileName()).OutputPath
+	outputFile := android.PathForModuleOut(ctx, r.installFileName())
 
 	ctx.Build(pctx, android.BuildParams{
 		Rule:        toRawBinary,
@@ -83,11 +83,11 @@ func (r *rawBinary) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		},
 	})
 
-	r.output = outputFile
 	r.installDir = android.PathForModuleInstall(ctx, "etc")
-	ctx.InstallFile(r.installDir, r.installFileName(), r.output)
+	ctx.InstallFile(r.installDir, r.installFileName(), outputFile)
 
-	ctx.SetOutputFiles([]android.Path{r.output}, "")
+	ctx.SetOutputFiles([]android.Path{outputFile}, "")
+	r.output = outputFile
 }
 
 var _ android.AndroidMkEntriesProvider = (*rawBinary)(nil)

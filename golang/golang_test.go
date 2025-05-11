@@ -16,9 +16,10 @@ package golang
 
 import (
 	"android/soong/android"
-	"github.com/google/blueprint/bootstrap"
-	"path/filepath"
+	"regexp"
 	"testing"
+
+	"github.com/google/blueprint/bootstrap"
 )
 
 func TestGolang(t *testing.T) {
@@ -39,13 +40,19 @@ func TestGolang(t *testing.T) {
 		android.FixtureRegisterWithContext(func(ctx android.RegistrationContext) {
 			RegisterGoModuleTypes(ctx)
 			ctx.PreDepsMutators(func(ctx android.RegisterMutatorsContext) {
-				ctx.BottomUpBlueprint("bootstrap_deps", bootstrap.BootstrapDeps)
+				ctx.BottomUpBlueprint("bootstrap_deps", bootstrap.BootstrapDeps).UsesReverseDependencies()
 			})
 		}),
 	).RunTestWithBp(t, bp)
 
 	bin := result.ModuleForTests("gobin", result.Config.BuildOSTarget.String())
 
-	expected := filepath.Join("out/soong/host", result.Config.PrebuiltOS(), "bin/go/gobin/obj/gobin")
-	android.AssertPathsRelativeToTopEquals(t, "output files", []string{expected}, bin.OutputFiles(result.TestContext, t, ""))
+	expected := "^out/soong/host/" + result.Config.PrebuiltOS() + "/bin/go/gobin/?[^/]*/obj/gobin$"
+	actual := android.PathsRelativeToTop(bin.OutputFiles(result.TestContext, t, ""))
+	if len(actual) != 1 {
+		t.Fatalf("Expected 1 output file, got %v", actual)
+	}
+	if match, err := regexp.Match(expected, []byte(actual[0])); err != nil || !match {
+		t.Fatalf("Expected output file to match %q, but got %q", expected, actual[0])
+	}
 }

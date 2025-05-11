@@ -26,13 +26,11 @@ blueprint_go_binary {
         "soong",
         "soong-android",
         "soong-provenance",
-        "soong-bp2build",
         "soong-ui-metrics_proto",
     ],
     srcs: [
         "main.go",
         "writedocs.go",
-        "queryview.go",
     ],
     primaryBuilder: true,
 }

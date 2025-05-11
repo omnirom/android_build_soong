@@ -21,15 +21,26 @@ import (
 	"github.com/google/blueprint"
 )
 
+// ModuleErrorContext provides only methods to report errors about the current module.
+type ModuleErrorContext interface {
+	// ModuleErrorf reports an error at the line number of the module type in the module definition.
+	ModuleErrorf(fmt string, args ...interface{})
+
+	// PropertyErrorf reports an error at the line number of a property in the module definition.
+	PropertyErrorf(property, fmt string, args ...interface{})
+}
+
 // EarlyModuleContext provides methods that can be called early, as soon as the properties have
 // been parsed into the module and before any mutators have run.
 type EarlyModuleContext interface {
+	ModuleErrorContext
+
 	// Module returns the current module as a Module.  It should rarely be necessary, as the module already has a
 	// reference to itself.
 	Module() Module
 
 	// ModuleName returns the name of the module.  This is generally the value that was returned by Module.Name() when
-	// the module was created, but may have been modified by calls to BaseMutatorContext.Rename.
+	// the module was created, but may have been modified by calls to BottomUpMutatorContext.Rename.
 	ModuleName() string
 
 	// ModuleDir returns the path to the directory that contains the definition of the module.
@@ -48,12 +59,6 @@ type EarlyModuleContext interface {
 
 	// Errorf reports an error at the specified position of the module definition file.
 	Errorf(pos scanner.Position, fmt string, args ...interface{})
-
-	// ModuleErrorf reports an error at the line number of the module type in the module definition.
-	ModuleErrorf(fmt string, args ...interface{})
-
-	// PropertyErrorf reports an error at the line number of a property in the module definition.
-	PropertyErrorf(property, fmt string, args ...interface{})
 
 	// OtherModulePropertyErrorf reports an error at the line number of a property in the given module definition.
 	OtherModulePropertyErrorf(module Module, property, fmt string, args ...interface{})
@@ -93,6 +98,10 @@ type EarlyModuleContext interface {
 	// Namespace returns the Namespace object provided by the NameInterface set by Context.SetNameInterface, or the
 	// default SimpleNameInterface if Context.SetNameInterface was not called.
 	Namespace() *Namespace
+
+	// HasMutatorFinished returns true if the given mutator has finished running.
+	// It will panic if given an invalid mutator name.
+	HasMutatorFinished(mutatorName string) bool
 }
 
 // Deprecated: use EarlyModuleContext instead
@@ -174,4 +183,8 @@ func (e *earlyModuleContext) Namespace() *Namespace {
 
 func (e *earlyModuleContext) OtherModulePropertyErrorf(module Module, property string, fmt string, args ...interface{}) {
 	e.EarlyModuleContext.OtherModulePropertyErrorf(module, property, fmt, args...)
+}
+
+func (e *earlyModuleContext) HasMutatorFinished(mutatorName string) bool {
+	return e.EarlyModuleContext.HasMutatorFinished(mutatorName)
 }

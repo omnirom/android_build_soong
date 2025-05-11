@@ -15,6 +15,7 @@
 package filesystem
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -32,7 +33,7 @@ type fsverityProperties struct {
 	Libs []string `android:"path"`
 }
 
-func (f *filesystem) writeManifestGeneratorListFile(ctx android.ModuleContext, outputPath android.OutputPath, matchedSpecs []android.PackagingSpec, rebasedDir android.OutputPath) {
+func (f *filesystem) writeManifestGeneratorListFile(ctx android.ModuleContext, outputPath android.WritablePath, matchedSpecs []android.PackagingSpec, rebasedDir android.OutputPath) {
 	var buf strings.Builder
 	for _, spec := range matchedSpecs {
 		buf.WriteString(rebasedDir.Join(ctx, spec.RelPathInPackage()).String())
@@ -65,115 +66,85 @@ func (f *filesystem) buildFsverityMetadataFiles(ctx android.ModuleContext, build
 		return
 	}
 
-	fsverityBuilderPath := android.PathForModuleOut(ctx, "fsverity_builder.sh")
-	metadataGeneratorPath := ctx.Config().HostToolPath(ctx, "fsverity_metadata_generator")
 	fsverityPath := ctx.Config().HostToolPath(ctx, "fsverity")
-
-	cmd := builder.Command().Tool(fsverityBuilderPath)
 
 	// STEP 1: generate .fsv_meta
 	var sb strings.Builder
 	sb.WriteString("set -e\n")
-	cmd.Implicit(metadataGeneratorPath).Implicit(fsverityPath)
 	for _, spec := range matchedSpecs {
 		// srcPath is copied by CopySpecsToDir()
 		srcPath := rebasedDir.Join(ctx, spec.RelPathInPackage())
 		destPath := rebasedDir.Join(ctx, spec.RelPathInPackage()+".fsv_meta")
-		sb.WriteString(metadataGeneratorPath.String())
-		sb.WriteString(" --fsverity-path ")
-		sb.WriteString(fsverityPath.String())
-		sb.WriteString(" --signature none --hash-alg sha256 --output ")
-		sb.WriteString(destPath.String())
-		sb.WriteRune(' ')
-		sb.WriteString(srcPath.String())
-		sb.WriteRune('\n')
+		builder.Command().
+			BuiltTool("fsverity_metadata_generator").
+			FlagWithInput("--fsverity-path ", fsverityPath).
+			FlagWithArg("--signature ", "none").
+			FlagWithArg("--hash-alg ", "sha256").
+			FlagWithArg("--output ", destPath.String()).
+			Text(srcPath.String())
 		f.appendToEntry(ctx, destPath)
 	}
 
 	// STEP 2: generate signed BuildManifest.apk
 	// STEP 2-1: generate build_manifest.pb
+	manifestGeneratorListPath := android.PathForModuleOut(ctx, "fsverity_manifest.list")
+	f.writeManifestGeneratorListFile(ctx, manifestGeneratorListPath, matchedSpecs, rebasedDir)
 	assetsPath := android.PathForModuleOut(ctx, "fsverity_manifest/assets")
 	manifestPbPath := assetsPath.Join(ctx, "build_manifest.pb")
-	manifestGeneratorPath := ctx.Config().HostToolPath(ctx, "fsverity_manifest_generator")
-	cmd.Implicit(manifestGeneratorPath)
-	sb.WriteString("rm -rf ")
-	sb.WriteString(assetsPath.String())
-	sb.WriteString(" && mkdir -p ")
-	sb.WriteString(assetsPath.String())
-	sb.WriteRune('\n')
-	sb.WriteString(manifestGeneratorPath.String())
-	sb.WriteString(" --fsverity-path ")
-	sb.WriteString(fsverityPath.String())
-	sb.WriteString(" --base-dir ")
-	sb.WriteString(rootDir.String())
-	sb.WriteString(" --output ")
-	sb.WriteString(manifestPbPath.String())
-	sb.WriteRune(' ')
-	f.appendToEntry(ctx, manifestPbPath)
+	builder.Command().Text("rm -rf " + assetsPath.String())
+	builder.Command().Text("mkdir -p " + assetsPath.String())
+	builder.Command().
+		BuiltTool("fsverity_manifest_generator").
+		FlagWithInput("--fsverity-path ", fsverityPath).
+		FlagWithArg("--base-dir ", rootDir.String()).
+		FlagWithArg("--output ", manifestPbPath.String()).
+		FlagWithInput("@", manifestGeneratorListPath)
 
-	manifestGeneratorListPath := android.PathForModuleOut(ctx, "fsverity_manifest.list")
-	f.writeManifestGeneratorListFile(ctx, manifestGeneratorListPath.OutputPath, matchedSpecs, rebasedDir)
-	sb.WriteRune('@')
-	sb.WriteString(manifestGeneratorListPath.String())
-	sb.WriteRune('\n')
-	cmd.Implicit(manifestGeneratorListPath)
-	f.appendToEntry(ctx, manifestGeneratorListPath.OutputPath)
+	f.appendToEntry(ctx, manifestPbPath)
+	f.appendToEntry(ctx, manifestGeneratorListPath)
 
 	// STEP 2-2: generate BuildManifest.apk (unsigned)
-	aapt2Path := ctx.Config().HostToolPath(ctx, "aapt2")
-	apkPath := rebasedDir.Join(ctx, "etc", "security", "fsverity", "BuildManifest.apk")
-	idsigPath := rebasedDir.Join(ctx, "etc", "security", "fsverity", "BuildManifest.apk.idsig")
+	apkNameSuffix := ""
+	if f.PartitionType() == "system_ext" {
+		//https://source.corp.google.com/h/googleplex-android/platform/build/+/e392d2b486c2d4187b20a72b1c67cc737ecbcca5:core/Makefile;l=3410;drc=ea8f34bc1d6e63656b4ec32f2391e9d54b3ebb6b;bpv=1;bpt=0
+		apkNameSuffix = "SystemExt"
+	}
+	apkPath := rebasedDir.Join(ctx, "etc", "security", "fsverity", fmt.Sprintf("BuildManifest%s.apk", apkNameSuffix))
+	idsigPath := rebasedDir.Join(ctx, "etc", "security", "fsverity", fmt.Sprintf("BuildManifest%s.apk.idsig", apkNameSuffix))
 	manifestTemplatePath := android.PathForSource(ctx, "system/security/fsverity/AndroidManifest.xml")
 	libs := android.PathsForModuleSrc(ctx, f.properties.Fsverity.Libs)
-	cmd.Implicit(aapt2Path)
-	cmd.Implicit(manifestTemplatePath)
-	cmd.Implicits(libs)
-	cmd.ImplicitOutput(apkPath)
 
-	sb.WriteString(aapt2Path.String())
-	sb.WriteString(" link -o ")
-	sb.WriteString(apkPath.String())
-	sb.WriteString(" -A ")
-	sb.WriteString(assetsPath.String())
-	for _, lib := range libs {
-		sb.WriteString(" -I ")
-		sb.WriteString(lib.String())
-	}
 	minSdkVersion := ctx.Config().PlatformSdkCodename()
 	if minSdkVersion == "REL" {
 		minSdkVersion = ctx.Config().PlatformSdkVersion().String()
 	}
-	sb.WriteString(" --min-sdk-version ")
-	sb.WriteString(minSdkVersion)
-	sb.WriteString(" --version-code ")
-	sb.WriteString(ctx.Config().PlatformSdkVersion().String())
-	sb.WriteString(" --version-name ")
-	sb.WriteString(ctx.Config().AppsDefaultVersionName())
-	sb.WriteString(" --manifest ")
-	sb.WriteString(manifestTemplatePath.String())
-	sb.WriteString(" --rename-manifest-package com.android.security.fsverity_metadata.")
-	sb.WriteString(f.partitionName())
-	sb.WriteRune('\n')
+
+	unsignedApkCommand := builder.Command().
+		BuiltTool("aapt2").
+		Text("link").
+		FlagWithOutput("-o ", apkPath).
+		FlagWithArg("-A ", assetsPath.String())
+	for _, lib := range libs {
+		unsignedApkCommand.FlagWithInput("-I ", lib)
+	}
+	unsignedApkCommand.
+		FlagWithArg("--min-sdk-version ", minSdkVersion).
+		FlagWithArg("--version-code ", ctx.Config().PlatformSdkVersion().String()).
+		FlagWithArg("--version-name ", ctx.Config().AppsDefaultVersionName()).
+		FlagWithInput("--manifest ", manifestTemplatePath).
+		Text(" --rename-manifest-package com.android.security.fsverity_metadata." + f.partitionName())
 
 	f.appendToEntry(ctx, apkPath)
 
 	// STEP 2-3: sign BuildManifest.apk
-	apksignerPath := ctx.Config().HostToolPath(ctx, "apksigner")
 	pemPath, keyPath := ctx.Config().DefaultAppCertificate(ctx)
-	cmd.Implicit(apksignerPath)
-	cmd.Implicit(pemPath)
-	cmd.Implicit(keyPath)
-	cmd.ImplicitOutput(idsigPath)
-	sb.WriteString(apksignerPath.String())
-	sb.WriteString(" sign --in ")
-	sb.WriteString(apkPath.String())
-	sb.WriteString(" --cert ")
-	sb.WriteString(pemPath.String())
-	sb.WriteString(" --key ")
-	sb.WriteString(keyPath.String())
-	sb.WriteRune('\n')
+	builder.Command().
+		BuiltTool("apksigner").
+		Text("sign").
+		FlagWithArg("--in ", apkPath.String()).
+		FlagWithInput("--cert ", pemPath).
+		FlagWithInput("--key ", keyPath).
+		ImplicitOutput(idsigPath)
 
 	f.appendToEntry(ctx, idsigPath)
-
-	android.WriteExecutableFileRuleVerbatim(ctx, fsverityBuilderPath, sb.String())
 }

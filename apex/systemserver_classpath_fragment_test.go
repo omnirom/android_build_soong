@@ -29,6 +29,7 @@ var prepareForTestWithSystemserverclasspathFragment = android.GroupFixturePrepar
 )
 
 func TestSystemserverclasspathFragmentContents(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		prepareForTestWithSystemserverclasspathFragment,
 		prepareForTestWithMyapex,
@@ -118,6 +119,7 @@ func TestSystemserverclasspathFragmentContents(t *testing.T) {
 }
 
 func TestSystemserverclasspathFragmentNoGeneratedProto(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		prepareForTestWithSystemserverclasspathFragment,
 		prepareForTestWithMyapex,
@@ -171,6 +173,7 @@ func TestSystemserverclasspathFragmentNoGeneratedProto(t *testing.T) {
 }
 
 func TestSystemServerClasspathFragmentWithContentNotInMake(t *testing.T) {
+	t.Parallel()
 	android.GroupFixturePreparers(
 		prepareForTestWithSystemserverclasspathFragment,
 		prepareForTestWithMyapex,
@@ -222,6 +225,7 @@ func TestSystemServerClasspathFragmentWithContentNotInMake(t *testing.T) {
 }
 
 func TestPrebuiltSystemserverclasspathFragmentContents(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		prepareForTestWithSystemserverclasspathFragment,
 		prepareForTestWithMyapex,
@@ -297,6 +301,7 @@ func TestPrebuiltSystemserverclasspathFragmentContents(t *testing.T) {
 }
 
 func TestSystemserverclasspathFragmentStandaloneContents(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		prepareForTestWithSystemserverclasspathFragment,
 		prepareForTestWithMyapex,
@@ -380,6 +385,7 @@ func TestSystemserverclasspathFragmentStandaloneContents(t *testing.T) {
 }
 
 func TestPrebuiltStandaloneSystemserverclasspathFragmentContents(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		prepareForTestWithSystemserverclasspathFragment,
 		prepareForTestWithMyapex,

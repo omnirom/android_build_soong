@@ -7,6 +7,7 @@ bootstrap_go_package {
     pkgPath: "android/soong/cc",
     deps: [
         "blueprint",
+        "blueprint-depset",
         "blueprint-pathtools",
         "soong",
         "soong-aconfig",
@@ -16,7 +17,6 @@ bootstrap_go_package {
         "soong-etc",
         "soong-fuzz",
         "soong-genrule",
-        "soong-testing",
         "soong-tradefed",
     ],
     srcs: [
@@ -27,6 +27,7 @@ bootstrap_go_package {
         "builder.go",
         "cc.go",
         "ccdeps.go",
+        "cc_preprocess_no_configuration.go",
         "check.go",
         "coverage.go",
         "gen.go",
@@ -88,6 +89,7 @@ bootstrap_go_package {
     testSrcs: [
         "afdo_test.go",
         "binary_test.go",
+        "cc_preprocess_no_configuration_test.go",
         "cc_test.go",
         "cc_test_only_property_test.go",
         "cmake_snapshot_test.go",
@@ -102,6 +104,7 @@ bootstrap_go_package {
         "orderfile_test.go",
         "prebuilt_test.go",
         "proto_test.go",
+        "sabi_test.go",
         "sanitize_test.go",
         "sdk_test.go",
         "test_data_test.go",
@@ -118,4 +121,32 @@ bootstrap_go_package {
     pluginFor: ["soong_build"],
     // Used by plugins
     visibility: ["//visibility:public"],
+}
+
+phony {
+    name: "llndk_libs",
+    required: [
+        "libEGL",
+        "libGLESv1_CM",
+        "libGLESv2",
+        "libGLESv3",
+        "libRS",
+        "libandroid_net",
+        "libapexsupport",
+        "libbinder_ndk",
+        "libc",
+        "libcgrouprc",
+        "libclang_rt.asan",
+        "libdl",
+        "libft2",
+        "liblog",
+        "libm",
+        "libmediandk",
+        "libnativewindow",
+        "libselinux",
+        "libsync",
+        "libvendorsupport",
+        "libvndksupport",
+        "libvulkan",
+    ],
 }

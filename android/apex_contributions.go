@@ -26,7 +26,7 @@ func init() {
 func RegisterApexContributionsBuildComponents(ctx RegistrationContext) {
 	ctx.RegisterModuleType("apex_contributions", apexContributionsFactory)
 	ctx.RegisterModuleType("apex_contributions_defaults", apexContributionsDefaultsFactory)
-	ctx.RegisterSingletonModuleType("all_apex_contributions", allApexContributionsFactory)
+	ctx.RegisterModuleType("all_apex_contributions", allApexContributionsFactory)
 }
 
 type apexContributions struct {
@@ -87,10 +87,10 @@ func apexContributionsDefaultsFactory() Module {
 // Based on product_config, it will create a dependency on the selected
 // apex_contributions per mainline module
 type allApexContributions struct {
-	SingletonModuleBase
+	ModuleBase
 }
 
-func allApexContributionsFactory() SingletonModule {
+func allApexContributionsFactory() Module {
 	module := &allApexContributions{}
 	InitAndroidModule(module)
 	return module
@@ -191,7 +191,7 @@ func (p *PrebuiltSelectionInfoMap) GetSelectedModulesForApiDomain(apiDomain stri
 
 // This module type does not have any build actions.
 func (a *allApexContributions) GenerateAndroidBuildActions(ctx ModuleContext) {
-}
-
-func (a *allApexContributions) GenerateSingletonBuildActions(ctx SingletonContext) {
+	if ctx.ModuleName() != "all_apex_contributions" {
+		ctx.ModuleErrorf("There can only be 1 all_apex_contributions module in build/soong")
+	}
 }

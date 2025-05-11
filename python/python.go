@@ -90,6 +90,11 @@ type BaseProperties struct {
 	// the test. the file extension can be arbitrary except for (.py).
 	Data []string `android:"path,arch_variant"`
 
+	// Same as data, but will add dependencies on modules using the device's os variation and
+	// the common arch variation. Useful for a host test that wants to embed a module built for
+	// device.
+	Device_common_data []string `android:"path_device_common"`
+
 	// list of java modules that provide data that should be installed alongside the test.
 	Java_data []string
 
@@ -451,6 +456,7 @@ func (p *PythonLibraryModule) GenerateAndroidBuildActions(ctx android.ModuleCont
 
 	// expand data files from "data" property.
 	expandedData := android.PathsForModuleSrc(ctx, p.properties.Data)
+	expandedData = append(expandedData, android.PathsForModuleSrc(ctx, p.properties.Device_common_data)...)
 
 	// Emulate the data property for java_data dependencies.
 	for _, javaData := range ctx.GetDirectDepsWithTag(javaDataTag) {

@@ -46,8 +46,9 @@ func fixtureAddPlatformBootclasspathForBootclasspathFragmentWithExtra(apex, frag
 				],
 			}
 		`, apex, fragment, extraFragments)),
-		android.FixtureAddFile("frameworks/base/config/boot-profile.txt", nil),
-		android.FixtureAddFile("frameworks/base/config/boot-image-profile.txt", nil),
+		android.FixtureAddFile("frameworks/base/boot/boot-profile.txt", nil),
+		android.FixtureAddFile("frameworks/base/boot/boot-image-profile.txt", nil),
+		android.FixtureAddFile("art/build/boot/boot-image-profile.txt", nil),
 		android.FixtureAddFile("build/soong/scripts/check_boot_jars/package_allowed_list.txt", nil),
 	)
 }

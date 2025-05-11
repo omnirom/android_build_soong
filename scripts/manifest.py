@@ -16,7 +16,6 @@
 #
 """A tool for inserting values from the build system into a manifest or a test config."""
 
-from __future__ import print_function
 from xml.dom import minidom
 
 

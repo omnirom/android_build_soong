@@ -22,6 +22,8 @@ import (
 	"io/ioutil"
 	"os"
 	"strings"
+	"sync"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
@@ -31,7 +33,10 @@ import (
 )
 
 type verboseLog struct {
-	w io.WriteCloser
+	w    *gzip.Writer
+	lock *sync.Mutex
+	data chan []string
+	stop chan bool
 }
 
 func NewVerboseLog(log logger.Logger, filename string) StatusOutput {
@@ -47,9 +52,42 @@ func NewVerboseLog(log logger.Logger, filename string) StatusOutput {
 
 	w := gzip.NewWriter(f)
 
-	return &verboseLog{
-		w: w,
+	l := &verboseLog{
+		w:    w,
+		lock: &sync.Mutex{},
+		data: make(chan []string),
+		stop: make(chan bool),
 	}
+	l.startWriter()
+	return l
+}
+
+func (v *verboseLog) startWriter() {
+	go func() {
+		tick := time.Tick(time.Second)
+		for {
+			select {
+			case <-v.stop:
+				close(v.data)
+				v.w.Close()
+				return
+			case <-tick:
+				v.w.Flush()
+			case dataList := <-v.data:
+				for _, data := range dataList {
+					fmt.Fprint(v.w, data)
+				}
+			}
+		}
+	}()
+}
+
+func (v *verboseLog) stopWriter() {
+	v.stop <- true
+}
+
+func (v *verboseLog) queueWrite(s ...string) {
+	v.data <- s
 }
 
 func (v *verboseLog) StartAction(action *Action, counts Counts) {}
@@ -60,27 +98,27 @@ func (v *verboseLog) FinishAction(result ActionResult, counts Counts) {
 		cmd = result.Description
 	}
 
-	fmt.Fprintf(v.w, "[%d/%d] %s\n", counts.FinishedActions, counts.TotalActions, cmd)
+	v.queueWrite(fmt.Sprintf("[%d/%d] ", counts.FinishedActions, counts.TotalActions), cmd, "\n")
 
 	if result.Error != nil {
-		fmt.Fprintf(v.w, "FAILED: %s\n", strings.Join(result.Outputs, " "))
+		v.queueWrite("FAILED: ", strings.Join(result.Outputs, " "), "\n")
 	}
 
 	if result.Output != "" {
-		fmt.Fprintln(v.w, result.Output)
+		v.queueWrite(result.Output, "\n")
 	}
 }
 
 func (v *verboseLog) Flush() {
-	v.w.Close()
+	v.stopWriter()
 }
 
 func (v *verboseLog) Message(level MsgLevel, message string) {
-	fmt.Fprintf(v.w, "%s%s\n", level.Prefix(), message)
+	v.queueWrite(level.Prefix(), message, "\n")
 }
 
 func (v *verboseLog) Write(p []byte) (int, error) {
-	fmt.Fprint(v.w, string(p))
+	v.queueWrite(string(p))
 	return len(p), nil
 }
 

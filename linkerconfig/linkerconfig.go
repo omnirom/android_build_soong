@@ -77,7 +77,7 @@ func (l *linkerConfig) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	output := android.PathForModuleOut(ctx, "linker.config.pb").OutputPath
 
 	builder := android.NewRuleBuilder(pctx, ctx)
-	BuildLinkerConfig(ctx, builder, input, nil, nil, output)
+	BuildLinkerConfig(ctx, builder, android.Paths{input}, nil, nil, output)
 	builder.Build("conv_linker_config", "Generate linker config protobuf "+output.String())
 
 	l.outputFilePath = output
@@ -91,16 +91,18 @@ func (l *linkerConfig) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 }
 
 func BuildLinkerConfig(ctx android.ModuleContext, builder *android.RuleBuilder,
-	input android.Path, provideModules []android.Module, requireModules []android.Module, output android.OutputPath) {
+	inputs android.Paths, provideModules []android.Module, requireModules []android.Module, output android.OutputPath) {
 
 	// First, convert the input json to protobuf format
 	interimOutput := android.PathForModuleOut(ctx, "temp.pb")
-	builder.Command().
+	cmd := builder.Command().
 		BuiltTool("conv_linker_config").
 		Flag("proto").
-		Flag("--force").
-		FlagWithInput("-s ", input).
-		FlagWithOutput("-o ", interimOutput)
+		Flag("--force")
+	for _, input := range inputs {
+		cmd.FlagWithInput("-s ", input)
+	}
+	cmd.FlagWithOutput("-o ", interimOutput)
 
 	// Secondly, if there's provideLibs gathered from provideModules, append them
 	var provideLibs []string

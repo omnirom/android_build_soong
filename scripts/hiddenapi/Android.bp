@@ -27,6 +27,12 @@ python_binary_host {
     libs: [
         "signature_trie",
     ],
+    target: {
+        windows: {
+            // go modules (bpmodify) don't support windows
+            enabled: false,
+        },
+    },
 }
 
 python_test_host {
@@ -43,6 +49,12 @@ python_test_host {
     ],
     test_options: {
         unit_test: true,
+    },
+    target: {
+        windows: {
+            // go modules (bpmodify) don't support windows
+            enabled: false,
+        },
     },
 }
 

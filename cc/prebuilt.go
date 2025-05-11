@@ -16,8 +16,8 @@ package cc
 
 import (
 	"path/filepath"
-	"strings"
 
+	"github.com/google/blueprint/depset"
 	"github.com/google/blueprint/proptools"
 
 	"android/soong/android"
@@ -119,22 +119,6 @@ func (p *prebuiltLibraryLinker) link(ctx ModuleContext,
 	// Stub variants will create a stub .so file from stub .c files
 	if p.buildStubs() && objs.objFiles != nil {
 		// TODO (b/275273834): Make objs.objFiles == nil a hard error when the symbol files have been added to module sdk.
-
-		// The map.txt files of libclang_rt.* contain version information, but the checked in .so files do not.
-		// e.g. libclang_rt.* libs impl
-		// $ nm -D prebuilts/../libclang_rt.hwasan-aarch64-android.so
-		// __hwasan_init
-
-		// stubs generated from .map.txt
-		// $ nm -D out/soong/.intermediates/../<stubs>/libclang_rt.hwasan-aarch64-android.so
-		// __hwasan_init@@LIBCLANG_RT_ASAN
-
-		// Special-case libclang_rt.* libs to account for this discrepancy.
-		// TODO (spandandas): Remove this special case https://r.android.com/3236596 has been submitted, and a new set of map.txt
-		// files of libclang_rt.* libs have been generated.
-		if strings.Contains(ctx.ModuleName(), "libclang_rt.") {
-			p.versionScriptPath = android.OptionalPathForPath(nil)
-		}
 		return p.linkShared(ctx, flags, deps, objs)
 	}
 
@@ -156,7 +140,7 @@ func (p *prebuiltLibraryLinker) link(ctx ModuleContext,
 		}
 
 		if p.static() {
-			depSet := android.NewDepSetBuilder[android.Path](android.TOPOLOGICAL).Direct(in).Build()
+			depSet := depset.NewBuilder[android.Path](depset.TOPOLOGICAL).Direct(in).Build()
 			android.SetProvider(ctx, StaticLibraryInfoProvider, StaticLibraryInfo{
 				StaticLibrary: in,
 
@@ -220,6 +204,7 @@ func (p *prebuiltLibraryLinker) link(ctx ModuleContext,
 				Target:        ctx.Target(),
 
 				TableOfContents: p.tocFile,
+				IsStubs:         p.buildStubs(),
 			})
 
 			return outputFile
@@ -231,6 +216,7 @@ func (p *prebuiltLibraryLinker) link(ctx ModuleContext,
 		android.SetProvider(ctx, SharedLibraryInfoProvider, SharedLibraryInfo{
 			SharedLibrary: latestStub,
 			Target:        ctx.Target(),
+			IsStubs:       true,
 		})
 
 		return latestStub

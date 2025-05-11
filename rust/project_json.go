@@ -19,6 +19,7 @@ import (
 	"fmt"
 
 	"android/soong/android"
+	"android/soong/rust/config"
 )
 
 // This singleton collects Rust crate definitions and generates a JSON file
@@ -44,17 +45,19 @@ type rustProjectDep struct {
 }
 
 type rustProjectCrate struct {
-	DisplayName string            `json:"display_name"`
-	RootModule  string            `json:"root_module"`
-	Edition     string            `json:"edition,omitempty"`
-	Deps        []rustProjectDep  `json:"deps"`
-	Cfg         []string          `json:"cfg"`
-	Env         map[string]string `json:"env"`
-	ProcMacro   bool              `json:"is_proc_macro"`
+	DisplayName    string            `json:"display_name"`
+	RootModule     string            `json:"root_module"`
+	Edition        string            `json:"edition,omitempty"`
+	Deps           []rustProjectDep  `json:"deps"`
+	Cfg            []string          `json:"cfg"`
+	Env            map[string]string `json:"env"`
+	ProcMacro      bool              `json:"is_proc_macro"`
+	ProcMacroDylib *string           `json:"proc_macro_dylib_path"`
 }
 
 type rustProjectJson struct {
-	Crates []rustProjectCrate `json:"crates"`
+	Sysroot string             `json:"sysroot"`
+	Crates  []rustProjectCrate `json:"crates"`
 }
 
 // crateInfo is used during the processing to keep track of the known crates.
@@ -135,23 +138,28 @@ func (singleton *projectGeneratorSingleton) addCrate(ctx android.SingletonContex
 		return 0, false
 	}
 
-	_, procMacro := rModule.compiler.(*procMacroDecorator)
+	var procMacroDylib *string = nil
+	if procDec, procMacro := rModule.compiler.(*procMacroDecorator); procMacro {
+		procMacroDylib = new(string)
+		*procMacroDylib = procDec.baseCompiler.unstrippedOutputFilePath().String()
+	}
 
 	crate := rustProjectCrate{
-		DisplayName: rModule.Name(),
-		RootModule:  rootModule.String(),
-		Edition:     rModule.compiler.edition(),
-		Deps:        make([]rustProjectDep, 0),
-		Cfg:         make([]string, 0),
-		Env:         make(map[string]string),
-		ProcMacro:   procMacro,
+		DisplayName:    rModule.Name(),
+		RootModule:     rootModule.String(),
+		Edition:        rModule.compiler.edition(),
+		Deps:           make([]rustProjectDep, 0),
+		Cfg:            make([]string, 0),
+		Env:            make(map[string]string),
+		ProcMacro:      procMacroDylib != nil,
+		ProcMacroDylib: procMacroDylib,
 	}
 
 	if rModule.compiler.cargoOutDir().Valid() {
 		crate.Env["OUT_DIR"] = rModule.compiler.cargoOutDir().String()
 	}
 
-	for _, feature := range rModule.compiler.features() {
+	for _, feature := range rModule.compiler.features(ctx, rModule) {
 		crate.Cfg = append(crate.Cfg, "feature=\""+feature+"\"")
 	}
 
@@ -196,6 +204,8 @@ func (singleton *projectGeneratorSingleton) GenerateBuildActions(ctx android.Sin
 	if !ctx.Config().IsEnvTrue(envVariableCollectRustDeps) {
 		return
 	}
+
+	singleton.project.Sysroot = config.RustPath(ctx)
 
 	singleton.knownCrates = make(map[string]crateInfo)
 	ctx.VisitAllModules(func(module android.Module) {

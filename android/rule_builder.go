@@ -38,6 +38,9 @@ const sboxOutSubDir = "out"
 const sboxToolsSubDir = "tools"
 const sboxOutDir = sboxSandboxBaseDir + "/" + sboxOutSubDir
 
+const nsjailToolsSubDir = "tools"
+const nsjailOutDir = "out"
+
 // RuleBuilder provides an alternative to ModuleContext.Rule and ModuleContext.Build to add a command line to the build
 // graph.
 type RuleBuilder struct {
@@ -59,6 +62,10 @@ type RuleBuilder struct {
 	sboxManifestPath WritablePath
 	missingDeps      []string
 	args             map[string]string
+	nsjail           bool
+	nsjailKeepGendir bool
+	nsjailBasePath   WritablePath
+	nsjailImplicits  Paths
 }
 
 // NewRuleBuilder returns a newly created RuleBuilder.
@@ -165,9 +172,52 @@ func (r *RuleBuilder) Sbox(outputDir WritablePath, manifestPath WritablePath) *R
 	if len(r.commands) > 0 {
 		panic("Sbox() may not be called after Command()")
 	}
+	if r.nsjail {
+		panic("Sbox() may not be called after Nsjail()")
+	}
 	r.sbox = true
 	r.outDir = outputDir
 	r.sboxManifestPath = manifestPath
+	return r
+}
+
+// Nsjail marks the rule as needing to be wrapped by nsjail. The outputDir should point to the
+// output directory that nsjail will mount to out/. It should not be written to by any other rule.
+// baseDir should point to a location where nsjail will mount to /nsjail_build_sandbox, which will
+// be the working directory of the command.
+func (r *RuleBuilder) Nsjail(outputDir WritablePath, baseDir WritablePath) *RuleBuilder {
+	if len(r.commands) > 0 {
+		panic("Nsjail() may not be called after Command()")
+	}
+	if r.sbox {
+		panic("Nsjail() may not be called after Sbox()")
+	}
+	r.nsjail = true
+	r.outDir = outputDir
+	r.nsjailBasePath = baseDir
+	return r
+}
+
+// NsjailImplicits adds implicit inputs that are not directly mounted. This is useful when
+// the rule mounts directories, as files within those directories can be globbed and
+// tracked as dependencies with NsjailImplicits().
+func (r *RuleBuilder) NsjailImplicits(inputs Paths) *RuleBuilder {
+	if !r.nsjail {
+		panic("NsjailImplicits() must be called after Nsjail()")
+	}
+	r.nsjailImplicits = append(r.nsjailImplicits, inputs...)
+	return r
+}
+
+// By default, nsjail rules truncate outputDir and baseDir before running commands, similar to Sbox
+// rules which always run commands in a fresh sandbox. Calling NsjailKeepGendir keeps outputDir and
+// baseDir as-is, leaving previous artifacts. This is useful when the rules support incremental
+// builds.
+func (r *RuleBuilder) NsjailKeepGendir() *RuleBuilder {
+	if !r.nsjail {
+		panic("NsjailKeepGendir() must be called after Nsjail()")
+	}
+	r.nsjailKeepGendir = true
 	return r
 }
 
@@ -451,21 +501,15 @@ func (r *RuleBuilder) depFileMergerCmd(depFiles WritablePaths) *RuleBuilderComma
 		Inputs(depFiles.Paths())
 }
 
-// BuildWithNinjaVars adds the built command line to the build graph, with dependencies on Inputs and Tools, and output files for
-// Outputs. This function will not escape Ninja variables, so it may be used to write sandbox manifests using Ninja variables.
-func (r *RuleBuilder) BuildWithUnescapedNinjaVars(name string, desc string) {
-	r.build(name, desc, false)
-}
-
 // Build adds the built command line to the build graph, with dependencies on Inputs and Tools, and output files for
 // Outputs.
 func (r *RuleBuilder) Build(name string, desc string) {
-	r.build(name, desc, true)
+	r.build(name, desc)
 }
 
 var sandboxEnvOnceKey = NewOnceKey("sandbox_environment_variables")
 
-func (r *RuleBuilder) build(name string, desc string, ninjaEscapeCommandString bool) {
+func (r *RuleBuilder) build(name string, desc string) {
 	name = ninjaNameEscape(name)
 
 	if len(r.missingDeps) > 0 {
@@ -514,7 +558,86 @@ func (r *RuleBuilder) build(name string, desc string, ninjaEscapeCommandString b
 
 	commandString := strings.Join(commands, " && ")
 
-	if r.sbox {
+	if !r.sbox {
+		// If not using sbox the rule will run the command directly, put the hash of the
+		// list of input files in a comment at the end of the command line to ensure ninja
+		// reruns the rule when the list of input files changes.
+		commandString += " # hash of input list: " + hashSrcFiles(inputs)
+	}
+
+	if r.nsjail {
+		var nsjailCmd strings.Builder
+		nsjailPath := r.ctx.Config().PrebuiltBuildTool(r.ctx, "nsjail")
+		if !r.nsjailKeepGendir {
+			nsjailCmd.WriteString("rm -rf ")
+			nsjailCmd.WriteString(r.nsjailBasePath.String())
+			nsjailCmd.WriteRune(' ')
+			nsjailCmd.WriteString(r.outDir.String())
+			nsjailCmd.WriteString(" && ")
+		}
+		nsjailCmd.WriteString("mkdir -p ")
+		nsjailCmd.WriteString(r.nsjailBasePath.String())
+		nsjailCmd.WriteRune(' ')
+		nsjailCmd.WriteString(r.outDir.String())
+		nsjailCmd.WriteString(" && ")
+		nsjailCmd.WriteString(nsjailPath.String())
+		nsjailCmd.WriteRune(' ')
+		nsjailCmd.WriteString("-B $PWD/")
+		nsjailCmd.WriteString(r.nsjailBasePath.String())
+		nsjailCmd.WriteString(":nsjail_build_sandbox")
+
+		// out is mounted to $(genDir).
+		nsjailCmd.WriteString(" -B $PWD/")
+		nsjailCmd.WriteString(r.outDir.String())
+		nsjailCmd.WriteString(":nsjail_build_sandbox/out")
+
+		addBindMount := func(src, dst string) {
+			nsjailCmd.WriteString(" -R $PWD/")
+			nsjailCmd.WriteString(src)
+			nsjailCmd.WriteString(":nsjail_build_sandbox/")
+			nsjailCmd.WriteString(dst)
+		}
+
+		for _, input := range inputs {
+			addBindMount(input.String(), r.nsjailPathForInputRel(input))
+		}
+		for _, tool := range tools {
+			addBindMount(tool.String(), nsjailPathForToolRel(r.ctx, tool))
+		}
+		inputs = append(inputs, tools...)
+		for _, c := range r.commands {
+			for _, directory := range c.implicitDirectories {
+				addBindMount(directory.String(), directory.String())
+				// TODO(b/375551969): Add implicitDirectories to BuildParams, rather than relying on implicits
+				inputs = append(inputs, SourcePath{basePath: directory.base()})
+			}
+			for _, tool := range c.packagedTools {
+				addBindMount(tool.srcPath.String(), nsjailPathForPackagedToolRel(tool))
+				inputs = append(inputs, tool.srcPath)
+			}
+		}
+
+		// These five directories are necessary to run native host tools like /bin/bash and py3-cmd.
+		nsjailCmd.WriteString(" -R /bin")
+		nsjailCmd.WriteString(" -R /lib")
+		nsjailCmd.WriteString(" -R /lib64")
+		nsjailCmd.WriteString(" -R /dev")
+		nsjailCmd.WriteString(" -R /usr")
+
+		nsjailCmd.WriteString(" -m none:/tmp:tmpfs:size=1073741824") // 1GB, should be enough
+		nsjailCmd.WriteString(" -D nsjail_build_sandbox")
+		nsjailCmd.WriteString(" --disable_rlimits")
+		nsjailCmd.WriteString(" --skip_setsid") // ABFS relies on process-groups to track file operations
+		nsjailCmd.WriteString(" -q")
+		nsjailCmd.WriteString(" -- ")
+		nsjailCmd.WriteString("/bin/bash -c ")
+		nsjailCmd.WriteString(proptools.ShellEscape(commandString))
+
+		commandString = nsjailCmd.String()
+
+		inputs = append(inputs, nsjailPath)
+		inputs = append(inputs, r.nsjailImplicits...)
+	} else if r.sbox {
 		// If running the command inside sbox, write the rule data out to an sbox
 		// manifest.textproto.
 		manifest := sbox_proto.Manifest{}
@@ -658,30 +781,7 @@ func (r *RuleBuilder) build(name string, desc string, ninjaEscapeCommandString b
 		if err != nil {
 			ReportPathErrorf(r.ctx, "sbox manifest failed to marshal: %q", err)
 		}
-		if ninjaEscapeCommandString {
-			WriteFileRule(r.ctx, r.sboxManifestPath, string(pbText))
-		} else {
-			// We need  to have a rule to write files that is
-			// defined on the RuleBuilder's pctx in order to
-			// write Ninja variables in the string.
-			// The WriteFileRule function above rule can only write
-			// raw strings because it is defined on the android
-			// package's pctx, and it can't access variables defined
-			// in another context.
-			r.ctx.Build(r.pctx, BuildParams{
-				Rule: r.ctx.Rule(r.pctx, "unescapedWriteFile", blueprint.RuleParams{
-					Command:        `rm -rf ${out} && cat ${out}.rsp > ${out}`,
-					Rspfile:        "${out}.rsp",
-					RspfileContent: "${content}",
-					Description:    "write file",
-				}, "content"),
-				Output:      r.sboxManifestPath,
-				Description: "write sbox manifest " + r.sboxManifestPath.Base(),
-				Args: map[string]string{
-					"content": string(pbText),
-				},
-			})
-		}
+		WriteFileRule(r.ctx, r.sboxManifestPath, string(pbText))
 
 		// Generate a new string to use as the command line of the sbox rule.  This uses
 		// a RuleBuilderCommand as a convenience method of building the command line, then
@@ -734,11 +834,6 @@ func (r *RuleBuilder) build(name string, desc string, ninjaEscapeCommandString b
 			rewrapperCommand := r.rbeParams.NoVarTemplate(r.ctx.Config().RBEWrapper())
 			commandString = rewrapperCommand + " bash -c '" + strings.ReplaceAll(commandString, `'`, `'\''`) + "'"
 		}
-	} else {
-		// If not using sbox the rule will run the command directly, put the hash of the
-		// list of input files in a comment at the end of the command line to ensure ninja
-		// reruns the rule when the list of input files changes.
-		commandString += " # hash of input list: " + hashSrcFiles(inputs)
 	}
 
 	// Ninja doesn't like multiple outputs when depfiles are enabled, move all but the first output to
@@ -780,9 +875,19 @@ func (r *RuleBuilder) build(name string, desc string, ninjaEscapeCommandString b
 		pool = localPool
 	}
 
-	if ninjaEscapeCommandString {
-		commandString = proptools.NinjaEscape(commandString)
+	// If the command length is getting close to linux's maximum, dump it to a file, which allows
+	// for longer commands.
+	if len(commandString) > 100000 {
+		hasher := sha256.New()
+		hasher.Write([]byte(output.String()))
+		script := PathForOutput(r.ctx, "rule_builder_scripts", fmt.Sprintf("%x.sh", hasher.Sum(nil)))
+		commandString = "set -eu\n\n" + commandString + "\n"
+		WriteExecutableFileRuleVerbatim(r.ctx, script, commandString)
+		inputs = append(inputs, script)
+		commandString = script.String()
 	}
+
+	commandString = proptools.NinjaEscape(commandString)
 
 	args_vars := make([]string, len(r.args))
 	i := 0
@@ -819,16 +924,17 @@ func (r *RuleBuilder) build(name string, desc string, ninjaEscapeCommandString b
 type RuleBuilderCommand struct {
 	rule *RuleBuilder
 
-	buf           strings.Builder
-	inputs        Paths
-	implicits     Paths
-	orderOnlys    Paths
-	validations   Paths
-	outputs       WritablePaths
-	depFiles      WritablePaths
-	tools         Paths
-	packagedTools []PackagingSpec
-	rspFiles      []rspFileAndPaths
+	buf                 strings.Builder
+	inputs              Paths
+	implicits           Paths
+	orderOnlys          Paths
+	validations         Paths
+	outputs             WritablePaths
+	depFiles            WritablePaths
+	tools               Paths
+	packagedTools       []PackagingSpec
+	rspFiles            []rspFileAndPaths
+	implicitDirectories DirectoryPaths
 }
 
 type rspFileAndPaths struct {
@@ -853,6 +959,10 @@ func (c *RuleBuilderCommand) addImplicit(path Path) {
 	c.implicits = append(c.implicits, path)
 }
 
+func (c *RuleBuilderCommand) addImplicitDirectory(path DirectoryPath) {
+	c.implicitDirectories = append(c.implicitDirectories, path)
+}
+
 func (c *RuleBuilderCommand) addOrderOnly(path Path) {
 	checkPathNotNil(path)
 	c.orderOnlys = append(c.orderOnlys, path)
@@ -869,6 +979,8 @@ func (c *RuleBuilderCommand) PathForInput(path Path) string {
 			rel = filepath.Join(sboxSandboxBaseDir, rel)
 		}
 		return rel
+	} else if c.rule.nsjail {
+		return c.rule.nsjailPathForInputRel(path)
 	}
 	return path.String()
 }
@@ -894,6 +1006,10 @@ func (c *RuleBuilderCommand) PathForOutput(path WritablePath) string {
 		// Errors will be handled in RuleBuilder.Build where we have a context to report them
 		rel, _, _ := maybeRelErr(c.rule.outDir.String(), path.String())
 		return filepath.Join(sboxOutDir, rel)
+	} else if c.rule.nsjail {
+		// Errors will be handled in RuleBuilder.Build where we have a context to report them
+		rel, _, _ := maybeRelErr(c.rule.outDir.String(), path.String())
+		return filepath.Join(nsjailOutDir, rel)
 	}
 	return path.String()
 }
@@ -945,15 +1061,49 @@ func sboxPathForPackagedToolRel(spec PackagingSpec) string {
 	return filepath.Join(sboxToolsSubDir, "out", spec.relPathInPackage)
 }
 
+func nsjailPathForToolRel(ctx BuilderContext, path Path) string {
+	// Errors will be handled in RuleBuilder.Build where we have a context to report them
+	toolDir := pathForInstall(ctx, ctx.Config().BuildOS, ctx.Config().BuildArch, "")
+	relOutSoong, isRelOutSoong, _ := maybeRelErr(toolDir.String(), path.String())
+	if isRelOutSoong {
+		// The tool is in the Soong output directory, it will be copied to __SBOX_OUT_DIR__/tools/out
+		return filepath.Join(nsjailToolsSubDir, "out", relOutSoong)
+	}
+	// The tool is in the source directory, it will be copied to __SBOX_OUT_DIR__/tools/src
+	return filepath.Join(nsjailToolsSubDir, "src", path.String())
+}
+
+func (r *RuleBuilder) nsjailPathForInputRel(path Path) string {
+	rel, isRelSboxOut, _ := maybeRelErr(r.outDir.String(), path.String())
+	if isRelSboxOut {
+		return filepath.Join(nsjailOutDir, rel)
+	}
+	return path.String()
+}
+
+func (r *RuleBuilder) nsjailPathsForInputsRel(paths Paths) []string {
+	ret := make([]string, len(paths))
+	for i, path := range paths {
+		ret[i] = r.nsjailPathForInputRel(path)
+	}
+	return ret
+}
+
+func nsjailPathForPackagedToolRel(spec PackagingSpec) string {
+	return filepath.Join(nsjailToolsSubDir, "out", spec.relPathInPackage)
+}
+
 // PathForPackagedTool takes a PackageSpec for a tool and returns the corresponding path for the
 // tool after copying it into the sandbox.  This can be used  on the RuleBuilder command line to
 // reference the tool.
 func (c *RuleBuilderCommand) PathForPackagedTool(spec PackagingSpec) string {
-	if !c.rule.sboxTools {
-		panic("PathForPackagedTool() requires SandboxTools()")
+	if c.rule.sboxTools {
+		return filepath.Join(sboxSandboxBaseDir, sboxPathForPackagedToolRel(spec))
+	} else if c.rule.nsjail {
+		return nsjailPathForPackagedToolRel(spec)
+	} else {
+		panic("PathForPackagedTool() requires SandboxTools() or Nsjail()")
 	}
-
-	return filepath.Join(sboxSandboxBaseDir, sboxPathForPackagedToolRel(spec))
 }
 
 // PathForTool takes a path to a tool, which may be an output file or a source file, and returns
@@ -962,6 +1112,8 @@ func (c *RuleBuilderCommand) PathForPackagedTool(spec PackagingSpec) string {
 func (c *RuleBuilderCommand) PathForTool(path Path) string {
 	if c.rule.sbox && c.rule.sboxTools {
 		return filepath.Join(sboxSandboxBaseDir, sboxPathForToolRel(c.rule.ctx, path))
+	} else if c.rule.nsjail {
+		return nsjailPathForToolRel(c.rule.ctx, path)
 	}
 	return path.String()
 }
@@ -976,6 +1128,12 @@ func (c *RuleBuilderCommand) PathsForTools(paths Paths) []string {
 			ret = append(ret, filepath.Join(sboxSandboxBaseDir, sboxPathForToolRel(c.rule.ctx, path)))
 		}
 		return ret
+	} else if c.rule.nsjail {
+		var ret []string
+		for _, path := range paths {
+			ret = append(ret, nsjailPathForToolRel(c.rule.ctx, path))
+		}
+		return ret
 	}
 	return paths.Strings()
 }
@@ -983,20 +1141,22 @@ func (c *RuleBuilderCommand) PathsForTools(paths Paths) []string {
 // PackagedTool adds the specified tool path to the command line.  It can only be used with tool
 // sandboxing enabled by SandboxTools(), and will copy the tool into the sandbox.
 func (c *RuleBuilderCommand) PackagedTool(spec PackagingSpec) *RuleBuilderCommand {
-	if !c.rule.sboxTools {
-		panic("PackagedTool() requires SandboxTools()")
-	}
-
 	c.packagedTools = append(c.packagedTools, spec)
-	c.Text(sboxPathForPackagedToolRel(spec))
+	if c.rule.sboxTools {
+		c.Text(sboxPathForPackagedToolRel(spec))
+	} else if c.rule.nsjail {
+		c.Text(nsjailPathForPackagedToolRel(spec))
+	} else {
+		panic("PackagedTool() requires SandboxTools() or Nsjail()")
+	}
 	return c
 }
 
 // ImplicitPackagedTool copies the specified tool into the sandbox without modifying the command
 // line.  It can only be used with tool sandboxing enabled by SandboxTools().
 func (c *RuleBuilderCommand) ImplicitPackagedTool(spec PackagingSpec) *RuleBuilderCommand {
-	if !c.rule.sboxTools {
-		panic("ImplicitPackagedTool() requires SandboxTools()")
+	if !c.rule.sboxTools && !c.rule.nsjail {
+		panic("ImplicitPackagedTool() requires SandboxTools() or Nsjail()")
 	}
 
 	c.packagedTools = append(c.packagedTools, spec)
@@ -1006,8 +1166,8 @@ func (c *RuleBuilderCommand) ImplicitPackagedTool(spec PackagingSpec) *RuleBuild
 // ImplicitPackagedTools copies the specified tools into the sandbox without modifying the command
 // line.  It can only be used with tool sandboxing enabled by SandboxTools().
 func (c *RuleBuilderCommand) ImplicitPackagedTools(specs []PackagingSpec) *RuleBuilderCommand {
-	if !c.rule.sboxTools {
-		panic("ImplicitPackagedTools() requires SandboxTools()")
+	if !c.rule.sboxTools && !c.rule.nsjail {
+		panic("ImplicitPackagedTools() requires SandboxTools() or Nsjail()")
 	}
 
 	c.packagedTools = append(c.packagedTools, specs...)
@@ -1162,6 +1322,16 @@ func (c *RuleBuilderCommand) Implicits(paths Paths) *RuleBuilderCommand {
 	for _, path := range paths {
 		c.addImplicit(path)
 	}
+	return c
+}
+
+// ImplicitDirectory adds the specified input directory to the dependencies without modifying the
+// command line. Added directories will be bind-mounted for the nsjail.
+func (c *RuleBuilderCommand) ImplicitDirectory(path DirectoryPath) *RuleBuilderCommand {
+	if !c.rule.nsjail {
+		panic("ImplicitDirectory() must be called after Nsjail()")
+	}
+	c.addImplicitDirectory(path)
 	return c
 }
 

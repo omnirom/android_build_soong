@@ -32,6 +32,17 @@ license {
 }
 
 license_kind {
+    name: "BSD-Binary-Only",
+    conditions: [
+        "notice",
+        "by_exception_only",
+        "proprietary",
+    ],
+}
+
+// Deprecated. All users of the following license should be changed to
+// BSD-Binary-Only and it should be removed.
+license_kind {
     name: "BSD-Like-Binary-Only",
     conditions: [
         "notice",

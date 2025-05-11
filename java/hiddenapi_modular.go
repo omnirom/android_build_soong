@@ -298,13 +298,12 @@ func hiddenAPIAddStubLibDependencies(ctx android.BottomUpMutatorContext, apiScop
 // available, or reports an error.
 func hiddenAPIRetrieveDexJarBuildPath(ctx android.ModuleContext, module android.Module, kind android.SdkKind) android.Path {
 	var dexJar OptionalDexJarPath
-	if sdkLibrary, ok := module.(SdkLibraryDependency); ok {
+	if sdkLibrary, ok := android.OtherModuleProvider(ctx, module, SdkLibraryInfoProvider); ok {
 		if ctx.Config().ReleaseHiddenApiExportableStubs() {
-			dexJar = sdkLibrary.SdkApiExportableStubDexJar(ctx, kind)
+			dexJar = sdkLibrary.ExportableStubDexJarPaths[kind]
 		} else {
-			dexJar = sdkLibrary.SdkApiStubDexJar(ctx, kind)
+			dexJar = sdkLibrary.EverythingStubDexJarPaths[kind]
 		}
-
 	} else if j, ok := module.(UsesLibraryDependency); ok {
 		dexJar = j.DexJarBuildPath(ctx)
 	} else {
@@ -853,15 +852,15 @@ func (i *HiddenAPIFlagInput) gatherStubLibInfo(ctx android.ModuleContext, conten
 			i.StubDexJarsByScope.addStubDexJar(ctx, module, apiScope, dexJar)
 		}
 
-		if sdkLibrary, ok := module.(SdkLibraryDependency); ok {
-			removedTxtFile := sdkLibrary.SdkRemovedTxtFile(ctx, sdkKind)
+		if sdkLibrary, ok := android.OtherModuleProvider(ctx, module, SdkLibraryInfoProvider); ok {
+			removedTxtFile := sdkLibrary.RemovedTxtFiles[sdkKind]
 			i.RemovedTxtFiles = append(i.RemovedTxtFiles, removedTxtFile.AsPaths()...)
 		}
 	}
 
 	// If the contents includes any java_sdk_library modules then add them to the stubs.
 	for _, module := range contents {
-		if _, ok := module.(SdkLibraryDependency); ok {
+		if _, ok := android.OtherModuleProvider(ctx, module, SdkLibraryInfoProvider); ok {
 			// Add information for every possible API scope needed by hidden API.
 			for _, apiScope := range hiddenAPISdkLibrarySupportedScopes {
 				addFromModule(ctx, module, apiScope)

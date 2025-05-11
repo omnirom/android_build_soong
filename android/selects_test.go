@@ -1031,6 +1031,54 @@ my_module_type {
 				my_string_list: &[]string{"d2", "e2", "f2", "a1", "b1", "c1"},
 			},
 		},
+		{
+			name: "string list variables",
+			bp: `
+my_module_type {
+	name: "foo",
+	my_string_list: ["a"] + select(soong_config_variable("my_namespace", "my_var"), {
+		any @ my_var: my_var,
+		default: [],
+	}),
+}
+`,
+			vendorVars: map[string]map[string]string{
+				"my_namespace": {
+					"my_var": "b c",
+				},
+			},
+			vendorVarTypes: map[string]map[string]string{
+				"my_namespace": {
+					"my_var": "string_list",
+				},
+			},
+			provider: selectsTestProvider{
+				my_string_list: &[]string{"a", "b", "c"},
+			},
+		},
+		{
+			name: "string list variables don't match string matchers",
+			bp: `
+my_module_type {
+	name: "foo",
+	my_string_list: ["a"] + select(soong_config_variable("my_namespace", "my_var"), {
+		"foo": ["b"],
+		default: [],
+	}),
+}
+`,
+			vendorVars: map[string]map[string]string{
+				"my_namespace": {
+					"my_var": "b c",
+				},
+			},
+			vendorVarTypes: map[string]map[string]string{
+				"my_namespace": {
+					"my_var": "string_list",
+				},
+			},
+			expectedError: `Expected all branches of a select on condition soong_config_variable\("my_namespace", "my_var"\) to have type string_list, found string`,
+		},
 	}
 
 	for _, tc := range testCases {

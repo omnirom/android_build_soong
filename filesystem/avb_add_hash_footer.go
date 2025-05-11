@@ -29,7 +29,7 @@ type avbAddHashFooter struct {
 
 	properties avbAddHashFooterProperties
 
-	output     android.OutputPath
+	output     android.Path
 	installDir android.InstallPath
 }
 
@@ -97,8 +97,8 @@ func (a *avbAddHashFooter) GenerateAndroidBuildActions(ctx android.ModuleContext
 		return
 	}
 	input := android.PathForModuleSrc(ctx, proptools.String(a.properties.Src))
-	a.output = android.PathForModuleOut(ctx, a.installFileName()).OutputPath
-	builder.Command().Text("cp").Input(input).Output(a.output)
+	output := android.PathForModuleOut(ctx, a.installFileName())
+	builder.Command().Text("cp").Input(input).Output(output)
 
 	cmd := builder.Command().BuiltTool("avbtool").Text("add_hash_footer")
 
@@ -141,12 +141,13 @@ func (a *avbAddHashFooter) GenerateAndroidBuildActions(ctx android.ModuleContext
 		cmd.Flag(fmt.Sprintf(" --rollback_index %d", rollbackIndex))
 	}
 
-	cmd.FlagWithOutput("--image ", a.output)
+	cmd.FlagWithOutput("--image ", output)
 
 	builder.Build("avbAddHashFooter", fmt.Sprintf("avbAddHashFooter %s", ctx.ModuleName()))
 
 	a.installDir = android.PathForModuleInstall(ctx, "etc")
-	ctx.InstallFile(a.installDir, a.installFileName(), a.output)
+	ctx.InstallFile(a.installDir, a.installFileName(), output)
+	a.output = output
 }
 
 func addAvbProp(ctx android.ModuleContext, cmd *android.RuleBuilderCommand, prop avbProp) {

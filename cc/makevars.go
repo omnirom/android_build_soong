@@ -25,10 +25,7 @@ import (
 )
 
 var (
-	modulesWarningsAllowedKey    = android.NewOnceKey("ModulesWarningsAllowed")
-	modulesUsingWnoErrorKey      = android.NewOnceKey("ModulesUsingWnoError")
-	modulesMissingProfileFileKey = android.NewOnceKey("ModulesMissingProfileFile")
-	sanitizerVariables           = map[string]string{
+	sanitizerVariables = map[string]string{
 		"ADDRESS_SANITIZER_RUNTIME_LIBRARY":   config.AddressSanitizerRuntimeLibrary(),
 		"HWADDRESS_SANITIZER_RUNTIME_LIBRARY": config.HWAddressSanitizerRuntimeLibrary(),
 		"HWADDRESS_SANITIZER_STATIC_LIBRARY":  config.HWAddressSanitizerStaticLibrary(),
@@ -50,15 +47,9 @@ func getNamedMapForConfig(config android.Config, key android.OnceKey) *sync.Map 
 	}).(*sync.Map)
 }
 
-func makeStringOfKeys(ctx android.MakeVarsContext, key android.OnceKey) string {
-	set := getNamedMapForConfig(ctx.Config(), key)
-	keys := []string{}
-	set.Range(func(key interface{}, value interface{}) bool {
-		keys = append(keys, key.(string))
-		return true
-	})
-	sort.Strings(keys)
-	return strings.Join(keys, " ")
+func makeVarsString(items []string) string {
+	items = android.SortedUniqueStrings(items)
+	return strings.Join(items, " ")
 }
 
 func makeStringOfWarningAllowedProjects() string {
@@ -108,27 +99,33 @@ func makeVarsProvider(ctx android.MakeVarsContext) {
 	ctx.Strict("GLOBAL_CLANG_EXTERNAL_CFLAGS_NO_OVERRIDE", "${config.NoOverrideExternalGlobalCflags}")
 
 	// Filter vendor_public_library that are exported to make
-	exportedVendorPublicLibraries := []string{}
+	var exportedVendorPublicLibraries []string
+	var warningsAllowed []string
+	var usingWnoErrors []string
+	var missingProfiles []string
 	ctx.VisitAllModules(func(module android.Module) {
+		if v, ok := android.OtherModuleProvider(ctx, module, CcMakeVarsInfoProvider); ok {
+			warningsAllowed = android.AppendIfNotZero(warningsAllowed, v.WarningsAllowed)
+			usingWnoErrors = android.AppendIfNotZero(usingWnoErrors, v.UsingWnoError)
+			missingProfiles = android.AppendIfNotZero(missingProfiles, v.MissingProfile)
+		}
 		if ccModule, ok := module.(*Module); ok {
 			baseName := ccModule.BaseModuleName()
 			if ccModule.IsVendorPublicLibrary() && module.ExportedToMake() {
-				if !inList(baseName, exportedVendorPublicLibraries) {
-					exportedVendorPublicLibraries = append(exportedVendorPublicLibraries, baseName)
-				}
+				exportedVendorPublicLibraries = append(exportedVendorPublicLibraries, baseName)
 			}
 		}
 	})
-	sort.Strings(exportedVendorPublicLibraries)
-	ctx.Strict("VENDOR_PUBLIC_LIBRARIES", strings.Join(exportedVendorPublicLibraries, " "))
+	ctx.Strict("VENDOR_PUBLIC_LIBRARIES", makeVarsString(exportedVendorPublicLibraries))
 
+	lsdumpPaths := *lsdumpPaths(ctx.Config())
 	sort.Strings(lsdumpPaths)
 	ctx.Strict("LSDUMP_PATHS", strings.Join(lsdumpPaths, " "))
 
 	ctx.Strict("ANDROID_WARNING_ALLOWED_PROJECTS", makeStringOfWarningAllowedProjects())
-	ctx.Strict("SOONG_MODULES_WARNINGS_ALLOWED", makeStringOfKeys(ctx, modulesWarningsAllowedKey))
-	ctx.Strict("SOONG_MODULES_USING_WNO_ERROR", makeStringOfKeys(ctx, modulesUsingWnoErrorKey))
-	ctx.Strict("SOONG_MODULES_MISSING_PGO_PROFILE_FILE", makeStringOfKeys(ctx, modulesMissingProfileFileKey))
+	ctx.Strict("SOONG_MODULES_WARNINGS_ALLOWED", makeVarsString(warningsAllowed))
+	ctx.Strict("SOONG_MODULES_USING_WNO_ERROR", makeVarsString(usingWnoErrors))
+	ctx.Strict("SOONG_MODULES_MISSING_PGO_PROFILE_FILE", makeVarsString(missingProfiles))
 
 	ctx.Strict("CLANG_COVERAGE_CONFIG_CFLAGS", strings.Join(clangCoverageCFlags, " "))
 	ctx.Strict("CLANG_COVERAGE_CONFIG_COMMFLAGS", strings.Join(clangCoverageCommonFlags, " "))

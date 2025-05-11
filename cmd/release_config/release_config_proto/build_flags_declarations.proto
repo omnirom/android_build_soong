@@ -51,8 +51,8 @@ message FlagDeclarationArtifact {
   // Text description of the flag's purpose.
   optional string description = 3;
 
-  // reserve this for bug, if needed.
-  reserved 4;
+  // The bug number associated with the flag.
+  repeated string bugs = 4;
 
   // Where the flag was declared.
   optional string declaration_path = 5;

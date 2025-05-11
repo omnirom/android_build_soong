@@ -109,7 +109,7 @@ func TestCollectJavaLibraryWithJarJarRules(t *testing.T) {
 	module := ctx.ModuleForTests("javalib", "android_common").Module().(*Library)
 	dpInfo, _ := android.OtherModuleProvider(ctx, module, android.IdeInfoProviderKey)
 
-	android.AssertBoolEquals(t, "IdeInfo.Srcs of repackaged library should be empty", true, len(dpInfo.Srcs) == 0)
+	android.AssertStringEquals(t, "IdeInfo.Srcs of repackaged library should not be empty", "foo.java", dpInfo.Srcs[0])
 	android.AssertStringEquals(t, "IdeInfo.Jar_rules of repackaged library should not be empty", "jarjar_rules.txt", dpInfo.Jarjar_rules[0])
 	if !android.SubstringInList(dpInfo.Jars, "soong/.intermediates/javalib/android_common/jarjar/turbine/javalib.jar") {
 		t.Errorf("IdeInfo.Jars of repackaged library should contain the output of jarjar-ing. All outputs: %v\n", dpInfo.Jars)
@@ -133,4 +133,43 @@ func TestCollectJavaLibraryLinkingAgainstVersionedSdk(t *testing.T) {
 	dpInfo, _ := android.OtherModuleProvider(ctx, module, android.IdeInfoProviderKey)
 
 	android.AssertStringListContains(t, "IdeInfo.Deps should contain versioned sdk module", dpInfo.Deps, "sdk_public_29_android")
+}
+
+func TestDoNotAddNoneSystemModulesToDeps(t *testing.T) {
+	ctx := android.GroupFixturePreparers(
+		prepareForJavaTest,
+		android.FixtureMergeEnv(
+			map[string]string{
+				"DISABLE_STUB_VALIDATION": "true",
+			},
+		),
+	).RunTestWithBp(t,
+		`
+		java_library {
+			name: "javalib",
+			srcs: ["foo.java"],
+			sdk_version: "none",
+			system_modules: "none",
+		}
+
+		java_api_library {
+			name: "javalib.stubs",
+			stubs_type: "everything",
+			api_contributions: ["javalib-current.txt"],
+			api_surface: "public",
+			system_modules: "none",
+		}
+		java_api_contribution {
+			name: "javalib-current.txt",
+			api_file: "javalib-current.txt",
+			api_surface: "public",
+		}
+	`)
+	javalib := ctx.ModuleForTests("javalib", "android_common").Module().(*Library)
+	dpInfo, _ := android.OtherModuleProvider(ctx, javalib, android.IdeInfoProviderKey)
+	android.AssertStringListDoesNotContain(t, "IdeInfo.Deps should contain not contain `none`", dpInfo.Deps, "none")
+
+	javalib_stubs := ctx.ModuleForTests("javalib.stubs", "android_common").Module().(*ApiLibrary)
+	dpInfo, _ = android.OtherModuleProvider(ctx, javalib_stubs, android.IdeInfoProviderKey)
+	android.AssertStringListDoesNotContain(t, "IdeInfo.Deps should contain not contain `none`", dpInfo.Deps, "none")
 }

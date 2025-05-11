@@ -251,11 +251,10 @@ func preProductConfigSetup(buildCtx build.Context, config build.Config) {
 	buildErrorFile := filepath.Join(logsDir, logsPrefix+"build_error")
 	rbeMetricsFile := filepath.Join(logsDir, logsPrefix+"rbe_metrics.pb")
 	soongMetricsFile := filepath.Join(logsDir, logsPrefix+"soong_metrics")
-	bp2buildMetricsFile := filepath.Join(logsDir, logsPrefix+"bp2build_metrics.pb")
 	soongBuildMetricsFile := filepath.Join(logsDir, logsPrefix+"soong_build_metrics.pb")
 
 	//Delete the stale metrics files
-	staleFileSlice := []string{buildErrorFile, rbeMetricsFile, soongMetricsFile, bp2buildMetricsFile, soongBuildMetricsFile}
+	staleFileSlice := []string{buildErrorFile, rbeMetricsFile, soongMetricsFile, soongBuildMetricsFile}
 	if err := deleteStaleMetrics(staleFileSlice); err != nil {
 		log.Fatalln(err)
 	}

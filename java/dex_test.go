@@ -713,3 +713,97 @@ android_app {
 	}
 }`)
 }
+
+func TestDebugReleaseFlags(t *testing.T) {
+	bp := `
+		android_app {
+			name: "app",
+			srcs: ["foo.java"],
+			platform_apis: true,
+			dxflags: ["%s"]
+		}
+	`
+
+	testcases := []struct {
+		name          string
+		envVar        string
+		isEng         bool
+		dxFlags       string
+		expectedFlags string
+	}{
+		{
+			name:          "app_no_optimize_dx",
+			envVar:        "NO_OPTIMIZE_DX",
+			expectedFlags: "--debug",
+		},
+		{
+			name:    "app_release_no_optimize_dx",
+			envVar:  "NO_OPTIMIZE_DX",
+			dxFlags: "--release",
+			// Global env vars override explicit dxflags.
+			expectedFlags: "--debug",
+		},
+		{
+			name:          "app_generate_dex_debug",
+			envVar:        "GENERATE_DEX_DEBUG",
+			expectedFlags: "--debug",
+		},
+		{
+			name:    "app_release_generate_dex_debug",
+			envVar:  "GENERATE_DEX_DEBUG",
+			dxFlags: "--release",
+			// Global env vars override explicit dxflags.
+			expectedFlags: "--debug",
+		},
+		{
+			name:          "app_eng",
+			isEng:         true,
+			expectedFlags: "--debug",
+		},
+		{
+			name:    "app_release_eng",
+			isEng:   true,
+			dxFlags: "--release",
+			// Eng mode does *not* override explicit dxflags.
+			expectedFlags: "--release",
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			fixturePreparer := PrepareForTestWithJavaDefaultModules
+			fixturePreparer = android.GroupFixturePreparers(
+				fixturePreparer,
+				android.FixtureModifyProductVariables(
+					func(variables android.FixtureProductVariables) {
+						variables.Eng = proptools.BoolPtr(tc.isEng)
+					},
+				),
+			)
+			if tc.envVar != "" {
+				fixturePreparer = android.GroupFixturePreparers(
+					fixturePreparer,
+					android.FixtureMergeEnv(map[string]string{
+						tc.envVar: "true",
+					}),
+				)
+			}
+			result := fixturePreparer.RunTestWithBp(t, fmt.Sprintf(bp, tc.dxFlags))
+
+			appR8 := result.ModuleForTests("app", "android_common").Rule("r8")
+			android.AssertStringDoesContain(t, "expected flag in R8 flags",
+				appR8.Args["r8Flags"], tc.expectedFlags)
+
+			var unexpectedFlags string
+			if tc.expectedFlags == "--debug" {
+				unexpectedFlags = "--release"
+			} else if tc.expectedFlags == "--release" {
+				unexpectedFlags = "--debug"
+			}
+			if unexpectedFlags != "" {
+				android.AssertStringDoesNotContain(t, "unexpected flag in R8 flags",
+					appR8.Args["r8Flags"], unexpectedFlags)
+			}
+		})
+	}
+}

@@ -183,6 +183,23 @@ func runKati(ctx Context, config Config, extraSuffix string, args []string, envF
 		username = usernameFromEnv
 	}
 
+	// SOONG_USE_PARTIAL_COMPILE may be used in makefiles, but both cases must be supported.
+	//
+	// In general, the partial compile features will be implemented in Soong-based rules. We
+	// also allow them to be used in makefiles.  Clear the environment variable when calling
+	// kati so that we avoid reanalysis when the user changes it.  We will pass it to Ninja.
+	// As a result, rules where we want to allow the developer to toggle the feature ("use
+	// the partial compile feature" vs "legacy, aka full compile behavior") need to use this
+	// in the rule, since changing it will not cause reanalysis.
+	//
+	// Shell syntax in the rule might look something like this:
+	//     if [[ -n ${SOONG_USE_PARTIAL_COMPILE} ]]; then
+	//         # partial compile behavior
+	//     else
+	//         # legacy behavior
+	//     fi
+	cmd.Environment.Unset("SOONG_USE_PARTIAL_COMPILE")
+
 	hostname, ok := cmd.Environment.Get("BUILD_HOSTNAME")
 	// Unset BUILD_HOSTNAME during kati run to avoid kati rerun, kati will use BUILD_HOSTNAME from a file.
 	cmd.Environment.Unset("BUILD_HOSTNAME")

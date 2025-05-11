@@ -268,7 +268,7 @@ func registerVisibilityMutators(ctx RegistrationContext) {
 // The rule checker needs to be registered before defaults expansion to correctly check that
 // //visibility:xxx isn't combined with other packages in the same list in any one module.
 func RegisterVisibilityRuleChecker(ctx RegisterMutatorsContext) {
-	ctx.BottomUp("visibilityRuleChecker", visibilityRuleChecker).Parallel()
+	ctx.BottomUp("visibilityRuleChecker", visibilityRuleChecker)
 }
 
 // Registers the function that gathers the visibility rules for each module.
@@ -278,12 +278,12 @@ func RegisterVisibilityRuleChecker(ctx RegisterMutatorsContext) {
 // the complete visibility lists from flat lists and after the package info is gathered to ensure
 // that default_visibility is available.
 func RegisterVisibilityRuleGatherer(ctx RegisterMutatorsContext) {
-	ctx.BottomUp("visibilityRuleGatherer", visibilityRuleGatherer).Parallel()
+	ctx.BottomUp("visibilityRuleGatherer", visibilityRuleGatherer)
 }
 
 // This must be registered after the deps have been resolved.
 func RegisterVisibilityRuleEnforcer(ctx RegisterMutatorsContext) {
-	ctx.BottomUp("visibilityRuleEnforcer", visibilityRuleEnforcer).Parallel()
+	ctx.BottomUp("visibilityRuleEnforcer", visibilityRuleEnforcer)
 }
 
 // Checks the per-module visibility rule lists before defaults expansion.

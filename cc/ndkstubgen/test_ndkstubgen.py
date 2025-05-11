@@ -473,16 +473,17 @@ class IntegrationTest(unittest.TestCase):
             VERSION_35 { # introduced=35
                 global:
                     wiggle;
-                    waggle;
-                    waggle; # llndk=202404
-                    bubble; # llndk=202404
-                    duddle;
-                    duddle; # llndk=202504
+                    waggle; # llndk
             } VERSION_34;
+            VERSION_36 { # introduced=36
+                global:
+                    abc;
+                    xyz; # llndk
+            } VERSION_35;
         """))
         f = copy(self.filter)
         f.llndk = True
-        f.api = 202404
+        f.api = 35
         parser = symbolfile.SymbolFileParser(input_file, {}, f)
         versions = parser.parse()
 
@@ -497,8 +498,8 @@ class IntegrationTest(unittest.TestCase):
         expected_src = textwrap.dedent("""\
             void foo() {}
             void bar() {}
+            void wiggle() {}
             void waggle() {}
-            void bubble() {}
         """)
         self.assertEqual(expected_src, src_file.getvalue())
 
@@ -510,8 +511,8 @@ class IntegrationTest(unittest.TestCase):
             };
             VERSION_35 {
                 global:
+                    wiggle;
                     waggle;
-                    bubble;
             } VERSION_34;
         """)
         self.assertEqual(expected_version, version_file.getvalue())
@@ -521,15 +522,15 @@ class IntegrationTest(unittest.TestCase):
             LIBANDROID {
                 global:
                     foo; # introduced=34
-                    bar; # introduced=35
-                    bar; # llndk=202404
-                    baz; # introduced=35
+                    bar; # introduced=35 llndk
+                    baz; # introduced=V
+                    qux; # introduced=36
             };
         """))
         f = copy(self.filter)
         f.llndk = True
-        f.api = 202404
-        parser = symbolfile.SymbolFileParser(input_file, {}, f)
+        f.api = 35
+        parser = symbolfile.SymbolFileParser(input_file, {'V': 35}, f)
         versions = parser.parse()
 
         src_file = io.StringIO()
@@ -543,6 +544,7 @@ class IntegrationTest(unittest.TestCase):
         expected_src = textwrap.dedent("""\
             void foo() {}
             void bar() {}
+            void baz() {}
         """)
         self.assertEqual(expected_src, src_file.getvalue())
 
@@ -551,6 +553,7 @@ class IntegrationTest(unittest.TestCase):
                 global:
                     foo;
                     bar;
+                    baz;
             };
         """)
         self.assertEqual(expected_version, version_file.getvalue())

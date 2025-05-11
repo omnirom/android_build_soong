@@ -63,7 +63,7 @@ func CcAconfigLibraryFactory() android.Module {
 	callbacks := &CcAconfigLibraryCallbacks{
 		properties: &CcAconfigLibraryProperties{},
 	}
-	return cc.GeneratedCcLibraryModuleFactory("cc_aconfig_library", callbacks)
+	return cc.GeneratedCcLibraryModuleFactory(callbacks)
 }
 
 func (this *CcAconfigLibraryCallbacks) GeneratorInit(ctx cc.BaseModuleContext) {

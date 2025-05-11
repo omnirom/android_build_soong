@@ -25,21 +25,12 @@ FLAGGED="android.annotation.FlaggedApi"
 # Convert the list of feature flags in the input file to Metalava options
 # of the form `--revert-annotation !android.annotation.FlaggedApi("<flag>")`
 # to prevent the annotated APIs from being hidden, i.e. include the annotated
-# APIs in the SDK snapshots. This also preserves the line comments, they will
-# be ignored by Metalava but might be useful when debugging.
+# APIs in the SDK snapshots.
 while read -r line; do
-  key=$(echo "$line" | cut -d= -f1)
-  value=$(echo "$line" | cut -d= -f2)
-
-  # Skip if value is not true and line does not start with '#'
-  if [[ ( $value != "true" ) && ( $line =~ ^[^#] )]]; then
-    continue
-  fi
-
   # Escape and quote the key for sed
-  escaped_key=$(echo "$key" | sed "s/'/\\\'/g; s/ /\\ /g")
+  escaped_line=$(echo "$line" | sed "s/'/\\\'/g; s/ /\\ /g")
 
-  echo $line | sed "s|^[^#].*$|--revert-annotation '!$FLAGGED(\"$escaped_key\")'|"
+  echo "--revert-annotation '!$FLAGGED(\"$escaped_line\")'"
 done < "$FLAGS"
 
 # Revert all flagged APIs, unless listed above.

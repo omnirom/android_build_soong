@@ -16,8 +16,6 @@
 #
 """Unit tests for modify_permissions_allowlist.py."""
 
-from __future__ import print_function
-
 import unittest
 
 from xml.dom import minidom

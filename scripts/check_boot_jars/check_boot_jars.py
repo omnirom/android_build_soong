@@ -4,7 +4,6 @@
 Usage: check_boot_jars.py <dexdump_path> <package_allow_list_file> <jar1> \
 <jar2> ...
 """
-from __future__ import print_function
 import logging
 import re
 import subprocess

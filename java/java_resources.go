@@ -17,6 +17,7 @@ package java
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/google/blueprint/pathtools"
@@ -99,10 +100,7 @@ func ResourceDirsToJarArgs(ctx android.ModuleContext,
 // that should not be treated as resources (including *.java).
 func ResourceFilesToJarArgs(ctx android.ModuleContext,
 	res, exclude []string) (args []string, deps android.Paths) {
-
-	exclude = append([]string(nil), exclude...)
-	exclude = append(exclude, resourceExcludes...)
-	return resourceFilesToJarArgs(ctx, res, exclude)
+	return resourceFilesToJarArgs(ctx, res, slices.Concat(exclude, resourceExcludes))
 }
 
 func resourceFilesToJarArgs(ctx android.ModuleContext,

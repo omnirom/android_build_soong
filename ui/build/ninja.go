@@ -241,6 +241,9 @@ func runNinjaForBuild(ctx Context, config Config) {
 			"SOONG_USE_N2",
 			"RUST_BACKTRACE",
 			"RUST_LOG",
+
+			// SOONG_USE_PARTIAL_COMPILE only determines which half of the rule we execute.
+			"SOONG_USE_PARTIAL_COMPILE",
 		}, config.BuildBrokenNinjaUsesEnvVars()...)...)
 	}
 

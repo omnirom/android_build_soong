@@ -59,7 +59,7 @@ type AconfigDeclarationsGroupProperties struct {
 func AconfigDeclarationsGroupFactory() android.Module {
 	module := &AconfigDeclarationsGroup{}
 	module.AddProperties(&module.properties)
-	android.InitAndroidModule(module)
+	android.InitAndroidArchModule(module, android.DeviceSupported, android.MultilibCommon)
 	android.InitDefaultableModule(module)
 	return module
 }

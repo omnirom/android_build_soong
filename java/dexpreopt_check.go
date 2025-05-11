@@ -17,6 +17,8 @@ package java
 import (
 	"strings"
 
+	"github.com/google/blueprint"
+
 	"android/soong/android"
 	"android/soong/dexpreopt"
 
@@ -43,16 +45,12 @@ func RegisterDexpreoptCheckBuildComponents(ctx android.RegistrationContext) {
 type dexpreoptSystemserverCheck struct {
 	android.SingletonModuleBase
 
-	// Mapping from the module name to the install paths to the compilation artifacts.
-	artifactsByModuleName map[string][]string
-
 	// The install paths to the compilation artifacts.
 	artifacts []string
 }
 
 func dexpreoptSystemserverCheckFactory() android.SingletonModule {
 	m := &dexpreoptSystemserverCheck{}
-	m.artifactsByModuleName = make(map[string][]string)
 	android.InitAndroidArchModule(m, android.DeviceSupported, android.MultilibCommon)
 	return m
 }
@@ -62,7 +60,25 @@ func getInstallPath(ctx android.ModuleContext, location string) android.InstallP
 		ctx, "", strings.TrimPrefix(location, "/"))
 }
 
-func (m *dexpreoptSystemserverCheck) GenerateAndroidBuildActions(ctx android.ModuleContext) {
+type systemServerDependencyTag struct {
+	blueprint.BaseDependencyTag
+}
+
+// systemServerJarDepTag willl be used for validation. Skip visiblility.
+func (b systemServerDependencyTag) ExcludeFromVisibilityEnforcement() {
+}
+
+var (
+	// dep tag for platform and apex system server jars
+	systemServerJarDepTag = systemServerDependencyTag{}
+)
+
+var _ android.ExcludeFromVisibilityEnforcementTag = systemServerJarDepTag
+
+// Add a depenendency on the system server jars. The dexpreopt files of those will be emitted to make.
+// The kati packaging system will verify that those files appear in installed files.
+// Adding the dependency allows the singleton module to determine whether an apex system server jar is system_ext specific.
+func (m *dexpreoptSystemserverCheck) DepsMutator(ctx android.BottomUpMutatorContext) {
 	global := dexpreopt.GetGlobalConfig(ctx)
 	targets := ctx.Config().Targets[android.Android]
 
@@ -72,23 +88,27 @@ func (m *dexpreoptSystemserverCheck) GenerateAndroidBuildActions(ctx android.Mod
 		return
 	}
 
-	systemServerJars := global.AllSystemServerJars(ctx)
-	for _, jar := range systemServerJars.CopyOfJars() {
-		dexLocation := dexpreopt.GetSystemServerDexLocation(ctx, global, jar)
-		odexLocation := dexpreopt.ToOdexPath(dexLocation, targets[0].Arch.ArchType)
+	ctx.AddDependency(ctx.Module(), systemServerJarDepTag, global.AllSystemServerJars(ctx).CopyOfJars()...)
+}
+
+func (m *dexpreoptSystemserverCheck) GenerateAndroidBuildActions(ctx android.ModuleContext) {
+	global := dexpreopt.GetGlobalConfig(ctx)
+	targets := ctx.Config().Targets[android.Android]
+
+	ctx.VisitDirectDepsWithTag(systemServerJarDepTag, func(systemServerJar android.Module) {
+		partition := "system"
+		if systemServerJar.InstallInSystemExt() && ctx.Config().InstallApexSystemServerDexpreoptSamePartition() {
+			partition = ctx.DeviceConfig().SystemExtPath() // system_ext
+		}
+		dexLocation := dexpreopt.GetSystemServerDexLocation(ctx, global, systemServerJar.Name())
+		odexLocation := dexpreopt.ToOdexPath(dexLocation, targets[0].Arch.ArchType, partition)
 		odexPath := getInstallPath(ctx, odexLocation)
 		vdexPath := getInstallPath(ctx, pathtools.ReplaceExtension(odexLocation, "vdex"))
-		m.artifactsByModuleName[jar] = []string{odexPath.String(), vdexPath.String()}
-	}
+		m.artifacts = append(m.artifacts, odexPath.String(), vdexPath.String())
+	})
 }
 
 func (m *dexpreoptSystemserverCheck) GenerateSingletonBuildActions(ctx android.SingletonContext) {
-	// Only keep modules defined in Soong.
-	ctx.VisitAllModules(func(module android.Module) {
-		if artifacts, ok := m.artifactsByModuleName[module.Name()]; ok {
-			m.artifacts = append(m.artifacts, artifacts...)
-		}
-	})
 }
 
 func (m *dexpreoptSystemserverCheck) MakeVars(ctx android.MakeVarsContext) {

@@ -992,7 +992,7 @@ func (s *sanitize) flags(ctx ModuleContext, flags Flags) Flags {
 	return flags
 }
 
-func (s *sanitize) AndroidMkEntries(ctx AndroidMkContext, entries *android.AndroidMkEntries) {
+func (s *sanitize) prepareAndroidMKProviderInfo(config android.Config, ctx AndroidMkContext, entries *android.AndroidMkInfo) {
 	// Add a suffix for cfi/hwasan/scs-enabled static/header libraries to allow surfacing
 	// both the sanitized and non-sanitized variants to make without a name conflict.
 	if entries.Class == "STATIC_LIBRARIES" || entries.Class == "HEADER_LIBRARIES" {
@@ -1504,9 +1504,6 @@ func sanitizerRuntimeMutator(mctx android.BottomUpMutatorContext) {
 
 		if Bool(sanProps.Memtag_globals) {
 			sanitizers = append(sanitizers, "memtag-globals")
-			// TODO(mitchp): For now, enable memtag-heap with memtag-globals because the linker
-			// isn't new enough (https://reviews.llvm.org/differential/changeset/?ref=4243566).
-			sanitizers = append(sanitizers, "memtag-heap")
 		}
 
 		if Bool(sanProps.Fuzzer) {
@@ -1813,7 +1810,7 @@ func memtagStackMakeVarsProvider(ctx android.MakeVarsContext) {
 type sanitizerLibrariesTxtModule struct {
 	android.ModuleBase
 
-	outputFile android.OutputPath
+	outputFile android.Path
 }
 
 var _ etc.PrebuiltEtcModule = (*sanitizerLibrariesTxtModule)(nil)
@@ -1830,10 +1827,7 @@ func sanitizerLibrariesTxtFactory() android.Module {
 
 type sanitizerLibraryDependencyTag struct {
 	blueprint.BaseDependencyTag
-}
-
-func (t sanitizerLibraryDependencyTag) AllowDisabledModuleDependency(target android.Module) bool {
-	return true
+	android.AlwaysAllowDisabledModuleDependencyTag
 }
 
 var _ android.AllowDisabledModuleDependency = (*sanitizerLibraryDependencyTag)(nil)
@@ -1899,20 +1893,23 @@ func (txt *sanitizerLibrariesTxtModule) getSanitizerLibs(ctx android.ModuleConte
 func (txt *sanitizerLibrariesTxtModule) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	filename := txt.Name()
 
-	txt.outputFile = android.PathForModuleOut(ctx, filename).OutputPath
-	android.WriteFileRule(ctx, txt.outputFile, txt.getSanitizerLibs(ctx))
+	outputFile := android.PathForModuleOut(ctx, filename)
+	android.WriteFileRule(ctx, outputFile, txt.getSanitizerLibs(ctx))
 
 	installPath := android.PathForModuleInstall(ctx, "etc")
-	ctx.InstallFile(installPath, filename, txt.outputFile)
+	ctx.InstallFile(installPath, filename, outputFile)
 
-	ctx.SetOutputFiles(android.Paths{txt.outputFile}, "")
+	ctx.SetOutputFiles(android.Paths{outputFile}, "")
+	txt.outputFile = outputFile
 }
 
-func (txt *sanitizerLibrariesTxtModule) AndroidMkEntries() []android.AndroidMkEntries {
-	return []android.AndroidMkEntries{{
-		Class:      "ETC",
-		OutputFile: android.OptionalPathForPath(txt.outputFile),
-	}}
+func (txt *sanitizerLibrariesTxtModule) PrepareAndroidMKProviderInfo(config android.Config) *android.AndroidMkProviderInfo {
+	return &android.AndroidMkProviderInfo{
+		PrimaryInfo: android.AndroidMkInfo{
+			Class:      "ETC",
+			OutputFile: android.OptionalPathForPath(txt.outputFile),
+		},
+	}
 }
 
 // PrebuiltEtcModule interface

@@ -46,7 +46,7 @@ func TestLibraryHeaders(t *testing.T) {
 
 			// Test that there's a valid AndroidMk entry.
 			headers := ctx.ModuleForTests("headers", "android_arm64_armv8-a").Module()
-			e := android.AndroidMkEntriesForTest(t, ctx, headers)[0]
+			e := android.AndroidMkInfoForTest(t, ctx, headers).PrimaryInfo
 
 			// This duplicates the tests done in AndroidMkEntries.write. It would be
 			// better to test its output, but there are no test functions that capture that.

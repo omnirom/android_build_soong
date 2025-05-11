@@ -16,6 +16,8 @@ package apex
 
 import "android/soong/android"
 
+const testDefaultUpdatableModuleVersion = "340090000"
+
 var PrepareForTestWithApexBuildComponents = android.GroupFixturePreparers(
 	android.FixtureRegisterWithContext(registerApexBuildComponents),
 	android.FixtureRegisterWithContext(registerApexKeyBuildComponents),
@@ -29,4 +31,5 @@ var PrepareForTestWithApexBuildComponents = android.GroupFixturePreparers(
 		// Needed by prebuilt_apex.
 		"build/soong/scripts/unpack-prebuilt-apex.sh": nil,
 	}.AddToFixture(),
+	android.PrepareForTestWithBuildFlag("RELEASE_DEFAULT_UPDATABLE_MODULE_VERSION", testDefaultUpdatableModuleVersion),
 )

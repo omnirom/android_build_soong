@@ -30,6 +30,7 @@ import (
 )
 
 const defaultJavaDir = "default/java"
+const testDefaultUpdatableModuleVersion = "340090000"
 
 // Test fixture preparer that will register most java build components.
 //
@@ -61,6 +62,7 @@ var PrepareForTestWithJavaBuildComponents = android.GroupFixturePreparers(
 		// Needed for the global lint checks provided from frameworks/base
 		"prebuilts/cmdline-tools/AndroidGlobalLintChecker.jar": nil,
 	}.AddToFixture(),
+	android.PrepareForTestWithBuildFlag("RELEASE_DEFAULT_UPDATABLE_MODULE_VERSION", testDefaultUpdatableModuleVersion),
 )
 
 var prepareForTestWithFrameworkDeps = android.GroupFixturePreparers(
@@ -188,6 +190,7 @@ var PrepareForTestWithJacocoInstrumentation = android.GroupFixturePreparers(
 				"//apex_available:anyapex",
 				"//apex_available:platform",
 			],
+			compile_dex: true,
 		}
 	`)),
 )
@@ -388,7 +391,6 @@ func registerRequiredBuildComponentsForTest(ctx android.RegistrationContext) {
 	RegisterStubsBuildComponents(ctx)
 	RegisterSystemModulesBuildComponents(ctx)
 	registerSystemserverClasspathBuildComponents(ctx)
-	registerLintBuildComponents(ctx)
 	android.RegisterApexContributionsBuildComponents(ctx)
 }
 
@@ -425,7 +427,7 @@ func gatherRequiredDepsForTest() string {
 		"kotlin-annotations",
 		"stub-annotations",
 		"aconfig-annotations-lib",
-		"aconfig_storage_reader_java",
+		"aconfig_storage_stub",
 		"unsupportedappusage",
 	}
 

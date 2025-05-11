@@ -15,12 +15,18 @@
 package android
 
 import (
+	"fmt"
+
 	"github.com/google/blueprint/proptools"
 )
 
 func init() {
-	ctx := InitRegistrationContext
-	ctx.RegisterModuleType("build_prop", buildPropFactory)
+	registerBuildPropComponents(InitRegistrationContext)
+}
+
+func registerBuildPropComponents(ctx RegistrationContext) {
+	ctx.RegisterModuleType("build_prop", BuildPropFactory)
+	ctx.RegisterModuleType("android_info", AndroidInfoFactory)
 }
 
 type buildPropProperties struct {
@@ -38,6 +44,10 @@ type buildPropProperties struct {
 	// Path to a JSON file containing product configs.
 	Product_config *string `android:"path"`
 
+	// Path to android-info.txt file containing board specific info.
+	// This is empty for build.prop of all partitions except vendor.
+	Android_info *string `android:"path"`
+
 	// Optional subdirectory under which this file is installed into
 	Relative_install_path *string
 }
@@ -47,7 +57,7 @@ type buildPropModule struct {
 
 	properties buildPropProperties
 
-	outputFilePath OutputPath
+	outputFilePath Path
 	installPath    InstallPath
 }
 
@@ -65,6 +75,12 @@ func (p *buildPropModule) propFiles(ctx ModuleContext) Paths {
 		return ctx.Config().ProductPropFiles(ctx)
 	} else if partition == "odm" {
 		return ctx.Config().OdmPropFiles(ctx)
+	} else if partition == "vendor" {
+		if p.properties.Android_info != nil {
+			androidInfo := PathForModuleSrc(ctx, proptools.String(p.properties.Android_info))
+			return append(ctx.Config().VendorPropFiles(ctx), androidInfo)
+		}
+		return ctx.Config().VendorPropFiles(ctx)
 	}
 	return nil
 }
@@ -95,30 +111,28 @@ func (p *buildPropModule) partition(config DeviceConfig) string {
 		return "product"
 	} else if p.SystemExtSpecific() {
 		return "system_ext"
+	} else if p.InstallInSystemDlkm() {
+		return "system_dlkm"
+	} else if p.InstallInVendorDlkm() {
+		return "vendor_dlkm"
+	} else if p.InstallInOdmDlkm() {
+		return "odm_dlkm"
+	} else if p.InstallInRamdisk() {
+		// From this hardcoding in make:
+		// https://cs.android.com/android/platform/superproject/main/+/main:build/make/core/sysprop.mk;l=311;drc=274435657e4682e5cee3fffd11fb301ab32a828d
+		return "bootimage"
 	}
 	return "system"
 }
 
-var validPartitions = []string{
-	"system",
-	"system_ext",
-	"product",
-	"odm",
-}
-
 func (p *buildPropModule) GenerateAndroidBuildActions(ctx ModuleContext) {
-	p.outputFilePath = PathForModuleOut(ctx, "build.prop").OutputPath
-	if !ctx.Config().KatiEnabled() {
-		WriteFileRule(ctx, p.outputFilePath, "# no build.prop if kati is disabled")
-		ctx.SetOutputFiles(Paths{p.outputFilePath}, "")
-		return
+	if !p.SocSpecific() && p.properties.Android_info != nil {
+		ctx.ModuleErrorf("Android_info cannot be set if build.prop is not installed in vendor partition")
 	}
+
+	outputFilePath := PathForModuleOut(ctx, "build.prop")
 
 	partition := p.partition(ctx.DeviceConfig())
-	if !InList(partition, validPartitions) {
-		ctx.PropertyErrorf("partition", "unsupported partition %q: only %q are supported", partition, validPartitions)
-		return
-	}
 
 	rule := NewRuleBuilder(pctx, ctx)
 
@@ -145,7 +159,7 @@ func (p *buildPropModule) GenerateAndroidBuildActions(ctx ModuleContext) {
 	cmd.FlagWithInput("--product-config=", PathForModuleSrc(ctx, proptools.String(p.properties.Product_config)))
 	cmd.FlagWithArg("--partition=", partition)
 	cmd.FlagForEachInput("--prop-files=", p.propFiles(ctx))
-	cmd.FlagWithOutput("--out=", p.outputFilePath)
+	cmd.FlagWithOutput("--out=", outputFilePath)
 
 	postProcessCmd := rule.Command().BuiltTool("post_process_props")
 	if ctx.DeviceConfig().BuildBrokenDupSysprop() {
@@ -158,17 +172,35 @@ func (p *buildPropModule) GenerateAndroidBuildActions(ctx ModuleContext) {
 		// still need to pass an empty string to kernel-version-file-for-uffd-gc
 		postProcessCmd.FlagWithArg("--kernel-version-file-for-uffd-gc ", `""`)
 	}
-	postProcessCmd.Text(p.outputFilePath.String())
+	postProcessCmd.Text(outputFilePath.String())
 	postProcessCmd.Flags(p.properties.Block_list)
 
-	rule.Command().Text("echo").Text(proptools.NinjaAndShellEscape("# end of file")).FlagWithArg(">> ", p.outputFilePath.String())
+	for _, footer := range p.properties.Footer_files {
+		path := PathForModuleSrc(ctx, footer)
+		rule.appendText(outputFilePath, "####################################")
+		rule.appendTextf(outputFilePath, "# Adding footer from %v", footer)
+		rule.appendTextf(outputFilePath, "# with path %v", path)
+		rule.appendText(outputFilePath, "####################################")
+		rule.Command().Text("cat").FlagWithInput("", path).FlagWithArg(">> ", outputFilePath.String())
+	}
+
+	rule.appendText(outputFilePath, "# end of file")
 
 	rule.Build(ctx.ModuleName(), "generating build.prop")
 
 	p.installPath = PathForModuleInstall(ctx, proptools.String(p.properties.Relative_install_path))
-	ctx.InstallFile(p.installPath, p.stem(), p.outputFilePath)
+	ctx.InstallFile(p.installPath, p.stem(), outputFilePath)
 
-	ctx.SetOutputFiles(Paths{p.outputFilePath}, "")
+	ctx.SetOutputFiles(Paths{outputFilePath}, "")
+	p.outputFilePath = outputFilePath
+}
+
+func (r *RuleBuilder) appendText(path ModuleOutPath, text string) {
+	r.Command().Text("echo").Text(proptools.NinjaAndShellEscape(text)).FlagWithArg(">> ", path.String())
+}
+
+func (r *RuleBuilder) appendTextf(path ModuleOutPath, format string, a ...any) {
+	r.appendText(path, fmt.Sprintf(format, a...))
 }
 
 func (p *buildPropModule) AndroidMkEntries() []AndroidMkEntries {
@@ -187,7 +219,7 @@ func (p *buildPropModule) AndroidMkEntries() []AndroidMkEntries {
 // build_prop module generates {partition}/build.prop file. At first common build properties are
 // printed based on Soong config variables. And then prop_files are printed as-is. Finally,
 // post_process_props tool is run to check if the result build.prop is valid or not.
-func buildPropFactory() Module {
+func BuildPropFactory() Module {
 	module := &buildPropModule{}
 	module.AddProperties(&module.properties)
 	InitAndroidArchModule(module, DeviceSupported, MultilibCommon)

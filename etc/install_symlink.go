@@ -26,6 +26,7 @@ func init() {
 
 func RegisterInstallSymlinkBuildComponents(ctx android.RegistrationContext) {
 	ctx.RegisterModuleType("install_symlink", InstallSymlinkFactory)
+	ctx.RegisterModuleType("install_symlink_host", InstallSymlinkHostFactory)
 }
 
 // install_symlink can be used to install an symlink with an arbitrary target to an arbitrary path
@@ -34,6 +35,14 @@ func InstallSymlinkFactory() android.Module {
 	module := &InstallSymlink{}
 	module.AddProperties(&module.properties)
 	android.InitAndroidMultiTargetsArchModule(module, android.DeviceSupported, android.MultilibCommon)
+	return module
+}
+
+// install_symlink can be used to install an symlink to an arbitrary path on the host.
+func InstallSymlinkHostFactory() android.Module {
+	module := &InstallSymlink{}
+	module.AddProperties(&module.properties)
+	android.InitAndroidMultiTargetsArchModule(module, android.HostSupported, android.MultilibCommon)
 	return module
 }
 

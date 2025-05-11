@@ -40,6 +40,9 @@ var (
 			"-march=x86-64",
 		},
 
+		"alderlake": []string{
+			"-march=alderlake",
+		},
 		"broadwell": []string{
 			"-march=broadwell",
 		},

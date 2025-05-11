@@ -32,7 +32,7 @@ func (p *productConfigModule) GenerateAndroidBuildActions(ctx ModuleContext) {
 		ctx.ModuleErrorf("There can only be one product_config module in build/soong")
 		return
 	}
-	outputFilePath := PathForModuleOut(ctx, p.Name()+".json").OutputPath
+	outputFilePath := PathForModuleOut(ctx, p.Name()+".json")
 
 	// DeviceProduct can be null so calling ctx.Config().DeviceProduct() may cause null dereference
 	targetProduct := proptools.String(ctx.Config().config.productVariables.DeviceProduct)

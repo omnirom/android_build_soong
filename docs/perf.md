@@ -61,8 +61,7 @@ SOONG_PROFILE_CPU=/tmp/foo m ..._
 
 saves CPU profile for each Soong invocation in /tmp/foo._step_ file, where
 _step_ is Soong execution step. The main step is `build`. The others as
-`bp2build_files`, `bp2build_workspace`, `modulegraph`, `queryview`,
-`api_bp2build`, `soong_docs` (not all of them necessarily run during the build).
+`soong_docs` (not all of them necessarily run during the build).
 The profiles can be inspected with `go tool pprof` from the command line or
 with _Run>Open Profiler Snapshot_ in IntelliJ IDEA.
 

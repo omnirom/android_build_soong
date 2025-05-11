@@ -46,7 +46,7 @@ var (
 )
 
 type ProvenanceMetadata interface {
-	ProvenanceMetaDataFile() android.OutputPath
+	ProvenanceMetaDataFile() android.Path
 }
 
 func init() {
@@ -74,7 +74,7 @@ func (p *provenanceInfoSingleton) GenerateBuildActions(context android.Singleton
 			return false
 		}
 		if p, ok := module.(ProvenanceMetadata); ok {
-			return p.ProvenanceMetaDataFile().String() != ""
+			return p.ProvenanceMetaDataFile() != nil
 		}
 		return false
 	}
@@ -101,7 +101,7 @@ func (p *provenanceInfoSingleton) GenerateBuildActions(context android.Singleton
 	context.Phony("droidcore", android.PathForPhony(context, "provenance_metadata"))
 }
 
-func GenerateArtifactProvenanceMetaData(ctx android.ModuleContext, artifactPath android.Path, installedFile android.InstallPath) android.OutputPath {
+func GenerateArtifactProvenanceMetaData(ctx android.ModuleContext, artifactPath android.Path, installedFile android.InstallPath) android.Path {
 	onDevicePathOfInstalledFile := android.InstallPathToOnDevicePath(ctx, installedFile)
 	artifactMetaDataFile := android.PathForIntermediates(ctx, "provenance_metadata", ctx.ModuleDir(), ctx.ModuleName(), "provenance_metadata.textproto")
 	ctx.Build(pctx, android.BuildParams{

@@ -42,6 +42,9 @@ var (
 		"x86_64": []string{
 			"-march=prescott",
 		},
+		"alderlake": []string{
+			"-march=alderlake",
+		},
 		"atom": []string{
 			"-march=atom",
 		},

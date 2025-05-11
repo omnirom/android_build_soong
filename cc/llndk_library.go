@@ -57,17 +57,18 @@ type llndkLibraryProperties struct {
 	// if true, make this module available to provide headers to other modules that set
 	// llndk.symbol_file.
 	Llndk_headers *bool
+
+	// moved_to_apex marks this module has having been distributed through an apex module.
+	Moved_to_apex *bool
 }
 
 func makeLlndkVars(ctx android.MakeVarsContext) {
-	// Make uses LLNDK_MOVED_TO_APEX_LIBRARIES to avoid installing libraries on /system if
-	// they been moved to an apex.
+	// Make uses LLNDK_MOVED_TO_APEX_LIBRARIES to generate the linker config.
 	movedToApexLlndkLibraries := make(map[string]bool)
 	ctx.VisitAllModules(func(module android.Module) {
 		if library := moduleLibraryInterface(module); library != nil && library.hasLLNDKStubs() {
-			// Skip bionic libs, they are handled in different manner
-			name := library.implementationModuleName(module.(*Module).BaseModuleName())
-			if module.(android.ApexModule).DirectlyInAnyApex() && !isBionic(name) {
+			if library.isLLNDKMovedToApex() {
+				name := library.implementationModuleName(module.(*Module).BaseModuleName())
 				movedToApexLlndkLibraries[name] = true
 			}
 		}

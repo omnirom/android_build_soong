@@ -103,23 +103,12 @@ class Tags:
     @property
     def has_llndk_tags(self) -> bool:
         """Returns True if any LL-NDK tags are set."""
-        for tag in self.tags:
-            if tag == 'llndk' or tag.startswith('llndk='):
-                return True
-        return False
+        return 'llndk' in self.tags
 
     @property
     def has_platform_only_tags(self) -> bool:
         """Returns True if any platform-only tags are set."""
         return 'platform-only' in self.tags
-
-    def copy_introduced_from(self, tags: Tags) -> None:
-        """Copies introduced= or introduced-*= tags."""
-        for tag in tags:
-            if tag.startswith('introduced=') or tag.startswith('introduced-'):
-                name, _ = split_tag(tag)
-                if not any(self_tag.startswith(name + '=') for self_tag in self.tags):
-                    self.tags += (tag,)
 
 
 @dataclass
@@ -157,8 +146,6 @@ def get_tags(line: str, api_map: ApiMap) -> Tags:
 def is_api_level_tag(tag: Tag) -> bool:
     """Returns true if this tag has an API level that may need decoding."""
     if tag.startswith('llndk-deprecated='):
-        return True
-    if tag.startswith('llndk='):
         return True
     if tag.startswith('introduced='):
         return True
@@ -245,21 +232,19 @@ class Filter:
         self.systemapi = systemapi
         self.ndk = ndk
 
+    def _symbol_in_arch_api(self, tags: Tags) -> bool:
+        if not symbol_in_arch(tags, self.arch):
+            return True
+        if not symbol_in_api(tags, self.arch, self.api):
+            return True
+        return False
+
     def _should_omit_tags(self, tags: Tags) -> bool:
         """Returns True if the tagged object should be omitted.
 
         This defines the rules shared between version tagging and symbol tagging.
         """
-        # LLNDK mode/tags follow the similar filtering except that API level checking
-        # is based llndk= instead of introduced=.
-        if self.llndk:
-            if tags.has_mode_tags and not tags.has_llndk_tags:
-                return True
-            if not symbol_in_arch(tags, self.arch):
-                return True
-            if not symbol_in_llndk_api(tags, self.arch, self.api):
-                return True
-            return False
+        # The apex and llndk tags will only exclude APIs from other modes. If in
         # APEX or LLNDK mode and neither tag is provided, we fall back to the
         # default behavior because all NDK symbols are implicitly available to
         # APEX and LLNDK.
@@ -268,12 +253,10 @@ class Filter:
                 return False
             if self.systemapi and tags.has_systemapi_tags:
                 return False
+            if self.llndk and tags.has_llndk_tags:
+                return self._symbol_in_arch_api(tags)
             return True
-        if not symbol_in_arch(tags, self.arch):
-            return True
-        if not symbol_in_api(tags, self.arch, self.api):
-            return True
-        return False
+        return self._symbol_in_arch_api(tags)
 
     def should_omit_version(self, version: Version) -> bool:
         """Returns True if the version section should be omitted.
@@ -286,10 +269,6 @@ class Filter:
             return True
         if version.tags.has_platform_only_tags:
             return True
-        # Include all versions when targeting LLNDK because LLNDK symbols are self-versioned.
-        # Empty version block will be handled separately.
-        if self.llndk:
-            return False
         return self._should_omit_tags(version.tags)
 
     def should_omit_symbol(self, symbol: Symbol) -> bool:
@@ -301,6 +280,7 @@ class Filter:
             return True
 
         return self._should_omit_tags(symbol.tags)
+
 
 def symbol_in_arch(tags: Tags, arch: Arch) -> bool:
     """Returns true if the symbol is present for the given architecture."""
@@ -316,14 +296,6 @@ def symbol_in_arch(tags: Tags, arch: Arch) -> bool:
     # for the tagged architectures.
     return not has_arch_tags
 
-def symbol_in_llndk_api(tags: Iterable[Tag], arch: Arch, api: int) -> bool:
-    """Returns true if the symbol is present for the given LLNDK API level."""
-    # Check llndk= first.
-    for tag in tags:
-        if tag.startswith('llndk='):
-            return api >= int(get_tag_value(tag))
-    # If not, we keep old behavior: NDK symbols in <= 34 are LLNDK symbols.
-    return symbol_in_api(tags, arch, 34)
 
 def symbol_in_api(tags: Iterable[Tag], arch: Arch, api: int) -> bool:
     """Returns true if the symbol is present for the given API level."""
@@ -400,7 +372,6 @@ class SymbolFileParser:
                     f'Unexpected contents at top level: {self.current_line}')
 
         self.check_no_duplicate_symbols(versions)
-        self.check_llndk_introduced(versions)
         return versions
 
     def check_no_duplicate_symbols(self, versions: Iterable[Version]) -> None:
@@ -428,31 +399,6 @@ class SymbolFileParser:
         if multiply_defined_symbols:
             raise MultiplyDefinedSymbolError(
                 sorted(list(multiply_defined_symbols)))
-
-    def check_llndk_introduced(self, versions: Iterable[Version]) -> None:
-        """Raises errors when llndk= is missing for new llndk symbols."""
-        if not self.filter.llndk:
-            return
-
-        def assert_llndk_with_version(tags: Tags,  name: str) -> None:
-            has_llndk_introduced = False
-            for tag in tags:
-                if tag.startswith('llndk='):
-                    has_llndk_introduced = True
-                    break
-            if not has_llndk_introduced:
-                raise ParseError(f'{name}: missing version. `llndk=yyyymm`')
-
-        arch = self.filter.arch
-        for version in versions:
-            # llndk symbols >= introduced=35 should be tagged
-            # explicitly with llndk=yyyymm.
-            for symbol in version.symbols:
-                if not symbol.tags.has_llndk_tags:
-                    continue
-                if symbol_in_api(symbol.tags, arch, 34):
-                    continue
-                assert_llndk_with_version(symbol.tags, symbol.name)
 
     def parse_version(self) -> Version:
         """Parses a single version section and returns a Version object."""
@@ -487,9 +433,7 @@ class SymbolFileParser:
                 else:
                     raise ParseError('Unknown visiblity label: ' + visibility)
             elif global_scope and not cpp_symbols:
-                symbol = self.parse_symbol()
-                symbol.tags.copy_introduced_from(tags)
-                symbols.append(symbol)
+                symbols.append(self.parse_symbol())
             else:
                 # We're in a hidden scope or in 'extern "C++"' block. Ignore
                 # everything.

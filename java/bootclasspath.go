@@ -29,7 +29,7 @@ func init() {
 
 func registerBootclasspathBuildComponents(ctx android.RegistrationContext) {
 	ctx.FinalDepsMutators(func(ctx android.RegisterMutatorsContext) {
-		ctx.BottomUp("bootclasspath_deps", bootclasspathDepsMutator).Parallel()
+		ctx.BottomUp("bootclasspath_deps", bootclasspathDepsMutator)
 	})
 }
 

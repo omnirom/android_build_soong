@@ -10,7 +10,6 @@ bootstrap_go_package {
         "soong-android",
         "soong-tradefed",
         "soong-cc",
-        "soong-testing",
     ],
     srcs: [
         "binary.go",

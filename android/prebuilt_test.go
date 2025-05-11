@@ -508,11 +508,10 @@ func (p *prebuiltModule) Name() string {
 }
 
 func (p *prebuiltModule) GenerateAndroidBuildActions(ctx ModuleContext) {
-	var src Path
 	if len(p.properties.Srcs) >= 1 {
-		src = p.prebuilt.SingleSourcePath(ctx)
+		src := p.prebuilt.SingleSourcePath(ctx)
+		ctx.SetOutputFiles(Paths{src}, "")
 	}
-	ctx.SetOutputFiles(Paths{src}, "")
 }
 
 func (p *prebuiltModule) Prebuilt() *Prebuilt {

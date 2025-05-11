@@ -133,3 +133,39 @@ func TestErrorOnInstalledPathStartingWithSlash(t *testing.T) {
 		}
 	`)
 }
+
+var prepareForInstallSymlinkHostTest = android.GroupFixturePreparers(
+	android.PrepareForTestWithAndroidBuildComponents,
+	android.FixtureRegisterWithContext(RegisterInstallSymlinkBuildComponents),
+)
+
+func TestInstallSymlinkHostBasic(t *testing.T) {
+	result := prepareForInstallSymlinkHostTest.RunTestWithBp(t, `
+		install_symlink_host {
+			name: "foo",
+			installed_location: "bin/foo",
+			symlink_target: "aa/bb/cc",
+		}
+	`)
+
+	buildOS := result.Config.BuildOS.String()
+	foo := result.ModuleForTests("foo", buildOS+"_common").Module()
+
+	androidMkEntries := android.AndroidMkEntriesForTest(t, result.TestContext, foo)
+	if len(androidMkEntries) != 1 {
+		t.Fatalf("expected 1 androidmkentry, got %d", len(androidMkEntries))
+	}
+
+	symlinks := androidMkEntries[0].EntryMap["LOCAL_SOONG_INSTALL_SYMLINKS"]
+	if len(symlinks) != 1 {
+		t.Fatalf("Expected 1 symlink, got %d", len(symlinks))
+	}
+
+	if !strings.HasSuffix(symlinks[0], "bin/foo") {
+		t.Fatalf("Expected symlink install path to end in bin/foo, got: %s", symlinks[0])
+	}
+
+	if !strings.Contains(symlinks[0], "host") {
+		t.Fatalf("Expected symlink install path to contain `host`, got: %s", symlinks[0])
+	}
+}

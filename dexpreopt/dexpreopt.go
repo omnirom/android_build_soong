@@ -219,9 +219,9 @@ func GetSystemServerDexLocation(ctx android.PathContext, global *GlobalConfig, l
 }
 
 // Returns the location to the odex file for the dex file at `path`.
-func ToOdexPath(path string, arch android.ArchType) string {
+func ToOdexPath(path string, arch android.ArchType, partition string) string {
 	if strings.HasPrefix(path, "/apex/") {
-		return filepath.Join("/system/framework/oat", arch.String(),
+		return filepath.Join(partition, "framework/oat", arch.String(),
 			strings.ReplaceAll(path[1:], "/", "@")+"@classes.odex")
 	}
 
@@ -245,7 +245,7 @@ func dexpreoptCommand(ctx android.BuilderContext, globalSoong *GlobalSoongConfig
 
 	odexPath := module.BuildPath.InSameDir(ctx, "oat", arch.String(), pathtools.ReplaceExtension(base, "odex"))
 	odexSymbolsPath := odexPath.ReplaceExtension(ctx, "symbols.odex")
-	odexInstallPath := ToOdexPath(module.DexLocation, arch)
+	odexInstallPath := ToOdexPath(module.DexLocation, arch, module.ApexPartition)
 	if odexOnSystemOther(module, global) {
 		odexInstallPath = filepath.Join(SystemOtherPartition, odexInstallPath)
 	}

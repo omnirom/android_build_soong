@@ -96,6 +96,9 @@ message ReleaseConfigArtifact {
   // config.  The listed directories contain at least a `release_config` message
   // for this release config.
   repeated string value_directories = 8;
+
+  // The ReleaseConfigType of this release config.
+  optional ReleaseConfigType release_config_type = 9;
 }
 
 message ReleaseConfigsArtifact {

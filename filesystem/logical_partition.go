@@ -32,7 +32,7 @@ type logicalPartition struct {
 
 	properties logicalPartitionProperties
 
-	output     android.OutputPath
+	output     android.Path
 	installDir android.InstallPath
 }
 
@@ -95,11 +95,14 @@ func (l *logicalPartition) GenerateAndroidBuildActions(ctx android.ModuleContext
 	builder := android.NewRuleBuilder(pctx, ctx)
 
 	// Sparse the filesystem images and calculate their sizes
-	sparseImages := make(map[string]android.OutputPath)
-	sparseImageSizes := make(map[string]android.OutputPath)
+	sparseImages := make(map[string]android.Path)
+	sparseImageSizes := make(map[string]android.Path)
 
 	sparsePartitions := func(partitions []partitionProperties) {
 		for _, part := range partitions {
+			if part.Filesystem == nil {
+				continue
+			}
 			sparseImg, sizeTxt := sparseFilesystem(ctx, part, builder)
 			pName := proptools.String(part.Name)
 			sparseImages[pName] = sparseImg
@@ -185,31 +188,29 @@ func (l *logicalPartition) GenerateAndroidBuildActions(ctx android.ModuleContext
 		addPartitionsToGroup(group.Partitions, gName)
 	}
 
-	l.output = android.PathForModuleOut(ctx, l.installFileName()).OutputPath
-	cmd.FlagWithOutput("--output=", l.output)
+	output := android.PathForModuleOut(ctx, l.installFileName())
+	cmd.FlagWithOutput("--output=", output)
 
 	builder.Build("build_logical_partition", fmt.Sprintf("Creating %s", l.BaseModuleName()))
 
 	l.installDir = android.PathForModuleInstall(ctx, "etc")
-	ctx.InstallFile(l.installDir, l.installFileName(), l.output)
+	ctx.InstallFile(l.installDir, l.installFileName(), output)
 
-	ctx.SetOutputFiles([]android.Path{l.output}, "")
+	ctx.SetOutputFiles([]android.Path{output}, "")
+	l.output = output
 }
 
 // Add a rule that converts the filesystem for the given partition to the given rule builder. The
 // path to the sparse file and the text file having the size of the partition are returned.
-func sparseFilesystem(ctx android.ModuleContext, p partitionProperties, builder *android.RuleBuilder) (sparseImg android.OutputPath, sizeTxt android.OutputPath) {
-	if p.Filesystem == nil {
-		return
-	}
-	img := android.PathForModuleSrc(ctx, proptools.String(p.Filesystem))
+func sparseFilesystem(ctx android.ModuleContext, p partitionProperties, builder *android.RuleBuilder) (android.Path, android.Path) {
+	img := android.PathForModuleSrc(ctx, *p.Filesystem)
 	name := proptools.String(p.Name)
-	sparseImg = android.PathForModuleOut(ctx, name+".img").OutputPath
 
+	sparseImg := android.PathForModuleOut(ctx, name+".img")
 	builder.Temporary(sparseImg)
 	builder.Command().BuiltTool("img2simg").Input(img).Output(sparseImg)
 
-	sizeTxt = android.PathForModuleOut(ctx, name+"-size.txt").OutputPath
+	sizeTxt := android.PathForModuleOut(ctx, name+"-size.txt")
 	builder.Temporary(sizeTxt)
 	builder.Command().BuiltTool("sparse_img").Flag("--get_partition_size").Input(sparseImg).
 		Text("| ").Text("tr").FlagWithArg("-d ", "'\n'").

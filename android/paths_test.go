@@ -1592,6 +1592,12 @@ func TestPathRelativeToTop(t *testing.T) {
 	})
 }
 
+func TestDirectoryPathIsIncompatibleWithPath(t *testing.T) {
+	d := (DirectoryPath)(&directoryPath{})
+	_, ok := d.(Path)
+	AssertBoolEquals(t, "directoryPath shouldn't implement Path", ok, false)
+}
+
 func ExampleOutputPath_ReplaceExtension() {
 	ctx := &configErrorWrapper{
 		config: TestConfig("out", nil, "", nil),

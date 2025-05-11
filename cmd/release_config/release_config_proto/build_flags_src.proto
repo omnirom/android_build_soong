@@ -67,8 +67,8 @@ message FlagDeclaration {
   // Text description of the flag's purpose.
   optional string description = 3;
 
-  // reserve this for bug, if needed.
-  reserved 4;
+  // The bug number associated with the flag.
+  repeated string bugs = 4;
 
   // Value for the flag
   optional Value value = 201;
@@ -98,6 +98,24 @@ message FlagValue {
   optional bool redacted = 202;
 }
 
+enum ReleaseConfigType {
+  // This is treated as `RELEASE_CONFIG`.
+  CONFIG_TYPE_UNSPECIFIED = 0;
+
+  // This is a normal release config.  This is the only ReleaseConfigType with
+  // implicit inheritance.
+  RELEASE_CONFIG = 1;
+
+  // Same as RELEASE_CONFIG, except no implicit inheritance happens.
+  // This is the "root" release config.
+  EXPLICIT_INHERITANCE_CONFIG = 2;
+
+  // This is a release config applied based on the TARGET_BUILD_VARIANT
+  // environment variable, if the build flag RELEASE_BUILD_USE_VARIANT_FLAGS is
+  // enabled.
+  BUILD_VARIANT = 3;
+}
+
 // This replaces $(call declare-release-config).
 message ReleaseConfig {
   // The name of the release config.
@@ -117,6 +135,9 @@ message ReleaseConfig {
   // Prior stage(s) for flag advancement (during development).
   // Once a flag has met criteria in a prior stage, it can advance to this one.
   repeated string prior_stages = 5;
+
+  // The ReleaseConfigType of this release config.
+  optional ReleaseConfigType release_config_type = 6;
 }
 
 // Any aliases.  These are used for continuous integration builder config.

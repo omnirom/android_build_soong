@@ -17,8 +17,6 @@ package python
 import (
 	"fmt"
 
-	"android/soong/testing"
-
 	"github.com/google/blueprint/proptools"
 
 	"android/soong/android"
@@ -64,6 +62,11 @@ type TestProperties struct {
 	// list of files or filegroup modules that provide data that should be installed alongside
 	// the test
 	Data []string `android:"path,arch_variant"`
+
+	// Same as data, but will add dependencies on modules using the device's os variation and
+	// the common arch variation. Useful for a host test that wants to embed a module built for
+	// device.
+	Device_common_data []string `android:"path_device_common"`
 
 	// list of java modules that provide data that should be installed alongside the test.
 	Java_data []string
@@ -183,6 +186,9 @@ func (p *PythonTestModule) GenerateAndroidBuildActions(ctx android.ModuleContext
 	for _, dataSrcPath := range android.PathsForModuleSrc(ctx, p.testProperties.Data) {
 		p.data = append(p.data, android.DataPath{SrcPath: dataSrcPath})
 	}
+	for _, dataSrcPath := range android.PathsForModuleSrc(ctx, p.testProperties.Device_common_data) {
+		p.data = append(p.data, android.DataPath{SrcPath: dataSrcPath})
+	}
 
 	if p.isTestHost() && len(p.testProperties.Data_device_bins_both) > 0 {
 		ctx.VisitDirectDepsWithTag(dataDeviceBinsTag, func(dep android.Module) {
@@ -200,8 +206,6 @@ func (p *PythonTestModule) GenerateAndroidBuildActions(ctx android.ModuleContext
 	installDir := installDir(ctx, "nativetest", "nativetest64", ctx.ModuleName())
 	installedData := ctx.InstallTestData(installDir, p.data)
 	p.installedDest = ctx.InstallFile(installDir, p.installSource.Base(), p.installSource, installedData...)
-
-	android.SetProvider(ctx, testing.TestModuleProviderKey, testing.TestModuleProviderData{})
 }
 
 func (p *PythonTestModule) AndroidMkEntries() []android.AndroidMkEntries {

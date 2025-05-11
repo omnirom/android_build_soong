@@ -107,7 +107,7 @@ func aconfigUpdateAndroidBuildActions(ctx ModuleContext) {
 	mergedAconfigFiles := make(map[string]Paths)
 	mergedModeInfos := make(map[string]ModeInfo)
 
-	ctx.VisitDirectDepsIgnoreBlueprint(func(module Module) {
+	ctx.VisitDirectDepsProxy(func(module ModuleProxy) {
 		if aconfig_dep, ok := OtherModuleProvider(ctx, module, CodegenInfoProvider); ok && len(aconfig_dep.ModeInfos) > 0 {
 			maps.Copy(mergedModeInfos, aconfig_dep.ModeInfos)
 		}

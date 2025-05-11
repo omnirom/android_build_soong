@@ -25,3 +25,53 @@ bootstrap_go_package {
     // Used by plugins
     visibility: ["//visibility:public"],
 }
+
+genrule {
+    name: "nsjail_genrule_test_input",
+    cmd: "echo nsjail_genrule_test_input > $(out)",
+    out: ["nsjail_genrule_test_input.txt"],
+}
+
+// Pseudo-test that's run on checkbuilds to verify consistent directory
+// structure for genrules using sbox or nsjail.
+genrule_defaults {
+    name: "nsjail_genrule_test_gen_defaults",
+    // verify both relative paths and its contents
+    cmd: "(echo $(out) $(genDir) && sha256sum " +
+        "$(location get_clang_version) " +
+        "$(location py3-cmd) " +
+        "$(location genrule.go) " +
+        "$(location :nsjail_genrule_test_input) " +
+        "$(locations *.go)) | sed 's@\\./@@g' > $(out)",
+    tools: [
+        "get_clang_version", // random tool
+        "py3-cmd", // random prebuilt tool
+    ],
+    tool_files: ["genrule.go"], // random local file
+    srcs: [
+        ":nsjail_genrule_test_input", // random OutputFileProducer
+        "*.go", // random glob
+    ],
+    out: ["nsjail_genrule_test.txt"],
+}
+
+genrule {
+    name: "nsjail_genrule_test_gen_without_nsjail",
+    defaults: ["nsjail_genrule_test_gen_defaults"],
+}
+
+genrule {
+    name: "nsjail_genrule_test_gen_with_nsjail",
+    defaults: ["nsjail_genrule_test_gen_defaults"],
+    use_nsjail: true,
+}
+
+genrule {
+    name: "nsjail_genrule_test",
+    srcs: [
+        ":nsjail_genrule_test_gen_without_nsjail",
+        ":nsjail_genrule_test_gen_with_nsjail",
+    ],
+    cmd: "diff $(in) > $(out)",
+    out: ["nsjail_genrule_test"],
+}

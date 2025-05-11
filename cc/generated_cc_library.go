@@ -18,7 +18,7 @@ import (
 	"android/soong/android"
 )
 
-func GeneratedCcLibraryModuleFactory(moduleName string, callbacks Generator) android.Module {
+func GeneratedCcLibraryModuleFactory(callbacks Generator) android.Module {
 	module, _ := NewLibrary(android.HostAndDeviceSupported)
 
 	// Can be used as both a static and a shared library.

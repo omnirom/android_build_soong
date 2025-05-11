@@ -195,8 +195,7 @@ func TestGenerateDistContributionsForMake(t *testing.T) {
 $(if $(strip $(ALL_TARGETS.one.out.META_LIC)),,$(eval ALL_TARGETS.one.out.META_LIC := meta_lic))
 $(call dist-for-goals,my_goal,one.out:one.out)
 $(if $(strip $(ALL_TARGETS.two.out.META_LIC)),,$(eval ALL_TARGETS.two.out.META_LIC := meta_lic))
-$(call dist-for-goals,my_goal,two.out:other.out)
-`, strings.Join(makeOutput, ""))
+$(call dist-for-goals,my_goal,two.out:other.out)`, strings.Join(makeOutput, "\n"))
 }
 
 func TestGetDistForGoals(t *testing.T) {
@@ -235,28 +234,28 @@ func TestGetDistForGoals(t *testing.T) {
 			`
 
 	expectedAndroidMkLines := []string{
-		".PHONY: my_second_goal\n",
-		"$(if $(strip $(ALL_TARGETS.two.out.META_LIC)),,$(eval ALL_TARGETS.two.out.META_LIC := meta_lic))\n",
-		"$(call dist-for-goals,my_second_goal,two.out:two.out)\n",
-		"$(if $(strip $(ALL_TARGETS.three/four.out.META_LIC)),,$(eval ALL_TARGETS.three/four.out.META_LIC := meta_lic))\n",
-		"$(call dist-for-goals,my_second_goal,three/four.out:four.out)\n",
-		".PHONY: my_third_goal\n",
-		"$(if $(strip $(ALL_TARGETS.one.out.META_LIC)),,$(eval ALL_TARGETS.one.out.META_LIC := meta_lic))\n",
-		"$(call dist-for-goals,my_third_goal,one.out:test/dir/one.out)\n",
-		".PHONY: my_fourth_goal\n",
-		"$(if $(strip $(ALL_TARGETS.one.out.META_LIC)),,$(eval ALL_TARGETS.one.out.META_LIC := meta_lic))\n",
-		"$(call dist-for-goals,my_fourth_goal,one.out:one.suffix.out)\n",
-		".PHONY: my_fifth_goal\n",
-		"$(if $(strip $(ALL_TARGETS.one.out.META_LIC)),,$(eval ALL_TARGETS.one.out.META_LIC := meta_lic))\n",
-		"$(call dist-for-goals,my_fifth_goal,one.out:new-name)\n",
-		".PHONY: my_sixth_goal\n",
-		"$(if $(strip $(ALL_TARGETS.one.out.META_LIC)),,$(eval ALL_TARGETS.one.out.META_LIC := meta_lic))\n",
-		"$(call dist-for-goals,my_sixth_goal,one.out:some/dir/new-name.suffix)\n",
-		".PHONY: my_goal my_other_goal\n",
-		"$(if $(strip $(ALL_TARGETS.two.out.META_LIC)),,$(eval ALL_TARGETS.two.out.META_LIC := meta_lic))\n",
-		"$(call dist-for-goals,my_goal my_other_goal,two.out:two.out)\n",
-		"$(if $(strip $(ALL_TARGETS.three/four.out.META_LIC)),,$(eval ALL_TARGETS.three/four.out.META_LIC := meta_lic))\n",
-		"$(call dist-for-goals,my_goal my_other_goal,three/four.out:four.out)\n",
+		".PHONY: my_second_goal",
+		"$(if $(strip $(ALL_TARGETS.two.out.META_LIC)),,$(eval ALL_TARGETS.two.out.META_LIC := meta_lic))",
+		"$(call dist-for-goals,my_second_goal,two.out:two.out)",
+		"$(if $(strip $(ALL_TARGETS.three/four.out.META_LIC)),,$(eval ALL_TARGETS.three/four.out.META_LIC := meta_lic))",
+		"$(call dist-for-goals,my_second_goal,three/four.out:four.out)",
+		".PHONY: my_third_goal",
+		"$(if $(strip $(ALL_TARGETS.one.out.META_LIC)),,$(eval ALL_TARGETS.one.out.META_LIC := meta_lic))",
+		"$(call dist-for-goals,my_third_goal,one.out:test/dir/one.out)",
+		".PHONY: my_fourth_goal",
+		"$(if $(strip $(ALL_TARGETS.one.out.META_LIC)),,$(eval ALL_TARGETS.one.out.META_LIC := meta_lic))",
+		"$(call dist-for-goals,my_fourth_goal,one.out:one.suffix.out)",
+		".PHONY: my_fifth_goal",
+		"$(if $(strip $(ALL_TARGETS.one.out.META_LIC)),,$(eval ALL_TARGETS.one.out.META_LIC := meta_lic))",
+		"$(call dist-for-goals,my_fifth_goal,one.out:new-name)",
+		".PHONY: my_sixth_goal",
+		"$(if $(strip $(ALL_TARGETS.one.out.META_LIC)),,$(eval ALL_TARGETS.one.out.META_LIC := meta_lic))",
+		"$(call dist-for-goals,my_sixth_goal,one.out:some/dir/new-name.suffix)",
+		".PHONY: my_goal my_other_goal",
+		"$(if $(strip $(ALL_TARGETS.two.out.META_LIC)),,$(eval ALL_TARGETS.two.out.META_LIC := meta_lic))",
+		"$(call dist-for-goals,my_goal my_other_goal,two.out:two.out)",
+		"$(if $(strip $(ALL_TARGETS.three/four.out.META_LIC)),,$(eval ALL_TARGETS.three/four.out.META_LIC := meta_lic))",
+		"$(call dist-for-goals,my_goal my_other_goal,three/four.out:four.out)",
 	}
 
 	ctx, module := buildContextAndCustomModuleFoo(t, bp)

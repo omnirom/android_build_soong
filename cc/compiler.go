@@ -78,11 +78,11 @@ type BaseCompilerProperties struct {
 	// If possible, don't use this.  If adding paths from the current directory use
 	// local_include_dirs, if adding paths from other modules use export_include_dirs in
 	// that module.
-	Include_dirs []string `android:"arch_variant,variant_prepend"`
+	Include_dirs proptools.Configurable[[]string] `android:"arch_variant,variant_prepend"`
 
 	// list of directories relative to the Blueprints file that will
 	// be added to the include path using -I
-	Local_include_dirs []string `android:"arch_variant,variant_prepend"`
+	Local_include_dirs proptools.Configurable[[]string] `android:"arch_variant,variant_prepend"`
 
 	// Add the directory containing the Android.bp file to the list of include
 	// directories. Defaults to true.
@@ -99,6 +99,11 @@ type BaseCompilerProperties struct {
 	// list of generated headers to add to the include path. These are the names
 	// of genrule modules.
 	Generated_headers proptools.Configurable[[]string] `android:"arch_variant,variant_prepend"`
+
+	// Same as generated_headers, but the dependencies will be added based on the first supported
+	// arch variant and the device os variant. This can be useful for creating a host tool that
+	// embeds a copy of a device tool, that it then extracts and pushes to a device at runtime.
+	Device_first_generated_headers proptools.Configurable[[]string] `android:"arch_variant,variant_prepend"`
 
 	// pass -frtti instead of -fno-rtti
 	Rtti *bool `android:"arch_variant"`
@@ -228,9 +233,6 @@ type BaseCompilerProperties struct {
 		Static *bool `android:"arch_variant"`
 	} `android:"arch_variant"`
 
-	// Stores the original list of source files before being cleared by library reuse
-	OriginalSrcs proptools.Configurable[[]string] `blueprint:"mutated"`
-
 	// Build and link with OpenMP
 	Openmp *bool `android:"arch_variant"`
 }
@@ -297,6 +299,7 @@ func (compiler *baseCompiler) compilerDeps(ctx DepsContext, deps Deps) Deps {
 	deps.GeneratedSources = append(deps.GeneratedSources, compiler.Properties.Generated_sources...)
 	deps.GeneratedSources = removeListFromList(deps.GeneratedSources, compiler.Properties.Exclude_generated_sources)
 	deps.GeneratedHeaders = append(deps.GeneratedHeaders, compiler.Properties.Generated_headers.GetOrDefault(ctx, nil)...)
+	deps.DeviceFirstGeneratedHeaders = append(deps.DeviceFirstGeneratedHeaders, compiler.Properties.Device_first_generated_headers.GetOrDefault(ctx, nil)...)
 	deps.AidlLibs = append(deps.AidlLibs, compiler.Properties.Aidl.Libs...)
 
 	android.ProtoDeps(ctx, &compiler.Proto)
@@ -363,10 +366,20 @@ func (compiler *baseCompiler) compilerFlags(ctx ModuleContext, flags Flags, deps
 	tc := ctx.toolchain()
 	modulePath := ctx.ModuleDir()
 
-	srcs := compiler.Properties.Srcs.GetOrDefault(ctx, nil)
-	exclude_srcs := compiler.Properties.Exclude_srcs.GetOrDefault(ctx, nil)
-	compiler.srcsBeforeGen = android.PathsForModuleSrcExcludes(ctx, srcs, exclude_srcs)
-	compiler.srcsBeforeGen = append(compiler.srcsBeforeGen, deps.GeneratedSources...)
+	reuseObjs := false
+	if len(ctx.GetDirectDepsWithTag(reuseObjTag)) > 0 {
+		reuseObjs = true
+	}
+
+	// If a reuseObjTag dependency exists then this module is reusing the objects (generally the shared variant
+	// reusing objects from the static variant), and doesn't need to compile any sources of its own.
+	var srcs []string
+	if !reuseObjs {
+		srcs = compiler.Properties.Srcs.GetOrDefault(ctx, nil)
+		exclude_srcs := compiler.Properties.Exclude_srcs.GetOrDefault(ctx, nil)
+		compiler.srcsBeforeGen = android.PathsForModuleSrcExcludes(ctx, srcs, exclude_srcs)
+		compiler.srcsBeforeGen = append(compiler.srcsBeforeGen, deps.GeneratedSources...)
+	}
 
 	cflags := compiler.Properties.Cflags.GetOrDefault(ctx, nil)
 	cppflags := compiler.Properties.Cppflags.GetOrDefault(ctx, nil)
@@ -398,13 +411,13 @@ func (compiler *baseCompiler) compilerFlags(ctx ModuleContext, flags Flags, deps
 	}
 
 	// Include dir cflags
-	localIncludeDirs := android.PathsForModuleSrc(ctx, compiler.Properties.Local_include_dirs)
+	localIncludeDirs := android.PathsForModuleSrc(ctx, compiler.Properties.Local_include_dirs.GetOrDefault(ctx, nil))
 	if len(localIncludeDirs) > 0 {
 		f := includeDirsToFlags(localIncludeDirs)
 		flags.Local.CommonFlags = append(flags.Local.CommonFlags, f)
 		flags.Local.YasmFlags = append(flags.Local.YasmFlags, f)
 	}
-	rootIncludeDirs := android.PathsForSource(ctx, compiler.Properties.Include_dirs)
+	rootIncludeDirs := android.PathsForSource(ctx, compiler.Properties.Include_dirs.GetOrDefault(ctx, nil))
 	if len(rootIncludeDirs) > 0 {
 		f := includeDirsToFlags(rootIncludeDirs)
 		flags.Local.CommonFlags = append(flags.Local.CommonFlags, f)
@@ -423,32 +436,34 @@ func (compiler *baseCompiler) compilerFlags(ctx ModuleContext, flags Flags, deps
 	}
 
 	if ctx.useSdk() {
-		// TODO: Switch to --sysroot.
 		// The NDK headers are installed to a common sysroot. While a more
 		// typical Soong approach would be to only make the headers for the
 		// library you're using available, we're trying to emulate the NDK
 		// behavior here, and the NDK always has all the NDK headers available.
 		flags.SystemIncludeFlags = append(flags.SystemIncludeFlags,
-			"-isystem "+getCurrentIncludePath(ctx).String(),
-			"-isystem "+getCurrentIncludePath(ctx).Join(ctx, config.NDKTriple(tc)).String())
+			"--sysroot "+getNdkSysrootBase(ctx).String())
+	} else if ctx.Device() {
+		flags.Global.CommonFlags = append(flags.Global.CFlags, "-nostdlibinc")
 	}
 
 	if ctx.InVendorOrProduct() {
 		flags.Global.CommonFlags = append(flags.Global.CommonFlags, "-D__ANDROID_VNDK__")
 		if ctx.inVendor() {
 			flags.Global.CommonFlags = append(flags.Global.CommonFlags, "-D__ANDROID_VENDOR__")
-
-			vendorApiLevel := ctx.Config().VendorApiLevel()
-			if vendorApiLevel == "" {
-				// TODO(b/314036847): This is a fallback for UDC targets.
-				// This must be a build failure when UDC is no longer built
-				// from this source tree.
-				vendorApiLevel = ctx.Config().PlatformSdkVersion().String()
-			}
-			flags.Global.CommonFlags = append(flags.Global.CommonFlags, "-D__ANDROID_VENDOR_API__="+vendorApiLevel)
 		} else if ctx.inProduct() {
 			flags.Global.CommonFlags = append(flags.Global.CommonFlags, "-D__ANDROID_PRODUCT__")
 		}
+
+		// Define __ANDROID_VENDOR_API__ for both product and vendor variants
+		// because they both use the same LLNDK libraries.
+		vendorApiLevel := ctx.Config().VendorApiLevel()
+		if vendorApiLevel == "" {
+			// TODO(b/314036847): This is a fallback for UDC targets.
+			// This must be a build failure when UDC is no longer built
+			// from this source tree.
+			vendorApiLevel = ctx.Config().PlatformSdkVersion().String()
+		}
+		flags.Global.CommonFlags = append(flags.Global.CommonFlags, "-D__ANDROID_VENDOR_API__="+vendorApiLevel)
 	}
 
 	if ctx.inRecovery() {
@@ -670,10 +685,10 @@ func (compiler *baseCompiler) compilerFlags(ctx ModuleContext, flags Flags, deps
 	if len(srcs) > 0 {
 		module := ctx.ModuleDir() + "/Android.bp:" + ctx.ModuleName()
 		if inList("-Wno-error", flags.Local.CFlags) || inList("-Wno-error", flags.Local.CppFlags) {
-			addToModuleList(ctx, modulesUsingWnoErrorKey, module)
+			ctx.getOrCreateMakeVarsInfo().UsingWnoError = module
 		} else if !inList("-Werror", flags.Local.CFlags) && !inList("-Werror", flags.Local.CppFlags) {
 			if warningsAreAllowed(ctx.ModuleDir()) {
-				addToModuleList(ctx, modulesWarningsAllowedKey, module)
+				ctx.getOrCreateMakeVarsInfo().WarningsAllowed = module
 			} else {
 				flags.Local.CFlags = append([]string{"-Werror"}, flags.Local.CFlags...)
 			}
@@ -686,7 +701,9 @@ func (compiler *baseCompiler) compilerFlags(ctx ModuleContext, flags Flags, deps
 
 	if ctx.optimizeForSize() {
 		flags.Local.CFlags = append(flags.Local.CFlags, "-Oz")
-		flags.Local.LdFlags = append(flags.Local.LdFlags, "-Wl,-mllvm,-enable-ml-inliner=release")
+		if !ctx.Config().IsEnvFalse("THINLTO_USE_MLGO") {
+			flags.Local.LdFlags = append(flags.Local.LdFlags, "-Wl,-mllvm,-enable-ml-inliner=release")
+		}
 	}
 
 	// Exclude directories from manual binder interface allowed list.
@@ -715,11 +732,6 @@ func (compiler *baseCompiler) hasSrcExt(ctx BaseModuleContext, ext string) bool 
 		}
 	}
 	for _, src := range compiler.Properties.Srcs.GetOrDefault(ctx, nil) {
-		if filepath.Ext(src) == ext {
-			return true
-		}
-	}
-	for _, src := range compiler.Properties.OriginalSrcs.GetOrDefault(ctx, nil) {
 		if filepath.Ext(src) == ext {
 			return true
 		}
@@ -795,7 +807,7 @@ func compileObjs(ctx ModuleContext, flags builderFlags, subdir string,
 type RustBindgenClangProperties struct {
 	// list of directories relative to the Blueprints file that will
 	// be added to the include path using -I
-	Local_include_dirs []string `android:"arch_variant,variant_prepend"`
+	Local_include_dirs proptools.Configurable[[]string] `android:"arch_variant,variant_prepend"`
 
 	// list of static libraries that provide headers for this binding.
 	Static_libs proptools.Configurable[[]string] `android:"arch_variant,variant_prepend"`

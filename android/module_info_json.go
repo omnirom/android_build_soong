@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/google/blueprint"
+	"github.com/google/blueprint/gobtools"
 )
 
 type CoreModuleInfoJSON struct {
@@ -20,8 +21,7 @@ type CoreModuleInfoJSON struct {
 	Required           []string `json:"required,omitempty"`            // $(sort $(ALL_MODULES.$(m).REQUIRED_FROM_TARGET))
 }
 
-type ModuleInfoJSON struct {
-	core                CoreModuleInfoJSON
+type ExtraModuleInfoJSON struct {
 	SubName             string   `json:"-"`
 	Uninstallable       bool     `json:"-"`
 	Class               []string `json:"class,omitempty"`                 // $(sort $(ALL_MODULES.$(m).CLASS))
@@ -45,6 +45,11 @@ type ModuleInfoJSON struct {
 	TestConfig          []string `json:"test_config,omitempty"`          // $(strip $(ALL_MODULES.$(m).TEST_CONFIG) $(ALL_MODULES.$(m).EXTRA_TEST_CONFIGS)
 }
 
+type ModuleInfoJSON struct {
+	core CoreModuleInfoJSON
+	ExtraModuleInfoJSON
+}
+
 //ALL_DEPS.$(LOCAL_MODULE).ALL_DEPS := $(sort \
 //$(ALL_DEPS.$(LOCAL_MODULE).ALL_DEPS) \
 //$(LOCAL_STATIC_LIBRARIES) \
@@ -60,7 +65,7 @@ type ModuleInfoJSON struct {
 
 type combinedModuleInfoJSON struct {
 	*CoreModuleInfoJSON
-	*ModuleInfoJSON
+	*ExtraModuleInfoJSON
 }
 
 func encodeModuleInfoJSON(w io.Writer, moduleInfoJSON *ModuleInfoJSON) error {
@@ -99,7 +104,27 @@ func encodeModuleInfoJSON(w io.Writer, moduleInfoJSON *ModuleInfoJSON) error {
 	sortAndUnique(&moduleInfoJSONCopy.TestConfig)
 
 	encoder := json.NewEncoder(w)
-	return encoder.Encode(combinedModuleInfoJSON{&moduleInfoJSONCopy.core, &moduleInfoJSONCopy})
+	return encoder.Encode(combinedModuleInfoJSON{&moduleInfoJSONCopy.core, &moduleInfoJSONCopy.ExtraModuleInfoJSON})
+}
+
+func (p *ModuleInfoJSON) ToGob() *combinedModuleInfoJSON {
+	return &combinedModuleInfoJSON{
+		CoreModuleInfoJSON:  &p.core,
+		ExtraModuleInfoJSON: &p.ExtraModuleInfoJSON,
+	}
+}
+
+func (p *ModuleInfoJSON) FromGob(data *combinedModuleInfoJSON) {
+	p.core = *data.CoreModuleInfoJSON
+	p.ExtraModuleInfoJSON = *data.ExtraModuleInfoJSON
+}
+
+func (m *ModuleInfoJSON) GobEncode() ([]byte, error) {
+	return gobtools.CustomGobEncode[combinedModuleInfoJSON](m)
+}
+
+func (m *ModuleInfoJSON) GobDecode(data []byte) error {
+	return gobtools.CustomGobDecode[combinedModuleInfoJSON](data, m)
 }
 
 var ModuleInfoJSONProvider = blueprint.NewProvider[*ModuleInfoJSON]()

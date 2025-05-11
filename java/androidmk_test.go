@@ -286,7 +286,7 @@ func TestJniAsRequiredDeps(t *testing.T) {
 	}{
 		{
 			name:     "app",
-			expected: []string{"libjni"},
+			expected: []string{"libjni:64"},
 		},
 		{
 			name:     "app_embedded",

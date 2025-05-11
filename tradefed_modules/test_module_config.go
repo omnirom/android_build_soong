@@ -196,7 +196,7 @@ func TestModuleConfigFactory() android.Module {
 	module := &testModuleConfigModule{}
 
 	module.AddProperties(&module.tradefedProperties)
-	android.InitAndroidArchModule(module, android.DeviceSupported, android.MultilibCommon)
+	android.InitAndroidArchModule(module, android.DeviceSupported, android.MultilibFirst)
 	android.InitDefaultableModule(module)
 
 	return module
@@ -216,13 +216,28 @@ func TestModuleConfigHostFactory() android.Module {
 // Implements android.AndroidMkEntriesProvider
 var _ android.AndroidMkEntriesProvider = (*testModuleConfigModule)(nil)
 
+func (m *testModuleConfigModule) nativeExtraEntries(entries *android.AndroidMkEntries) {
+	// TODO(ron) provider for suffix and STEM?
+	entries.SetString("LOCAL_MODULE_SUFFIX", "")
+	// Should the stem and path use the base name or our module name?
+	entries.SetString("LOCAL_MODULE_STEM", m.provider.OutputFile.Rel())
+	entries.SetPath("LOCAL_MODULE_PATH", m.provider.InstallDir)
+}
+
+func (m *testModuleConfigModule) javaExtraEntries(entries *android.AndroidMkEntries) {
+	// The app_prebuilt_internal.mk files try create a copy of the OutputFile as an .apk.
+	// Normally, this copies the "package.apk" from the intermediate directory here.
+	// To prevent the copy of the large apk and to prevent confusion with the real .apk we
+	// link to, we set the STEM here to a bogus name and we set OutputFile to a small file (our manifest).
+	// We do this so we don't have to add more conditionals to base_rules.mk
+	// soong_java_prebult has the same issue for .jars so use this in both module types.
+	entries.SetString("LOCAL_MODULE_STEM", fmt.Sprintf("UNUSED-%s", *m.Base))
+	entries.SetString("LOCAL_MODULE_TAGS", "tests")
+}
+
 func (m *testModuleConfigModule) AndroidMkEntries() []android.AndroidMkEntries {
-	appClass := "APPS"
-	include := "$(BUILD_SYSTEM)/soong_app_prebuilt.mk"
-	if m.isHost {
-		appClass = "JAVA_LIBRARIES"
-		include = "$(BUILD_SYSTEM)/soong_java_prebuilt.mk"
-	}
+	appClass := m.provider.MkAppClass
+	include := m.provider.MkInclude
 	return []android.AndroidMkEntries{{
 		Class:      appClass,
 		OutputFile: android.OptionalPathForPath(m.manifest),
@@ -231,7 +246,6 @@ func (m *testModuleConfigModule) AndroidMkEntries() []android.AndroidMkEntries {
 		ExtraEntries: []android.AndroidMkExtraEntriesFunc{
 			func(ctx android.AndroidMkExtraEntriesContext, entries *android.AndroidMkEntries) {
 				entries.SetPath("LOCAL_FULL_TEST_CONFIG", m.testConfig)
-				entries.SetString("LOCAL_MODULE_TAGS", "tests")
 				entries.SetString("LOCAL_TEST_MODULE_CONFIG_BASE", *m.Base)
 				if m.provider.LocalSdkVersion != "" {
 					entries.SetString("LOCAL_SDK_VERSION", m.provider.LocalSdkVersion)
@@ -244,13 +258,11 @@ func (m *testModuleConfigModule) AndroidMkEntries() []android.AndroidMkEntries {
 				entries.AddCompatibilityTestSuites(m.tradefedProperties.Test_suites...)
 				entries.AddStrings("LOCAL_HOST_REQUIRED_MODULES", m.provider.HostRequiredModuleNames...)
 
-				// The app_prebuilt_internal.mk files try create a copy of the OutputFile as an .apk.
-				// Normally, this copies the "package.apk" from the intermediate directory here.
-				// To prevent the copy of the large apk and to prevent confusion with the real .apk we
-				// link to, we set the STEM here to a bogus name and we set OutputFile to a small file (our manifest).
-				// We do this so we don't have to add more conditionals to base_rules.mk
-				// soong_java_prebult has the same issue for .jars so use this in both module types.
-				entries.SetString("LOCAL_MODULE_STEM", fmt.Sprintf("UNUSED-%s", *m.Base))
+				if m.provider.MkAppClass == "NATIVE_TESTS" {
+					m.nativeExtraEntries(entries)
+				} else {
+					m.javaExtraEntries(entries)
+				}
 
 				// In normal java/app modules, the module writes LOCAL_COMPATIBILITY_SUPPORT_FILES
 				// and then base_rules.mk ends up copying each of those dependencies from .intermediates to the install directory.
@@ -357,16 +369,19 @@ func (m *testModuleConfigModule) generateManifestAndConfig(ctx android.ModuleCon
 	// FrameworksServicesTests
 	// └── x86_64
 	//    └── FrameworksServicesTests.apk
-	symlinkName := fmt.Sprintf("%s/%s", ctx.DeviceConfig().DeviceArch(), baseApk.Base())
-	// Only android_test, not java_host_test puts the output in the DeviceArch dir.
-	if m.provider.IsHost || ctx.DeviceConfig().DeviceArch() == "" {
-		// testcases/CtsDevicePolicyManagerTestCases
-		// ├── CtsDevicePolicyManagerTestCases.jar
-		symlinkName = baseApk.Base()
+	if m.provider.MkAppClass != "NATIVE_TESTS" {
+		symlinkName := fmt.Sprintf("%s/%s", ctx.DeviceConfig().DeviceArch(), baseApk.Base())
+		// Only android_test, not java_host_test puts the output in the DeviceArch dir.
+		if m.provider.IsHost || ctx.DeviceConfig().DeviceArch() == "" {
+			// testcases/CtsDevicePolicyManagerTestCases
+			// ├── CtsDevicePolicyManagerTestCases.jar
+			symlinkName = baseApk.Base()
+		}
+
+		target := installedBaseRelativeToHere(symlinkName, *m.tradefedProperties.Base)
+		installedApk := ctx.InstallAbsoluteSymlink(installDir, symlinkName, target)
+		m.supportFiles = append(m.supportFiles, installedApk)
 	}
-	target := installedBaseRelativeToHere(symlinkName, *m.tradefedProperties.Base)
-	installedApk := ctx.InstallAbsoluteSymlink(installDir, symlinkName, target)
-	m.supportFiles = append(m.supportFiles, installedApk)
 
 	// 3) Symlink for all data deps
 	// And like this for data files and required modules
@@ -374,8 +389,7 @@ func (m *testModuleConfigModule) generateManifestAndConfig(ctx android.ModuleCon
 	// ├── data
 	// │   └── broken_shortcut.xml
 	// ├── JobTestApp.apk
-	for _, f := range m.provider.InstalledFiles {
-		symlinkName := f.Rel()
+	for _, symlinkName := range m.provider.TestcaseRelDataFiles {
 		target := installedBaseRelativeToHere(symlinkName, *m.tradefedProperties.Base)
 		installedPath := ctx.InstallAbsoluteSymlink(installDir, symlinkName, target)
 		m.supportFiles = append(m.supportFiles, installedPath)
@@ -383,9 +397,30 @@ func (m *testModuleConfigModule) generateManifestAndConfig(ctx android.ModuleCon
 
 	// 4) Module.config / AndroidTest.xml
 	m.testConfig = m.fixTestConfig(ctx, m.provider.TestConfig)
+
+	// 5) We provide so we can be listed in test_suites.
+	android.SetProvider(ctx, tradefed.BaseTestProviderKey, tradefed.BaseTestProviderData{
+		TestcaseRelDataFiles:    testcaseRel(m.supportFiles.Paths()),
+		OutputFile:              baseApk,
+		TestConfig:              m.testConfig,
+		HostRequiredModuleNames: m.provider.HostRequiredModuleNames,
+		RequiredModuleNames:     m.provider.RequiredModuleNames,
+		TestSuites:              m.tradefedProperties.Test_suites,
+		IsHost:                  m.provider.IsHost,
+		LocalCertificate:        m.provider.LocalCertificate,
+		IsUnitTest:              m.provider.IsUnitTest,
+	})
 }
 
 var _ android.AndroidMkEntriesProvider = (*testModuleConfigHostModule)(nil)
+
+func testcaseRel(paths android.Paths) []string {
+	relPaths := []string{}
+	for _, p := range paths {
+		relPaths = append(relPaths, p.Rel())
+	}
+	return relPaths
+}
 
 // Given a relative path to a file in the current directory or a subdirectory,
 // return a relative path under our sibling directory named `base`.

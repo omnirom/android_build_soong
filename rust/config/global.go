@@ -15,6 +15,7 @@
 package config
 
 import (
+	"fmt"
 	"strings"
 
 	"android/soong/android"
@@ -92,6 +93,16 @@ var (
 		"-Wl,--compress-debug-sections=zstd",
 	}
 )
+
+func RustPath(ctx android.PathContext) string {
+	// I can't see any way to flatten the static variable inside Soong, so this
+	// reproduces the init logic.
+	var RustBase string = RustDefaultBase
+	if override := ctx.Config().Getenv("RUST_PREBUILTS_BASE"); override != "" {
+		RustBase = override
+	}
+	return fmt.Sprintf("%s/%s/%s", RustBase, HostPrebuiltTag(ctx.Config()), GetRustVersion(ctx))
+}
 
 func init() {
 	pctx.SourcePathVariable("RustDefaultBase", RustDefaultBase)

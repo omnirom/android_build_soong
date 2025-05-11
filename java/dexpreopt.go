@@ -494,6 +494,12 @@ func (d *dexpreopter) dexpreopt(ctx android.ModuleContext, libName string, dexJa
 		PresignedPrebuilt: d.isPresignedPrebuilt,
 	}
 
+	if ctx.Config().InstallApexSystemServerDexpreoptSamePartition() {
+		dexpreoptConfig.ApexPartition = android.PathForModuleInstall(ctx).Partition()
+	} else {
+		dexpreoptConfig.ApexPartition = "system"
+	}
+
 	d.configPath = android.PathForModuleOut(ctx, "dexpreopt", dexJarStem, "dexpreopt.config")
 	dexpreopt.WriteModuleConfig(ctx, dexpreoptConfig, d.configPath)
 	ctx.CheckbuildFile(d.configPath)
@@ -556,7 +562,7 @@ func (d *dexpreopter) dexpreopt(ctx android.ModuleContext, libName string, dexJa
 	// TODO(b/346662300): Let dexpreopter generate the installPath for dexpreopt files instead of
 	// using the dex location to generate the installPath.
 	if isApexSystemServerJar {
-		dexpreoptPartition = "system"
+		dexpreoptPartition = dexpreoptConfig.ApexPartition
 	}
 	for _, install := range dexpreoptRule.Installs() {
 		// Remove the "/" prefix because the path should be relative to $ANDROID_PRODUCT_OUT.

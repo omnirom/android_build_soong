@@ -660,3 +660,13 @@ func (m *SyncMap[K, V]) LoadOrStore(key K, value V) (actual V, loaded bool) {
 	v, loaded := m.Map.LoadOrStore(key, value)
 	return v.(V), loaded
 }
+
+// AppendIfNotZero append the given value to the slice if it is not the zero value
+// for its type.
+func AppendIfNotZero[T comparable](slice []T, value T) []T {
+	var zeroValue T // Get the zero value of the type T
+	if value != zeroValue {
+		return append(slice, value)
+	}
+	return slice
+}

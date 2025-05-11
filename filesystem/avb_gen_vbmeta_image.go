@@ -28,7 +28,7 @@ type avbGenVbmetaImage struct {
 
 	properties avbGenVbmetaImageProperties
 
-	output     android.OutputPath
+	output     android.Path
 	installDir android.InstallPath
 }
 
@@ -78,11 +78,12 @@ func (a *avbGenVbmetaImage) GenerateAndroidBuildActions(ctx android.ModuleContex
 	}
 	cmd.FlagWithArg("--salt ", proptools.String(a.properties.Salt))
 
-	a.output = android.PathForModuleOut(ctx, a.installFileName()).OutputPath
-	cmd.FlagWithOutput("--output_vbmeta_image ", a.output)
+	output := android.PathForModuleOut(ctx, a.installFileName())
+	cmd.FlagWithOutput("--output_vbmeta_image ", output)
 	builder.Build("avbGenVbmetaImage", fmt.Sprintf("avbGenVbmetaImage %s", ctx.ModuleName()))
 
-	ctx.SetOutputFiles([]android.Path{a.output}, "")
+	ctx.SetOutputFiles([]android.Path{output}, "")
+	a.output = output
 }
 
 var _ android.AndroidMkEntriesProvider = (*avbGenVbmetaImage)(nil)

@@ -7,6 +7,7 @@ bootstrap_go_package {
     pkgPath: "android/soong/apex",
     deps: [
         "blueprint",
+        "blueprint-bpmodify",
         "soong",
         "soong-aconfig",
         "soong-aconfig-codegen",
@@ -33,6 +34,7 @@ bootstrap_go_package {
         "vndk.go",
     ],
     testSrcs: [
+        "aconfig_test.go",
         "apex_test.go",
         "bootclasspath_fragment_test.go",
         "classpath_element_test.go",

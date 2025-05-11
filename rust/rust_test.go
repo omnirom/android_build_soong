@@ -494,7 +494,7 @@ func TestRustRlibs(t *testing.T) {
 	}
 
 	// Make sure the static lib is included in the ld command
-	if !strings.Contains(libcc_shared_ld.Args["libFlags"], "generated_rust_staticlib/liblibcc_shared_rust_staticlib.a") {
+	if !strings.Contains(libcc_shared_ld.Args["libFlags"], "generated_rust_staticlib/librustlibs.a") {
 		t.Errorf("missing generated static library in linker step libFlags %#v, libFlags: %#v",
 			"libcc_shared.generated_rust_staticlib.a", libcc_shared_ld.Args["libFlags"])
 	}
@@ -511,7 +511,7 @@ func TestRustRlibs(t *testing.T) {
 	}
 
 	// Make sure the static lib is included in the cc command
-	if !strings.Contains(ccbin_ld.Args["libFlags"], "generated_rust_staticlib/libccBin_rust_staticlib.a") {
+	if !strings.Contains(ccbin_ld.Args["libFlags"], "generated_rust_staticlib/librustlibs.a") {
 		t.Errorf("missing generated static library in linker step libFlags, expecting %#v, libFlags: %#v",
 			"ccBin.generated_rust_staticlib.a", ccbin_ld.Args["libFlags"])
 	}

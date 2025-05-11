@@ -45,6 +45,7 @@ func TestConfig(buildDir string, env map[string]string, bp string, fs map[string
 			Platform_version_active_codenames:   []string{"S", "Tiramisu"},
 			DeviceSystemSdkVersions:             []string{"29", "30", "S"},
 			Platform_systemsdk_versions:         []string{"29", "30", "S", "Tiramisu"},
+			VendorApiLevel:                      stringPtr("202404"),
 			AAPTConfig:                          []string{"normal", "large", "xlarge", "hdpi", "xhdpi", "xxhdpi"},
 			AAPTPreferredConfig:                 stringPtr("xhdpi"),
 			AAPTCharacteristics:                 stringPtr("nosdcard"),

@@ -15,7 +15,10 @@
 package android
 
 import (
+	"fmt"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 
 	"github.com/google/blueprint"
@@ -106,19 +109,19 @@ func moduleToPackageDefaultLicensesMap(config Config) *sync.Map {
 //
 // This goes before defaults expansion so the defaults can pick up the package default.
 func RegisterLicensesPackageMapper(ctx RegisterMutatorsContext) {
-	ctx.BottomUp("licensesPackageMapper", licensesPackageMapper).Parallel()
+	ctx.BottomUp("licensesPackageMapper", licensesPackageMapper)
 }
 
 // Registers the function that gathers the license dependencies for each module.
 //
 // This goes after defaults expansion so that it can pick up default licenses and before visibility enforcement.
 func RegisterLicensesPropertyGatherer(ctx RegisterMutatorsContext) {
-	ctx.BottomUp("licensesPropertyGatherer", licensesPropertyGatherer).Parallel()
+	ctx.BottomUp("licensesPropertyGatherer", licensesPropertyGatherer)
 }
 
 // Registers the function that verifies the licenses and license_kinds dependency types for each module.
 func RegisterLicensesDependencyChecker(ctx RegisterMutatorsContext) {
-	ctx.BottomUp("licensesPropertyChecker", licensesDependencyChecker).Parallel()
+	ctx.BottomUp("licensesPropertyChecker", licensesDependencyChecker)
 }
 
 // Maps each package to its default applicable licenses.
@@ -155,7 +158,25 @@ func licensesPropertyGatherer(ctx BottomUpMutatorContext) {
 	}
 
 	licenses := getLicenses(ctx, m)
-	ctx.AddVariationDependencies(nil, licensesTag, licenses...)
+
+	var fullyQualifiedLicenseNames []string
+	for _, license := range licenses {
+		fullyQualifiedLicenseName := license
+		if !strings.HasPrefix(license, "//") {
+			licenseModuleDir := ctx.OtherModuleDir(m)
+			for licenseModuleDir != "." && !ctx.OtherModuleExists(fmt.Sprintf("//%s:%s", licenseModuleDir, license)) {
+				licenseModuleDir = filepath.Dir(licenseModuleDir)
+			}
+			if licenseModuleDir == "." {
+				fullyQualifiedLicenseName = license
+			} else {
+				fullyQualifiedLicenseName = fmt.Sprintf("//%s:%s", licenseModuleDir, license)
+			}
+		}
+		fullyQualifiedLicenseNames = append(fullyQualifiedLicenseNames, fullyQualifiedLicenseName)
+	}
+
+	ctx.AddVariationDependencies(nil, licensesTag, fullyQualifiedLicenseNames...)
 }
 
 // Verifies the license and license_kind dependencies are each the correct kind of module.

@@ -186,7 +186,7 @@ func (b *bindgenDecorator) GenerateSource(ctx ModuleContext, deps PathDeps) andr
 	// Default clang flags
 	cflags = append(cflags, "${cc_config.CommonGlobalCflags}")
 	if ctx.Device() {
-		cflags = append(cflags, "${cc_config.DeviceGlobalCflags}")
+		cflags = append(cflags, "${cc_config.DeviceGlobalCflags}", "-nostdlibinc")
 	}
 
 	// Toolchain clang flags
@@ -198,18 +198,20 @@ func (b *bindgenDecorator) GenerateSource(ctx ModuleContext, deps PathDeps) andr
 		cflags = append(cflags, "-D__ANDROID_VNDK__")
 		if ctx.RustModule().InVendor() {
 			cflags = append(cflags, "-D__ANDROID_VENDOR__")
-
-			vendorApiLevel := ctx.Config().VendorApiLevel()
-			if vendorApiLevel == "" {
-				// TODO(b/314036847): This is a fallback for UDC targets.
-				// This must be a build failure when UDC is no longer built
-				// from this source tree.
-				vendorApiLevel = ctx.Config().PlatformSdkVersion().String()
-			}
-			cflags = append(cflags, "-D__ANDROID_VENDOR_API__="+vendorApiLevel)
 		} else if ctx.RustModule().InProduct() {
 			cflags = append(cflags, "-D__ANDROID_PRODUCT__")
 		}
+
+		// Define __ANDROID_VENDOR_API__ for both product and vendor variants
+		// because they both use the same LLNDK libraries.
+		vendorApiLevel := ctx.Config().VendorApiLevel()
+		if vendorApiLevel == "" {
+			// TODO(b/314036847): This is a fallback for UDC targets.
+			// This must be a build failure when UDC is no longer built
+			// from this source tree.
+			vendorApiLevel = ctx.Config().PlatformSdkVersion().String()
+		}
+		cflags = append(cflags, "-D__ANDROID_VENDOR_API__="+vendorApiLevel)
 	}
 
 	if ctx.RustModule().InRecovery() {
@@ -250,7 +252,7 @@ func (b *bindgenDecorator) GenerateSource(ctx ModuleContext, deps PathDeps) andr
 
 	// Module defined clang flags and include paths
 	cflags = append(cflags, esc(cflagsProp)...)
-	for _, include := range b.ClangProperties.Local_include_dirs {
+	for _, include := range b.ClangProperties.Local_include_dirs.GetOrDefault(ctx, nil) {
 		cflags = append(cflags, "-I"+android.PathForModuleSrc(ctx, include).String())
 		implicits = append(implicits, android.PathForModuleSrc(ctx, include))
 	}
@@ -297,6 +299,11 @@ func (b *bindgenDecorator) GenerateSource(ctx ModuleContext, deps PathDeps) andr
 	// The Clang version used by CXX can be newer than the one used by Bindgen, and uses warning related flags that
 	// it cannot recognize. Turn off unknown warning flags warning.
 	cflags = append(cflags, "-Wno-unknown-warning-option")
+
+	// Suppress warnings while testing a new compiler.
+	if ctx.Config().IsEnvTrue("LLVM_NEXT") {
+		cflags = append(cflags, "-Wno-everything")
+	}
 
 	outputFile := android.PathForModuleOut(ctx, b.BaseSourceProvider.getStem(ctx)+".rs")
 

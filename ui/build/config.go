@@ -30,6 +30,7 @@ import (
 	"syscall"
 	"time"
 
+	"android/soong/finder/fs"
 	"android/soong/shared"
 	"android/soong/ui/metrics"
 
@@ -68,7 +69,6 @@ type Config struct{ *configImpl }
 
 type configImpl struct {
 	// Some targets that are implemented in soong_build
-	// (bp2build, json-module-graph) are not here and have their own bits below.
 	arguments     []string
 	goma          bool
 	environ       *Environment
@@ -83,7 +83,6 @@ type configImpl struct {
 	checkbuild               bool
 	dist                     bool
 	jsonModuleGraph          bool
-	queryview                bool
 	reportMkMetrics          bool // Collect and report mk2bp migration progress metrics.
 	soongDocs                bool
 	skipConfig               bool
@@ -108,7 +107,9 @@ type configImpl struct {
 	sandboxConfig   *SandboxConfig
 
 	// Autodetected
-	totalRAM uint64
+	totalRAM      uint64
+	systemCpuInfo *metrics.CpuInfo
+	systemMemInfo *metrics.MemInfo
 
 	brokenDupRules       bool
 	brokenUsesNetwork    bool
@@ -239,6 +240,14 @@ func NewConfig(ctx Context, args ...string) Config {
 	ret.keepGoing = 1
 
 	ret.totalRAM = detectTotalRAM(ctx)
+	ret.systemCpuInfo, err = metrics.NewCpuInfo(fs.OsFs)
+	if err != nil {
+		ctx.Fatalln("Failed to get cpuinfo:", err)
+	}
+	ret.systemMemInfo, err = metrics.NewMemInfo(fs.OsFs)
+	if err != nil {
+		ctx.Fatalln("Failed to get meminfo:", err)
+	}
 	ret.parseArgs(ctx, args)
 
 	if ret.ninjaWeightListSource == HINT_FROM_SOONG {
@@ -295,6 +304,20 @@ func NewConfig(ctx Context, args ...string) Config {
 
 	if os.Getenv("GENERATE_SOONG_DEBUG") == "true" {
 		ret.moduleDebugFile, _ = filepath.Abs(shared.JoinPath(ret.SoongOutDir(), "soong-debug-info.json"))
+	}
+
+	// If SOONG_USE_PARTIAL_COMPILE is set, make it one of "true" or the empty string.
+	// This simplifies the generated Ninja rules, so that they only need to check for the empty string.
+	if value, ok := os.LookupEnv("SOONG_USE_PARTIAL_COMPILE"); ok {
+		if value == "true" || value == "1" || value == "y" || value == "yes" {
+			value = "true"
+		} else {
+			value = ""
+		}
+		err = os.Setenv("SOONG_USE_PARTIAL_COMPILE", value)
+		if err != nil {
+			ctx.Fatalln("Failed to set SOONG_USE_PARTIAL_COMPILE: %v", err)
+		}
 	}
 
 	ret.ninjaCommand = NINJA_NINJA
@@ -538,9 +561,23 @@ func storeConfigMetrics(ctx Context, config Config) {
 
 	ctx.Metrics.BuildConfig(buildConfig(config))
 
+	cpuInfo := &smpb.SystemCpuInfo{
+		VendorId:  proto.String(config.systemCpuInfo.VendorId),
+		ModelName: proto.String(config.systemCpuInfo.ModelName),
+		CpuCores:  proto.Int32(config.systemCpuInfo.CpuCores),
+		Flags:     proto.String(config.systemCpuInfo.Flags),
+	}
+	memInfo := &smpb.SystemMemInfo{
+		MemTotal:     proto.Uint64(config.systemMemInfo.MemTotal),
+		MemFree:      proto.Uint64(config.systemMemInfo.MemFree),
+		MemAvailable: proto.Uint64(config.systemMemInfo.MemAvailable),
+	}
+
 	s := &smpb.SystemResourceInfo{
 		TotalPhysicalMemory: proto.Uint64(config.TotalRAM()),
 		AvailableCpus:       proto.Int32(int32(runtime.NumCPU())),
+		CpuInfo:             cpuInfo,
+		MemInfo:             memInfo,
 	}
 	ctx.Metrics.SystemResourceInfo(s)
 }
@@ -897,8 +934,6 @@ func (c *configImpl) parseArgs(ctx Context, args []string) {
 			c.dist = true
 		} else if arg == "json-module-graph" {
 			c.jsonModuleGraph = true
-		} else if arg == "queryview" {
-			c.queryview = true
 		} else if arg == "soong_docs" {
 			c.soongDocs = true
 		} else {
@@ -993,7 +1028,7 @@ func (c *configImpl) SoongBuildInvocationNeeded() bool {
 		return true
 	}
 
-	if !c.JsonModuleGraph() && !c.Queryview() && !c.SoongDocs() {
+	if !c.JsonModuleGraph() && !c.SoongDocs() {
 		// Command line was empty, the default Ninja target is built
 		return true
 	}
@@ -1066,10 +1101,6 @@ func (c *configImpl) SoongDocsHtml() string {
 	return shared.JoinPath(c.SoongOutDir(), "docs/soong_build.html")
 }
 
-func (c *configImpl) QueryviewMarkerFile() string {
-	return shared.JoinPath(c.SoongOutDir(), "queryview.marker")
-}
-
 func (c *configImpl) ModuleGraphFile() string {
 	return shared.JoinPath(c.SoongOutDir(), "module-graph.json")
 }
@@ -1105,10 +1136,6 @@ func (c *configImpl) Dist() bool {
 
 func (c *configImpl) JsonModuleGraph() bool {
 	return c.jsonModuleGraph
-}
-
-func (c *configImpl) Queryview() bool {
-	return c.queryview
 }
 
 func (c *configImpl) SoongDocs() bool {
@@ -1327,7 +1354,7 @@ func (c *configImpl) sandboxPath(base, in string) string {
 
 func (c *configImpl) UseRBE() bool {
 	// These alternate modes of running Soong do not use RBE / reclient.
-	if c.Queryview() || c.JsonModuleGraph() {
+	if c.JsonModuleGraph() {
 		return false
 	}
 
@@ -1668,12 +1695,10 @@ func (c *configImpl) SisoBin() string {
 }
 
 func (c *configImpl) PrebuiltBuildTool(name string) string {
-	if v, ok := c.environ.Get("SANITIZE_HOST"); ok {
-		if sanitize := strings.Fields(v); inList("address", sanitize) {
-			asan := filepath.Join("prebuilts/build-tools", c.HostPrebuiltTag(), "asan/bin", name)
-			if _, err := os.Stat(asan); err == nil {
-				return asan
-			}
+	if c.environ.IsEnvTrue("SANITIZE_BUILD_TOOL_PREBUILTS") {
+		asan := filepath.Join("prebuilts/build-tools", c.HostPrebuiltTag(), "asan/bin", name)
+		if _, err := os.Stat(asan); err == nil {
+			return asan
 		}
 	}
 	return filepath.Join("prebuilts/build-tools", c.HostPrebuiltTag(), "bin", name)

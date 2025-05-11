@@ -32,6 +32,7 @@ var (
 				` ${declarations}` +
 				` ${values}` +
 				` ${default-permission}` +
+				` ${allow-read-write}` +
 				` --cache ${out}.tmp` +
 				` && ( if cmp -s ${out}.tmp ${out} ; then rm ${out}.tmp ; else mv ${out}.tmp ${out} ; fi )`,
 			//				` --build-id ${release_version}` +
@@ -39,7 +40,7 @@ var (
 				"${aconfig}",
 			},
 			Restat: true,
-		}, "release_version", "package", "container", "declarations", "values", "default-permission")
+		}, "release_version", "package", "container", "declarations", "values", "default-permission", "allow-read-write")
 
 	// For create-device-config-sysprops: Generate aconfig flag value map text file
 	aconfigTextRule = pctx.AndroidStaticRule("aconfig_text",

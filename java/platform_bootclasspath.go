@@ -24,7 +24,7 @@ func init() {
 }
 
 func registerPlatformBootclasspathBuildComponents(ctx android.RegistrationContext) {
-	ctx.RegisterParallelSingletonModuleType("platform_bootclasspath", platformBootclasspathFactory)
+	ctx.RegisterModuleType("platform_bootclasspath", platformBootclasspathFactory)
 }
 
 // The tags used for the dependencies between the platform bootclasspath and any configured boot
@@ -33,10 +33,11 @@ var (
 	platformBootclasspathArtBootJarDepTag  = bootclasspathDependencyTag{name: "art-boot-jar"}
 	platformBootclasspathBootJarDepTag     = bootclasspathDependencyTag{name: "platform-boot-jar"}
 	platformBootclasspathApexBootJarDepTag = bootclasspathDependencyTag{name: "apex-boot-jar"}
+	platformBootclasspathImplLibDepTag     = dependencyTag{name: "impl-lib-tag"}
 )
 
 type platformBootclasspathModule struct {
-	android.SingletonModuleBase
+	android.ModuleBase
 	ClasspathFragmentBase
 
 	properties platformBootclasspathProperties
@@ -63,7 +64,7 @@ type platformBootclasspathProperties struct {
 	HiddenAPIFlagFileProperties
 }
 
-func platformBootclasspathFactory() android.SingletonModule {
+func platformBootclasspathFactory() android.Module {
 	m := &platformBootclasspathModule{}
 	m.AddProperties(&m.properties)
 	initClasspathFragment(m, BOOTCLASSPATH)
@@ -111,12 +112,18 @@ func (b *platformBootclasspathModule) BootclasspathDepsMutator(ctx android.Botto
 	// Add dependencies on all the ART jars.
 	global := dexpreopt.GetGlobalConfig(ctx)
 	addDependenciesOntoSelectedBootImageApexes(ctx, "com.android.art")
+
+	var bootImageModuleNames []string
+
 	// TODO: b/308174306 - Remove the mechanism of depending on the java_sdk_library(_import) directly
 	addDependenciesOntoBootImageModules(ctx, global.ArtApexJars, platformBootclasspathArtBootJarDepTag)
+	bootImageModuleNames = append(bootImageModuleNames, global.ArtApexJars.CopyOfJars()...)
 
 	// Add dependencies on all the non-updatable jars, which are on the platform or in non-updatable
 	// APEXes.
-	addDependenciesOntoBootImageModules(ctx, b.platformJars(ctx), platformBootclasspathBootJarDepTag)
+	platformJars := b.platformJars(ctx)
+	addDependenciesOntoBootImageModules(ctx, platformJars, platformBootclasspathBootJarDepTag)
+	bootImageModuleNames = append(bootImageModuleNames, platformJars.CopyOfJars()...)
 
 	// Add dependencies on all the updatable jars, except the ART jars.
 	apexJars := dexpreopt.GetGlobalConfig(ctx).ApexBootJars
@@ -127,9 +134,17 @@ func (b *platformBootclasspathModule) BootclasspathDepsMutator(ctx android.Botto
 	addDependenciesOntoSelectedBootImageApexes(ctx, android.FirstUniqueStrings(apexes)...)
 	// TODO: b/308174306 - Remove the mechanism of depending on the java_sdk_library(_import) directly
 	addDependenciesOntoBootImageModules(ctx, apexJars, platformBootclasspathApexBootJarDepTag)
+	bootImageModuleNames = append(bootImageModuleNames, apexJars.CopyOfJars()...)
 
 	// Add dependencies on all the fragments.
 	b.properties.BootclasspathFragmentsDepsProperties.addDependenciesOntoFragments(ctx)
+
+	for _, bootImageModuleName := range bootImageModuleNames {
+		implLibName := implLibraryModuleName(bootImageModuleName)
+		if ctx.OtherModuleExists(implLibName) {
+			ctx.AddFarVariationDependencies(nil, platformBootclasspathImplLibDepTag, implLibName)
+		}
+	}
 }
 
 func addDependenciesOntoBootImageModules(ctx android.BottomUpMutatorContext, modules android.ConfiguredJarList, tag bootclasspathDependencyTag) {
@@ -139,18 +154,6 @@ func addDependenciesOntoBootImageModules(ctx android.BottomUpMutatorContext, mod
 
 		addDependencyOntoApexModulePair(ctx, apex, name, tag)
 	}
-}
-
-// GenerateSingletonBuildActions does nothing and must never do anything.
-//
-// This module only implements android.SingletonModule so that it can implement
-// android.SingletonMakeVarsProvider.
-func (b *platformBootclasspathModule) GenerateSingletonBuildActions(android.SingletonContext) {
-	// Keep empty
-}
-
-func (d *platformBootclasspathModule) MakeVars(ctx android.MakeVarsContext) {
-	d.generateHiddenApiMakeVars(ctx)
 }
 
 func (b *platformBootclasspathModule) GenerateAndroidBuildActions(ctx android.ModuleContext) {
@@ -166,17 +169,22 @@ func (b *platformBootclasspathModule) GenerateAndroidBuildActions(ctx android.Mo
 	allModules = append(allModules, apexModules...)
 	b.configuredModules = allModules
 
+	// Do not add implLibModule to allModules as the impl lib is only used to collect the
+	// transitive source files
+	var implLibModule []android.Module
+	ctx.VisitDirectDepsWithTag(implLibraryTag, func(m android.Module) {
+		implLibModule = append(implLibModule, m)
+	})
+
 	var transitiveSrcFiles android.Paths
-	for _, module := range allModules {
+	for _, module := range append(allModules, implLibModule...) {
 		if depInfo, ok := android.OtherModuleProvider(ctx, module, JavaInfoProvider); ok {
-			if depInfo.TransitiveSrcFiles != nil {
-				transitiveSrcFiles = append(transitiveSrcFiles, depInfo.TransitiveSrcFiles.ToList()...)
-			}
+			transitiveSrcFiles = append(transitiveSrcFiles, depInfo.TransitiveSrcFiles.ToList()...)
 		}
 	}
 	jarArgs := resourcePathsToJarArgs(transitiveSrcFiles)
 	jarArgs = append(jarArgs, "-srcjar") // Move srcfiles to the right package
-	srcjar := android.PathForModuleOut(ctx, ctx.ModuleName()+"-transitive.srcjar").OutputPath
+	srcjar := android.PathForModuleOut(ctx, ctx.ModuleName()+"-transitive.srcjar")
 	TransformResourcesToJar(ctx, srcjar, jarArgs, transitiveSrcFiles)
 
 	// Gather all the fragments dependencies.
@@ -407,14 +415,4 @@ func (b *platformBootclasspathModule) buildRuleMergeCSV(ctx android.ModuleContex
 		Inputs(inputPaths)
 
 	rule.Build(desc, desc)
-}
-
-// generateHiddenApiMakeVars generates make variables needed by hidden API related make rules, e.g.
-// veridex and run-appcompat.
-func (b *platformBootclasspathModule) generateHiddenApiMakeVars(ctx android.MakeVarsContext) {
-	if ctx.Config().IsEnvTrue("UNSAFE_DISABLE_HIDDENAPI_FLAGS") {
-		return
-	}
-	// INTERNAL_PLATFORM_HIDDENAPI_FLAGS is used by Make rules in art/ and cts/.
-	ctx.Strict("INTERNAL_PLATFORM_HIDDENAPI_FLAGS", b.hiddenAPIFlagsCSV.String())
 }

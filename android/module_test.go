@@ -998,6 +998,10 @@ func (p *pathContextAddMissingDependenciesWrapper) GetOutputFiles() OutputFilesI
 	return OutputFilesInfo{}
 }
 
+func (p *pathContextAddMissingDependenciesWrapper) EqualModules(m1, m2 Module) bool {
+	return m1 == m2
+}
+
 func TestOutputFileForModule(t *testing.T) {
 	testcases := []struct {
 		name        string
@@ -1079,4 +1083,30 @@ func TestOutputFileForModule(t *testing.T) {
 			AssertArrayString(t, "expected missing deps", tt.missingDeps, ctx.missingDeps)
 		})
 	}
+}
+
+func TestVintfFragmentModulesChecksPartition(t *testing.T) {
+	bp := `
+	vintf_fragment {
+		name: "vintfModA",
+		src: "test_vintf_file",
+		vendor: true,
+	}
+	deps {
+		name: "modA",
+		vintf_fragment_modules: [
+			"vintfModA",
+		]
+	}
+	`
+
+	testPreparer := GroupFixturePreparers(
+		PrepareForTestWithAndroidBuildComponents,
+		prepareForModuleTests,
+	)
+
+	testPreparer.
+		ExtendWithErrorHandler(FixtureExpectsOneErrorPattern(
+			"Module .+ and Vintf_fragment .+ are installed to different partitions.")).
+		RunTestWithBp(t, bp)
 }

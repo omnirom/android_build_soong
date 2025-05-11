@@ -15,6 +15,7 @@
 package android
 
 import (
+	"github.com/google/blueprint/depset"
 	"sort"
 	"strings"
 
@@ -61,13 +62,9 @@ func buildLicenseMetadata(ctx *moduleContext, licenseMetadataFile WritablePath) 
 	var allDepMetadataFiles Paths
 	var allDepMetadataArgs []string
 	var allDepOutputFiles Paths
-	var allDepMetadataDepSets []*DepSet[Path]
+	var allDepMetadataDepSets []depset.DepSet[Path]
 
-	ctx.VisitDirectDepsBlueprint(func(bpdep blueprint.Module) {
-		dep, _ := bpdep.(Module)
-		if dep == nil {
-			return
-		}
+	ctx.VisitDirectDeps(func(dep Module) {
 		if !dep.Enabled(ctx) {
 			return
 		}
@@ -137,7 +134,7 @@ func buildLicenseMetadata(ctx *moduleContext, licenseMetadataFile WritablePath) 
 		JoinWithPrefix(proptools.NinjaAndShellEscapeListIncludingSpaces(base.commonProperties.Effective_license_text.Strings()), "-n "))
 
 	if isContainer {
-		transitiveDeps := Paths(NewDepSet[Path](TOPOLOGICAL, nil, allDepMetadataDepSets).ToList())
+		transitiveDeps := Paths(depset.New[Path](depset.TOPOLOGICAL, nil, allDepMetadataDepSets).ToList())
 		args = append(args,
 			JoinWithPrefix(proptools.NinjaAndShellEscapeListIncludingSpaces(transitiveDeps.Strings()), "-d "))
 		orderOnlyDeps = append(orderOnlyDeps, transitiveDeps...)
@@ -180,7 +177,7 @@ func buildLicenseMetadata(ctx *moduleContext, licenseMetadataFile WritablePath) 
 
 	SetProvider(ctx, LicenseMetadataProvider, &LicenseMetadataInfo{
 		LicenseMetadataPath:   licenseMetadataFile,
-		LicenseMetadataDepSet: NewDepSet(TOPOLOGICAL, Paths{licenseMetadataFile}, allDepMetadataDepSets),
+		LicenseMetadataDepSet: depset.New(depset.TOPOLOGICAL, Paths{licenseMetadataFile}, allDepMetadataDepSets),
 	})
 }
 
@@ -208,7 +205,7 @@ var LicenseMetadataProvider = blueprint.NewProvider[*LicenseMetadataInfo]()
 // LicenseMetadataInfo stores the license metadata path for a module.
 type LicenseMetadataInfo struct {
 	LicenseMetadataPath   Path
-	LicenseMetadataDepSet *DepSet[Path]
+	LicenseMetadataDepSet depset.DepSet[Path]
 }
 
 // licenseAnnotationsFromTag returns the LicenseAnnotations for a tag (if any) converted into

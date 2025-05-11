@@ -17,6 +17,7 @@ package aidl_library
 import (
 	"android/soong/android"
 	"github.com/google/blueprint"
+	"github.com/google/blueprint/depset"
 	"github.com/google/blueprint/proptools"
 )
 
@@ -58,17 +59,17 @@ type AidlLibraryInfo struct {
 	// The direct aidl files of the module
 	Srcs android.Paths
 	// The include dirs to the direct aidl files and those provided from transitive aidl_library deps
-	IncludeDirs android.DepSet[android.Path]
+	IncludeDirs depset.DepSet[android.Path]
 	// The direct hdrs and hdrs from transitive deps
-	Hdrs android.DepSet[android.Path]
+	Hdrs depset.DepSet[android.Path]
 }
 
 // AidlLibraryProvider provides the srcs and the transitive include dirs
 var AidlLibraryProvider = blueprint.NewProvider[AidlLibraryInfo]()
 
 func (lib *AidlLibrary) GenerateAndroidBuildActions(ctx android.ModuleContext) {
-	includeDirsDepSetBuilder := android.NewDepSetBuilder[android.Path](android.PREORDER)
-	hdrsDepSetBuilder := android.NewDepSetBuilder[android.Path](android.PREORDER)
+	includeDirsDepSetBuilder := depset.NewBuilder[android.Path](depset.PREORDER)
+	hdrsDepSetBuilder := depset.NewBuilder[android.Path](depset.PREORDER)
 
 	if len(lib.properties.Srcs) == 0 && len(lib.properties.Hdrs) == 0 {
 		ctx.ModuleErrorf("at least srcs or hdrs prop must be non-empty")
@@ -100,15 +101,15 @@ func (lib *AidlLibrary) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 
 	for _, dep := range ctx.GetDirectDepsWithTag(aidlLibraryTag) {
 		if info, ok := android.OtherModuleProvider(ctx, dep, AidlLibraryProvider); ok {
-			includeDirsDepSetBuilder.Transitive(&info.IncludeDirs)
-			hdrsDepSetBuilder.Transitive(&info.Hdrs)
+			includeDirsDepSetBuilder.Transitive(info.IncludeDirs)
+			hdrsDepSetBuilder.Transitive(info.Hdrs)
 		}
 	}
 
 	android.SetProvider(ctx, AidlLibraryProvider, AidlLibraryInfo{
 		Srcs:        srcs,
-		IncludeDirs: *includeDirsDepSetBuilder.Build(),
-		Hdrs:        *hdrsDepSetBuilder.Build(),
+		IncludeDirs: includeDirsDepSetBuilder.Build(),
+		Hdrs:        hdrsDepSetBuilder.Build(),
 	})
 }
 

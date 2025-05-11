@@ -25,7 +25,7 @@ type vintfFragmentModule struct {
 	properties vintfFragmentProperties
 
 	installDirPath InstallPath
-	outputFilePath OutputPath
+	outputFilePath Path
 }
 
 func init() {
@@ -44,7 +44,7 @@ func vintfLibraryFactory() Module {
 	m.AddProperties(
 		&m.properties,
 	)
-	InitAndroidArchModule(m, DeviceSupported, MultilibFirst)
+	InitAndroidArchModule(m, DeviceSupported, MultilibCommon)
 
 	return m
 }
@@ -64,7 +64,7 @@ func (m *vintfFragmentModule) GenerateAndroidBuildActions(ctx ModuleContext) {
 	builder.Build("assemble_vintf", "Process vintf fragment "+processedVintfFragment.String())
 
 	m.installDirPath = PathForModuleInstall(ctx, "etc", "vintf", "manifest")
-	m.outputFilePath = processedVintfFragment.OutputPath
+	m.outputFilePath = processedVintfFragment
 
 	ctx.InstallFile(m.installDirPath, processedVintfFragment.Base(), processedVintfFragment)
 }

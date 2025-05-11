@@ -16,8 +16,6 @@
 #
 """A tool for modifying privileged permission allowlists."""
 
-from __future__ import print_function
-
 import argparse
 import sys
 from xml.dom import minidom

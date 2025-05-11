@@ -298,10 +298,10 @@ func TestPlatformBootclasspath_Dist(t *testing.T) {
 	platformBootclasspath := result.Module("platform-bootclasspath", "android_common").(*platformBootclasspathModule)
 	entries := android.AndroidMkEntriesForTest(t, result.TestContext, platformBootclasspath)
 	goals := entries[0].GetDistForGoals(platformBootclasspath)
-	android.AssertStringEquals(t, "platform dist goals phony", ".PHONY: droidcore\n", goals[0])
+	android.AssertStringEquals(t, "platform dist goals phony", ".PHONY: droidcore", goals[0])
 	android.AssertStringDoesContain(t, "platform dist goals meta check", goals[1], "$(if $(strip $(ALL_TARGETS.")
 	android.AssertStringDoesContain(t, "platform dist goals meta assign", goals[1], "),,$(eval ALL_TARGETS.")
-	android.AssertStringEquals(t, "platform dist goals call", "$(call dist-for-goals,droidcore,out/soong/hiddenapi/hiddenapi-flags.csv:hiddenapi-flags.csv)\n", android.StringRelativeToTop(result.Config, goals[2]))
+	android.AssertStringEquals(t, "platform dist goals call", "$(call dist-for-goals,droidcore,out/soong/hiddenapi/hiddenapi-flags.csv:hiddenapi-flags.csv)", android.StringRelativeToTop(result.Config, goals[2]))
 }
 
 func TestPlatformBootclasspath_HiddenAPIMonolithicFiles(t *testing.T) {

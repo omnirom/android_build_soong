@@ -170,6 +170,9 @@ func TransformSrctoRlib(ctx ModuleContext, mainSrc android.Path, deps PathDeps, 
 	return transformSrctoCrate(ctx, mainSrc, deps, flags, outputFile, getTransformProperties(ctx, "rlib"))
 }
 
+// TransformRlibstoStaticlib is assumed to be called from the cc module, and
+// thus needs to reconstruct the common set of flags which need to be passed
+// to the rustc compiler.
 func TransformRlibstoStaticlib(ctx android.ModuleContext, mainSrc android.Path, deps []cc.RustRlibDep,
 	outputFile android.WritablePath) android.Path {
 

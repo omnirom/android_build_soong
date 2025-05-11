@@ -41,6 +41,14 @@ type fileGroupProperties struct {
 
 	Exclude_srcs proptools.Configurable[[]string] `android:"path"`
 
+	// Sources the will be included in the filegroup, but any module dependencies will be added
+	// using the device os and the device's first architecture's variant.
+	Device_first_srcs proptools.Configurable[[]string] `android:"path_device_first"`
+
+	// Sources the will be included in the filegroup, but any module dependencies will be added
+	// using the device os and the common architecture's variant.
+	Device_common_srcs proptools.Configurable[[]string] `android:"path_device_common"`
+
 	// The base path to the files.  May be used by other modules to determine which portion
 	// of the path to use.  For example, when a filegroup is used as data in a cc_test rule,
 	// the base path is stripped off the path and the remaining path is used as the
@@ -90,11 +98,13 @@ func (fg *fileGroup) JSONActions() []blueprint.JSONAction {
 }
 
 func (fg *fileGroup) GenerateAndroidBuildActions(ctx ModuleContext) {
-	fg.srcs = PathsForModuleSrcExcludes(ctx, fg.properties.Srcs.GetOrDefault(ctx, nil), fg.properties.Exclude_srcs.GetOrDefault(ctx, nil))
+	srcs := PathsForModuleSrcExcludes(ctx, fg.properties.Srcs.GetOrDefault(ctx, nil), fg.properties.Exclude_srcs.GetOrDefault(ctx, nil))
+	srcs = append(srcs, PathsForModuleSrc(ctx, fg.properties.Device_first_srcs.GetOrDefault(ctx, nil))...)
+	srcs = append(srcs, PathsForModuleSrc(ctx, fg.properties.Device_common_srcs.GetOrDefault(ctx, nil))...)
 	if fg.properties.Path != nil {
-		fg.srcs = PathsWithModuleSrcSubDir(ctx, fg.srcs, String(fg.properties.Path))
+		srcs = PathsWithModuleSrcSubDir(ctx, srcs, String(fg.properties.Path))
 	}
-	SetProvider(ctx, blueprint.SrcsFileProviderKey, blueprint.SrcsFileProviderData{SrcPaths: fg.srcs.Strings()})
+	SetProvider(ctx, blueprint.SrcsFileProviderKey, blueprint.SrcsFileProviderData{SrcPaths: srcs.Strings()})
 
 	var aconfigDeclarations []string
 	var intermediateCacheOutputPaths Paths
@@ -108,6 +118,8 @@ func (fg *fileGroup) GenerateAndroidBuildActions(ctx ModuleContext) {
 			maps.Copy(modeInfos, dep.ModeInfos)
 		}
 	})
+
+	fg.srcs = srcs
 	SetProvider(ctx, CodegenInfoProvider, CodegenInfo{
 		AconfigDeclarations:          aconfigDeclarations,
 		IntermediateCacheOutputPaths: intermediateCacheOutputPaths,
@@ -138,4 +150,16 @@ func FileGroupDefaultsFactory() Module {
 	InitDefaultsModule(module)
 
 	return module
+}
+
+// Collect information for opening IDE project files in java/jdeps.go.
+// Copied from build/soong/genrule/genrule.go
+func (fg *fileGroup) IDEInfo(ctx BaseModuleContext, dpInfo *IdeInfo) {
+	dpInfo.Srcs = append(dpInfo.Srcs, fg.Srcs().Strings()...)
+	for _, src := range fg.properties.Srcs.GetOrDefault(ctx, nil) {
+		if mod, _ := SrcIsModuleWithTag(src); mod != "" {
+			// Register the module name without any tags in `Deps`
+			dpInfo.Deps = append(dpInfo.Deps, mod)
+		}
+	}
 }

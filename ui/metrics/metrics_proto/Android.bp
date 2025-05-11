@@ -1,0 +1,16 @@
+python_library_host {
+    name: "soong-metrics-proto-py",
+    srcs: [
+        "metrics.proto",
+    ],
+    visibility: [
+        "//build/make/ci",
+    ],
+    libs: [
+        "libprotobuf-python",
+    ],
+    proto: {
+        include_dirs: ["external/protobuf/src"],
+        canonical_path_from_root: false,
+    },
+}

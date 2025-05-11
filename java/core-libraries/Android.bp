@@ -41,10 +41,50 @@ java_defaults {
     is_stubs_module: true,
 }
 
+soong_config_module_type {
+    name: "core_current_stubs_soong_config_defaults",
+    module_type: "java_defaults",
+    config_namespace: "ANDROID",
+    bool_variables: [
+        "release_hidden_api_exportable_stubs",
+    ],
+    properties: [
+        "dist.targets",
+        "dist.dest",
+    ],
+}
+
+core_current_stubs_soong_config_defaults {
+    name: "core_current_stubs_everything_soong_config_defaults",
+    soong_config_variables: {
+        release_hidden_api_exportable_stubs: {
+            conditions_default: {
+                dist: {
+                    targets: dist_targets,
+                    dest: "core.current.stubs.jar",
+                },
+            },
+        },
+    },
+}
+
+core_current_stubs_soong_config_defaults {
+    name: "core_current_stubs_exportable_soong_config_defaults",
+    soong_config_variables: {
+        release_hidden_api_exportable_stubs: {
+            dist: {
+                targets: dist_targets,
+                dest: "core.current.stubs.jar",
+            },
+        },
+    },
+}
+
 java_library {
     name: "core.current.stubs",
     defaults: [
         "core.current.stubs.defaults",
+        "core_current_stubs_everything_soong_config_defaults",
     ],
     static_libs: [
         "art.module.public.api.stubs",
@@ -76,16 +116,13 @@ java_library {
     name: "core.current.stubs.exportable",
     defaults: [
         "core.current.stubs.defaults",
+        "core_current_stubs_exportable_soong_config_defaults",
     ],
     static_libs: [
         "art.module.public.api.stubs.exportable",
         "conscrypt.module.public.api.stubs.exportable",
         "i18n.module.public.api.stubs.exportable",
     ],
-    dist: {
-        targets: dist_targets,
-        dest: "core.current.stubs.jar",
-    },
 }
 
 // Distributed with the SDK for turning into system modules to compile apps
@@ -95,10 +132,10 @@ java_library {
 // prebuilts/sdk/update_prebuilts.py script to update the prebuilts/sdk
 // directory.
 java_library {
-    name: "core-current-stubs-for-system-modules",
+    name: "core-current-stubs-for-system-modules-exportable",
     visibility: ["//development/sdk"],
     static_libs: [
-        "core.current.stubs",
+        "core.current.stubs.exportable",
         // This one is not on device but it's needed when javac compiles code
         // containing lambdas.
         "core-lambda-stubs-for-system-modules",
@@ -116,6 +153,19 @@ java_library {
             targets: dist_targets,
         },
     ],
+}
+
+java_library {
+    name: "core-current-stubs-for-system-modules",
+    visibility: ["//development/sdk"],
+    static_libs: [
+        "core.current.stubs",
+        // This one is not on device but it's needed when javac compiles code
+        // containing lambdas.
+        "core-lambda-stubs-for-system-modules",
+    ],
+    sdk_version: "none",
+    system_modules: "none",
 }
 
 // Defaults module to strip out android annotations

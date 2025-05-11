@@ -1,0 +1,39 @@
+//
+// Copyright (C) 2024 The Android Open-Source Project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto2";
+package android.find_input_delta_proto_internal;
+option go_package = "android/soong/find_input_delta/find_input_delta_proto_internal";
+
+// The state of all inputs.
+message PartialCompileInputs {
+  // The status of each file.
+  repeated PartialCompileInput input_files = 1;
+}
+
+// The state of one input.
+message PartialCompileInput {
+  // The name of the file.
+  optional string name = 1;
+
+  // The timestamp of the file in (Unix) nanoseconds.
+  optional int64 mtime_nsec = 2;
+
+  // The hash of the file.  For crc32 hashes, this will be 8 hex digits.
+  optional string hash = 3;
+
+  // Contents of the file, if the file was inspected (such as jar files, etc).
+  repeated PartialCompileInput contents = 4;
+}

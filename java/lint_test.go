@@ -164,7 +164,7 @@ func TestJavaLintStrictUpdatabilityLinting(t *testing.T) {
 			sdk_version: "current",
 			lint: {
 				strict_updatability_linting: true,
-				baseline_filename: "lint-baseline.xml",
+				baseline_filename: "foo_lint_baseline.xml",
 			},
 		}
 
@@ -176,7 +176,7 @@ func TestJavaLintStrictUpdatabilityLinting(t *testing.T) {
 			min_sdk_version: "29",
 			sdk_version: "current",
 			lint: {
-				baseline_filename: "lint-baseline.xml",
+				baseline_filename: "bar_lint_baseline.xml",
 			}
 		}
 	`
@@ -188,18 +188,13 @@ func TestJavaLintStrictUpdatabilityLinting(t *testing.T) {
 		RunTestWithBp(t, bp)
 
 	foo := result.ModuleForTests("foo", "android_common")
-	sboxProto := android.RuleBuilderSboxProtoForTests(t, result.TestContext, foo.Output("lint.sbox.textproto"))
-	if !strings.Contains(*sboxProto.Commands[0].Command,
-		"--baseline lint-baseline.xml --disallowed_issues NewApi") {
+	strictUpdatabilityCheck := foo.Output("lint_strict_updatability_check.stamp")
+	if !strings.Contains(strictUpdatabilityCheck.RuleParams.Command,
+		"--disallowed_issues NewApi") {
 		t.Error("did not restrict baselining NewApi")
 	}
-
-	bar := result.ModuleForTests("bar", "android_common")
-	sboxProto = android.RuleBuilderSboxProtoForTests(t, result.TestContext, bar.Output("lint.sbox.textproto"))
-	if !strings.Contains(*sboxProto.Commands[0].Command,
-		"--baseline lint-baseline.xml --disallowed_issues NewApi") {
-		t.Error("did not restrict baselining NewApi")
-	}
+	android.AssertStringListContains(t, "strict updatability check baseline inputs", strictUpdatabilityCheck.Inputs.Strings(), "foo_lint_baseline.xml")
+	android.AssertStringListContains(t, "strict updatability check baseline inputs", strictUpdatabilityCheck.Inputs.Strings(), "bar_lint_baseline.xml")
 }
 
 func TestJavaLintDatabaseSelectionFull(t *testing.T) {

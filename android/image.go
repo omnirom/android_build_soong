@@ -14,44 +14,61 @@
 
 package android
 
+type ImageInterfaceContext interface {
+	ArchModuleContext
+
+	Module() Module
+
+	ModuleErrorf(fmt string, args ...interface{})
+	PropertyErrorf(property, fmt string, args ...interface{})
+
+	DeviceSpecific() bool
+	SocSpecific() bool
+	ProductSpecific() bool
+	SystemExtSpecific() bool
+	Platform() bool
+
+	Config() Config
+}
+
 // ImageInterface is implemented by modules that need to be split by the imageTransitionMutator.
 type ImageInterface interface {
 	// ImageMutatorBegin is called before any other method in the ImageInterface.
-	ImageMutatorBegin(ctx BaseModuleContext)
+	ImageMutatorBegin(ctx ImageInterfaceContext)
 
 	// VendorVariantNeeded should return true if the module needs a vendor variant (installed on the vendor image).
-	VendorVariantNeeded(ctx BaseModuleContext) bool
+	VendorVariantNeeded(ctx ImageInterfaceContext) bool
 
 	// ProductVariantNeeded should return true if the module needs a product variant (installed on the product image).
-	ProductVariantNeeded(ctx BaseModuleContext) bool
+	ProductVariantNeeded(ctx ImageInterfaceContext) bool
 
 	// CoreVariantNeeded should return true if the module needs a core variant (installed on the system image).
-	CoreVariantNeeded(ctx BaseModuleContext) bool
+	CoreVariantNeeded(ctx ImageInterfaceContext) bool
 
 	// RamdiskVariantNeeded should return true if the module needs a ramdisk variant (installed on the
 	// ramdisk partition).
-	RamdiskVariantNeeded(ctx BaseModuleContext) bool
+	RamdiskVariantNeeded(ctx ImageInterfaceContext) bool
 
 	// VendorRamdiskVariantNeeded should return true if the module needs a vendor ramdisk variant (installed on the
 	// vendor ramdisk partition).
-	VendorRamdiskVariantNeeded(ctx BaseModuleContext) bool
+	VendorRamdiskVariantNeeded(ctx ImageInterfaceContext) bool
 
 	// DebugRamdiskVariantNeeded should return true if the module needs a debug ramdisk variant (installed on the
 	// debug ramdisk partition: $(PRODUCT_OUT)/debug_ramdisk).
-	DebugRamdiskVariantNeeded(ctx BaseModuleContext) bool
+	DebugRamdiskVariantNeeded(ctx ImageInterfaceContext) bool
 
 	// RecoveryVariantNeeded should return true if the module needs a recovery variant (installed on the
 	// recovery partition).
-	RecoveryVariantNeeded(ctx BaseModuleContext) bool
+	RecoveryVariantNeeded(ctx ImageInterfaceContext) bool
 
 	// ExtraImageVariations should return a list of the additional variations needed for the module.  After the
 	// variants are created the SetImageVariation method will be called on each newly created variant with the
 	// its variation.
-	ExtraImageVariations(ctx BaseModuleContext) []string
+	ExtraImageVariations(ctx ImageInterfaceContext) []string
 
 	// SetImageVariation is called for each newly created image variant. The receiver is the original
 	// module, "variation" is the name of the newly created variant. "variation" is set on the receiver.
-	SetImageVariation(ctx BaseModuleContext, variation string)
+	SetImageVariation(ctx ImageInterfaceContext, variation string)
 }
 
 const (
@@ -81,16 +98,53 @@ const (
 	DebugRamdiskVariation string = "debug_ramdisk"
 )
 
+type imageInterfaceContextAdapter struct {
+	IncomingTransitionContext
+	kind moduleKind
+}
+
+var _ ImageInterfaceContext = (*imageInterfaceContextAdapter)(nil)
+
+func (e *imageInterfaceContextAdapter) Platform() bool {
+	return e.kind == platformModule
+}
+
+func (e *imageInterfaceContextAdapter) DeviceSpecific() bool {
+	return e.kind == deviceSpecificModule
+}
+
+func (e *imageInterfaceContextAdapter) SocSpecific() bool {
+	return e.kind == socSpecificModule
+}
+
+func (e *imageInterfaceContextAdapter) ProductSpecific() bool {
+	return e.kind == productSpecificModule
+}
+
+func (e *imageInterfaceContextAdapter) SystemExtSpecific() bool {
+	return e.kind == systemExtSpecificModule
+}
+
+// imageMutatorBeginMutator calls ImageMutatorBegin on all modules that may have image variants.
+// This happens right before the imageTransitionMutator runs. It's needed to initialize these
+// modules so that they return the correct results for all the other ImageInterface methods,
+// which the imageTransitionMutator will call. Transition mutators should also not mutate modules
+// (except in their Mutate() function), which this method does, so we run it in a separate mutator
+// first.
+func imageMutatorBeginMutator(ctx BottomUpMutatorContext) {
+	if m, ok := ctx.Module().(ImageInterface); ok && ctx.Os() == Android {
+		m.ImageMutatorBegin(ctx)
+	}
+}
+
 // imageTransitionMutator creates variants for modules that implement the ImageInterface that
 // allow them to build differently for each partition (recovery, core, vendor, etc.).
 type imageTransitionMutator struct{}
 
-func (imageTransitionMutator) Split(ctx BaseModuleContext) []string {
+func getImageVariations(ctx ImageInterfaceContext) []string {
 	var variations []string
 
 	if m, ok := ctx.Module().(ImageInterface); ctx.Os() == Android && ok {
-		m.ImageMutatorBegin(ctx)
-
 		if m.CoreVariantNeeded(ctx) {
 			variations = append(variations, CoreVariation)
 		}
@@ -124,6 +178,10 @@ func (imageTransitionMutator) Split(ctx BaseModuleContext) []string {
 	return variations
 }
 
+func (imageTransitionMutator) Split(ctx BaseModuleContext) []string {
+	return getImageVariations(ctx)
+}
+
 func (imageTransitionMutator) OutgoingTransition(ctx OutgoingTransitionContext, sourceVariation string) string {
 	return sourceVariation
 }
@@ -131,6 +189,16 @@ func (imageTransitionMutator) OutgoingTransition(ctx OutgoingTransitionContext, 
 func (imageTransitionMutator) IncomingTransition(ctx IncomingTransitionContext, incomingVariation string) string {
 	if _, ok := ctx.Module().(ImageInterface); ctx.Os() != Android || !ok {
 		return CoreVariation
+	}
+	variations := getImageVariations(&imageInterfaceContextAdapter{
+		IncomingTransitionContext: ctx,
+		kind:                      determineModuleKind(ctx.Module().base(), ctx),
+	})
+	// If there's only 1 possible variation, use that. This is a holdover from when blueprint,
+	// when adding dependencies, would use the only variant of a module regardless of its variations
+	// if only 1 variant existed.
+	if len(variations) == 1 {
+		return variations[0]
 	}
 	return incomingVariation
 }

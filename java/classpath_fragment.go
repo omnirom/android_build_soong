@@ -18,9 +18,10 @@ package java
 
 import (
 	"fmt"
+	"strings"
+
 	"github.com/google/blueprint"
 	"github.com/google/blueprint/proptools"
-	"strings"
 
 	"android/soong/android"
 )
@@ -103,7 +104,11 @@ type classpathJar struct {
 func gatherPossibleApexModuleNamesAndStems(ctx android.ModuleContext, contents []string, tag blueprint.DependencyTag) []string {
 	set := map[string]struct{}{}
 	for _, name := range contents {
-		dep, _ := ctx.GetDirectDepWithTag(name, tag).(android.Module)
+		dep := ctx.GetDirectDepWithTag(name, tag)
+		if dep == nil && ctx.Config().AllowMissingDependencies() {
+			// Ignore apex boot jars from dexpreopt if it does not exist, and missing deps are allowed.
+			continue
+		}
 		set[ModuleStemForDeapexing(dep)] = struct{}{}
 		if m, ok := dep.(ModuleWithStem); ok {
 			set[m.Stem()] = struct{}{}

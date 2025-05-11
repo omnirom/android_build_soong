@@ -72,7 +72,7 @@ func (callbacks *JavaAconfigDeclarationsLibraryCallbacks) DepsMutator(module *ja
 		module.AddSharedLibrary("aconfig-annotations-lib")
 		// TODO(b/303773055): Remove the annotation after access issue is resolved.
 		module.AddSharedLibrary("unsupportedappusage")
-		module.AddSharedLibrary("aconfig_storage_reader_java")
+		module.AddSharedLibrary("aconfig_storage_stub")
 	}
 }
 

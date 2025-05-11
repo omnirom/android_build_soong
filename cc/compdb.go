@@ -146,6 +146,8 @@ func getArguments(src android.Path, ctx android.SingletonContext, ccModule *Modu
 		isAsm = false
 		isCpp = true
 		clangPath = cxxPath
+	case ".o":
+		return nil
 	default:
 		log.Print("Unknown file extension " + src.Ext() + " on file " + src.String())
 		isAsm = true
@@ -185,6 +187,10 @@ func generateCompdbProject(compiledModule CompiledInterface, ctx android.Singlet
 	}
 	for _, src := range srcs {
 		if _, ok := builds[src.String()]; !ok {
+			args := getArguments(src, ctx, ccModule, ccPath, cxxPath)
+			if args == nil {
+				continue
+			}
 			builds[src.String()] = compDbEntry{
 				Directory: android.AbsSrcDirForExistingUseCases(),
 				Arguments: getArguments(src, ctx, ccModule, ccPath, cxxPath),

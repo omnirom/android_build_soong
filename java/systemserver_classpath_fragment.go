@@ -19,6 +19,7 @@ import (
 	"android/soong/dexpreopt"
 
 	"github.com/google/blueprint"
+	"github.com/google/blueprint/proptools"
 )
 
 func init() {
@@ -98,12 +99,12 @@ type systemServerClasspathFragmentProperties struct {
 	// List of system_server classpath jars, could be either java_library, or java_sdk_library.
 	//
 	// The order of this list matters as it is the order that is used in the SYSTEMSERVERCLASSPATH.
-	Contents []string
+	Contents proptools.Configurable[[]string] `android:"arch_variant"`
 
 	// List of jars that system_server loads dynamically using separate classloaders.
 	//
 	// The order does not matter.
-	Standalone_contents []string
+	Standalone_contents proptools.Configurable[[]string] `android:"arch_variant"`
 }
 
 func systemServerClasspathFactory() android.Module {
@@ -116,7 +117,7 @@ func systemServerClasspathFactory() android.Module {
 }
 
 func (s *SystemServerClasspathModule) GenerateAndroidBuildActions(ctx android.ModuleContext) {
-	if len(s.properties.Contents) == 0 && len(s.properties.Standalone_contents) == 0 {
+	if len(s.properties.Contents.GetOrDefault(ctx, nil)) == 0 && len(s.properties.Standalone_contents.GetOrDefault(ctx, nil)) == 0 {
 		ctx.PropertyErrorf("contents", "Either contents or standalone_contents needs to be non-empty")
 	}
 
@@ -127,12 +128,32 @@ func (s *SystemServerClasspathModule) GenerateAndroidBuildActions(ctx android.Mo
 	configuredJars = configuredJars.AppendList(&standaloneConfiguredJars)
 	classpathJars = append(classpathJars, standaloneClasspathJars...)
 	s.classpathFragmentBase().generateClasspathProtoBuildActions(ctx, configuredJars, classpathJars)
+	s.setPartitionInfoOfLibraries(ctx)
+}
+
+// Map of java library name to their install partition.
+type LibraryNameToPartitionInfo struct {
+	LibraryNameToPartition map[string]string
+}
+
+// LibraryNameToPartitionInfoProvider will be used by the top-level apex to enforce that dexpreopt files
+// of apex system server jars are installed in the same partition as the top-level apex.
+var LibraryNameToPartitionInfoProvider = blueprint.NewProvider[LibraryNameToPartitionInfo]()
+
+func (s *SystemServerClasspathModule) setPartitionInfoOfLibraries(ctx android.ModuleContext) {
+	libraryNameToPartition := map[string]string{}
+	ctx.VisitDirectDepsWithTag(systemServerClasspathFragmentContentDepTag, func(m android.Module) {
+		libraryNameToPartition[m.Name()] = m.PartitionTag(ctx.DeviceConfig())
+	})
+	android.SetProvider(ctx, LibraryNameToPartitionInfoProvider, LibraryNameToPartitionInfo{
+		LibraryNameToPartition: libraryNameToPartition,
+	})
 }
 
 func (s *SystemServerClasspathModule) configuredJars(ctx android.ModuleContext) android.ConfiguredJarList {
 	global := dexpreopt.GetGlobalConfig(ctx)
 
-	possibleUpdatableModules := gatherPossibleApexModuleNamesAndStems(ctx, s.properties.Contents, systemServerClasspathFragmentContentDepTag)
+	possibleUpdatableModules := gatherPossibleApexModuleNamesAndStems(ctx, s.properties.Contents.GetOrDefault(ctx, nil), systemServerClasspathFragmentContentDepTag)
 	jars, unknown := global.ApexSystemServerJars.Filter(possibleUpdatableModules)
 	// TODO(satayev): remove geotz ssc_fragment, since geotz is not part of SSCP anymore.
 	_, unknown = android.RemoveFromList("geotz", unknown)
@@ -164,7 +185,7 @@ func (s *SystemServerClasspathModule) configuredJars(ctx android.ModuleContext) 
 func (s *SystemServerClasspathModule) standaloneConfiguredJars(ctx android.ModuleContext) android.ConfiguredJarList {
 	global := dexpreopt.GetGlobalConfig(ctx)
 
-	possibleUpdatableModules := gatherPossibleApexModuleNamesAndStems(ctx, s.properties.Standalone_contents, systemServerClasspathFragmentContentDepTag)
+	possibleUpdatableModules := gatherPossibleApexModuleNamesAndStems(ctx, s.properties.Standalone_contents.GetOrDefault(ctx, nil), systemServerClasspathFragmentContentDepTag)
 	jars, _ := global.ApexStandaloneSystemServerJars.Filter(possibleUpdatableModules)
 
 	// TODO(jiakaiz): add a check to ensure that the contents are declared in make.
@@ -197,16 +218,11 @@ func (b systemServerClasspathFragmentContentDependencyTag) ExportMember() bool {
 	return true
 }
 
-// Contents of system server fragments in an apex are considered to be directly in the apex, as if
-// they were listed in java_libs.
-func (systemServerClasspathFragmentContentDependencyTag) CopyDirectlyInAnyApex() {}
-
 // Contents of system server fragments require files from prebuilt apex files.
 func (systemServerClasspathFragmentContentDependencyTag) RequiresFilesFromPrebuiltApex() {}
 
 var _ android.ReplaceSourceWithPrebuilt = systemServerClasspathFragmentContentDepTag
 var _ android.SdkMemberDependencyTag = systemServerClasspathFragmentContentDepTag
-var _ android.CopyDirectlyInAnyApexTag = systemServerClasspathFragmentContentDepTag
 var _ android.RequiresFilesFromPrebuiltApexTag = systemServerClasspathFragmentContentDepTag
 
 // The tag used for the dependency between the systemserverclasspath_fragment module and its contents.
@@ -225,8 +241,8 @@ func (s *SystemServerClasspathModule) ComponentDepsMutator(ctx android.BottomUpM
 	module := ctx.Module()
 	_, isSourceModule := module.(*SystemServerClasspathModule)
 	var deps []string
-	deps = append(deps, s.properties.Contents...)
-	deps = append(deps, s.properties.Standalone_contents...)
+	deps = append(deps, s.properties.Contents.GetOrDefault(ctx, nil)...)
+	deps = append(deps, s.properties.Standalone_contents.GetOrDefault(ctx, nil)...)
 
 	for _, name := range deps {
 		// A systemserverclasspath_fragment must depend only on other source modules, while the
@@ -240,8 +256,8 @@ func (s *SystemServerClasspathModule) ComponentDepsMutator(ctx android.BottomUpM
 
 // Collect information for opening IDE project files in java/jdeps.go.
 func (s *SystemServerClasspathModule) IDEInfo(ctx android.BaseModuleContext, dpInfo *android.IdeInfo) {
-	dpInfo.Deps = append(dpInfo.Deps, s.properties.Contents...)
-	dpInfo.Deps = append(dpInfo.Deps, s.properties.Standalone_contents...)
+	dpInfo.Deps = append(dpInfo.Deps, s.properties.Contents.GetOrDefault(ctx, nil)...)
+	dpInfo.Deps = append(dpInfo.Deps, s.properties.Standalone_contents.GetOrDefault(ctx, nil)...)
 }
 
 type systemServerClasspathFragmentMemberType struct {
@@ -282,8 +298,8 @@ type systemServerClasspathFragmentSdkMemberProperties struct {
 func (s *systemServerClasspathFragmentSdkMemberProperties) PopulateFromVariant(ctx android.SdkMemberContext, variant android.Module) {
 	module := variant.(*SystemServerClasspathModule)
 
-	s.Contents = module.properties.Contents
-	s.Standalone_contents = module.properties.Standalone_contents
+	s.Contents = module.properties.Contents.GetOrDefault(ctx.SdkModuleContext(), nil)
+	s.Standalone_contents = module.properties.Standalone_contents.GetOrDefault(ctx.SdkModuleContext(), nil)
 }
 
 func (s *systemServerClasspathFragmentSdkMemberProperties) AddToPropertySet(ctx android.SdkMemberContext, propertySet android.BpPropertySet) {

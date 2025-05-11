@@ -569,8 +569,7 @@ func TestBinary(t *testing.T) {
 
 	bar := ctx.ModuleForTests("bar", buildOS+"_common")
 	barJar := bar.Output("bar.jar").Output.String()
-	barWrapper := ctx.ModuleForTests("bar", buildOS+"_x86_64")
-	barWrapperDeps := barWrapper.Output("bar").Implicits.Strings()
+	barWrapperDeps := bar.Output("bar").Implicits.Strings()
 
 	libjni := ctx.ModuleForTests("libjni", buildOS+"_x86_64_shared")
 	libjniSO := libjni.Rule("Cp").Output.String()
@@ -1174,7 +1173,7 @@ func TestJavaLibraryOutputFiles(t *testing.T) {
 
 				filegroup {
 					name: "core-jar",
-					srcs: [":core{.jar}"],
+					device_common_srcs: [":core{.jar}"],
 				}
 		`),
 	})
@@ -1190,7 +1189,7 @@ func TestJavaImportOutputFiles(t *testing.T) {
 
 				filegroup {
 					name: "core-jar",
-					srcs: [":core{.jar}"],
+					device_common_srcs: [":core{.jar}"],
 				}
 		`),
 	})
@@ -1931,7 +1930,7 @@ func TestDeviceBinaryWrapperGeneration(t *testing.T) {
 			main_class: "foo.bar.jb",
 		}
 	`)
-	wrapperPath := fmt.Sprint(ctx.ModuleForTests("foo", "android_arm64_armv8-a").AllOutputs())
+	wrapperPath := fmt.Sprint(ctx.ModuleForTests("foo", "android_common").AllOutputs())
 	if !strings.Contains(wrapperPath, "foo.sh") {
 		t.Errorf("wrapper file foo.sh is not generated")
 	}
@@ -2452,37 +2451,6 @@ java_test_host {
 	if args["extraTestRunnerConfigs"] != expected {
 		t.Errorf("Expected args[\"extraTestRunnerConfigs\"] to equal %q, was %q", expected, args["extraTestRunnerConfigs"])
 	}
-}
-
-func TestJavaExcludeStaticLib(t *testing.T) {
-	ctx, _ := testJava(t, `
-	java_library {
-		name: "bar",
-	}
-	java_library {
-		name: "foo",
-	}
-	java_library {
-		name: "baz",
-		static_libs: [
-			"foo",
-			"bar",
-		],
-		exclude_static_libs: [
-			"bar",
-		],
-	}
-	`)
-
-	// "bar" not included as dependency of "baz"
-	CheckModuleDependencies(t, ctx, "baz", "android_common", []string{
-		`core-lambda-stubs`,
-		`ext`,
-		`foo`,
-		`framework`,
-		`stable-core-platform-api-stubs-system-modules`,
-		`stable.core.platform.api.stubs`,
-	})
 }
 
 func TestJavaLibraryWithResourcesStem(t *testing.T) {
@@ -3065,6 +3033,44 @@ func TestJavaLibraryOutputFilesRel(t *testing.T) {
 		"baz.jar", bazOutputPaths[0].Rel())
 }
 
+func TestCoverage(t *testing.T) {
+	result := android.GroupFixturePreparers(
+		PrepareForTestWithJavaDefaultModules,
+		prepareForTestWithFrameworkJacocoInstrumentation,
+		PrepareForTestWithTransitiveClasspathEnabled,
+	).RunTestWithBp(t, `
+		android_app {
+			name: "foo",
+			srcs: ["foo.java"],
+			static_libs: ["android.car"],
+			platform_apis: true,
+		}
+
+		// A library in InstrumentFrameworkModules
+		java_library {
+			name: "android.car",
+			srcs: ["android.car.java"],
+			installable: true,
+		}
+	`)
+
+	foo := result.ModuleForTests("foo", "android_common")
+	androidCar := result.ModuleForTests("android.car", "android_common")
+
+	fooJacoco := foo.Rule("jacoco")
+	fooCombine := foo.Description("for javac")
+
+	androidCarJacoco := androidCar.Rule("jacoco")
+	androidCarJavac := androidCar.Rule("javac")
+
+	android.AssertStringEquals(t, "foo instrumentation rule inputs", fooJacoco.Input.String(), fooCombine.Output.String())
+	android.AssertStringEquals(t, "android.car instrumentation rule inputs", androidCarJacoco.Input.String(), androidCarJavac.Output.String())
+
+	// The input to instrumentation for the `foo` app contains the non-instrumented android.car classes.
+	android.AssertStringListContains(t, "foo combined inputs", fooCombine.Inputs.Strings(), androidCarJavac.Output.String())
+	android.AssertStringListDoesNotContain(t, "foo combined inputs", fooCombine.Inputs.Strings(), androidCarJacoco.Output.String())
+}
+
 func assertTestOnlyAndTopLevel(t *testing.T, ctx *android.TestResult, expectedTestOnly []string, expectedTopLevel []string) {
 	t.Helper()
 	actualTrueModules := []string{}
@@ -3094,4 +3100,31 @@ func assertTestOnlyAndTopLevel(t *testing.T, ctx *android.TestResult, expectedTe
 	if notEqual {
 		t.Errorf("top-level: Expected but not found: %v, Found but not expected: %v", left, right)
 	}
+}
+
+// Test that a dependency edge is created to the matching variant of a native library listed in `jni_libs` of java_binary
+func TestNativeRequiredDepOfJavaBinary(t *testing.T) {
+	findDepsOfModule := func(ctx *android.TestContext, module android.Module, depName string) []blueprint.Module {
+		var ret []blueprint.Module
+		ctx.VisitDirectDeps(module, func(dep blueprint.Module) {
+			if dep.Name() == depName {
+				ret = append(ret, dep)
+			}
+		})
+		return ret
+	}
+
+	bp := cc.GatherRequiredDepsForTest(android.Android) + `
+java_binary {
+	name: "myjavabin",
+	main_class: "com.android.MyJava",
+	jni_libs: ["mynativelib"],
+}
+cc_library_shared {
+	name: "mynativelib",
+}
+`
+	res, _ := testJava(t, bp)
+	deps := findDepsOfModule(res, res.ModuleForTests("myjavabin", "android_common").Module(), "mynativelib")
+	android.AssertIntEquals(t, "Create a dep on the first variant", 1, len(deps))
 }

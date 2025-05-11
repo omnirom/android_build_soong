@@ -26,7 +26,6 @@ import (
 
 	"android/soong/android"
 	"android/soong/android/allowlists"
-	"android/soong/bp2build"
 	"android/soong/shared"
 
 	"github.com/google/blueprint"
@@ -78,7 +77,6 @@ func init() {
 	flag.StringVar(&cmdlineArgs.ModuleGraphFile, "module_graph_file", "", "JSON module graph file to output")
 	flag.StringVar(&cmdlineArgs.ModuleActionsFile, "module_actions_file", "", "JSON file to output inputs/outputs of actions of modules")
 	flag.StringVar(&cmdlineArgs.DocFile, "soong_docs", "", "build documentation file to output")
-	flag.StringVar(&cmdlineArgs.BazelQueryViewDir, "bazel_queryview_dir", "", "path to the bazel queryview directory relative to --top")
 	flag.StringVar(&cmdlineArgs.OutFile, "o", "build.ninja", "the Ninja file to output")
 	flag.StringVar(&cmdlineArgs.SoongVariables, "soong_variables", "soong.variables", "the file contains all build variables")
 	flag.BoolVar(&cmdlineArgs.EmptyNinjaFile, "empty-ninja-file", false, "write out a 0-byte ninja file")
@@ -119,16 +117,6 @@ func needToWriteNinjaHint(ctx *android.Context) bool {
 		}
 	}
 	return false
-}
-
-// Run the code-generation phase to convert BazelTargetModules to BUILD files.
-func runQueryView(queryviewDir, queryviewMarker string, ctx *android.Context) {
-	ctx.EventHandler.Begin("queryview")
-	defer ctx.EventHandler.End("queryview")
-	codegenContext := bp2build.NewCodegenContext(ctx.Config(), ctx, bp2build.QueryView, topDir)
-	err := createBazelWorkspace(codegenContext, shared.JoinPath(topDir, queryviewDir), false)
-	maybeQuit(err, "")
-	touch(shared.JoinPath(topDir, queryviewMarker))
 }
 
 func writeNinjaHint(ctx *android.Context) error {
@@ -283,7 +271,7 @@ func runSoongOnlyBuild(ctx *android.Context) (string, []string) {
 	switch ctx.Config().BuildMode {
 	case android.GenerateModuleGraph:
 		stopBefore = bootstrap.StopBeforeWriteNinja
-	case android.GenerateQueryView, android.GenerateDocFile:
+	case android.GenerateDocFile:
 		stopBefore = bootstrap.StopBeforePrepareBuildActions
 	default:
 		stopBefore = bootstrap.DoEverything
@@ -294,10 +282,6 @@ func runSoongOnlyBuild(ctx *android.Context) (string, []string) {
 
 	// Convert the Soong module graph into Bazel BUILD files.
 	switch ctx.Config().BuildMode {
-	case android.GenerateQueryView:
-		queryviewMarkerFile := cmdlineArgs.BazelQueryViewDir + ".marker"
-		runQueryView(cmdlineArgs.BazelQueryViewDir, queryviewMarkerFile, ctx)
-		return queryviewMarkerFile, ninjaDeps
 	case android.GenerateModuleGraph:
 		writeJsonModuleGraphAndActions(ctx, cmdlineArgs)
 		return cmdlineArgs.ModuleGraphFile, ninjaDeps
@@ -375,6 +359,7 @@ func main() {
 	ctx.Register()
 	finalOutputFile, ninjaDeps := runSoongOnlyBuild(ctx)
 
+	ninjaDeps = append(ninjaDeps, configuration.ProductVariablesFileName)
 	ninjaDeps = append(ninjaDeps, usedEnvFile)
 	if shared.IsDebugging() {
 		// Add a non-existent file to the dependencies so that soong_build will rerun when the debugger is

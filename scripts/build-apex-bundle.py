@@ -16,8 +16,6 @@
 #
 """A tool to create an APEX bundle out of Soong-built base.zip"""
 
-from __future__ import print_function
-
 import argparse
 import sys
 import tempfile

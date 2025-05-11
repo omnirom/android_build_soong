@@ -42,12 +42,14 @@ func testModuleConfig(ctx android.PathContext, name, partition string) *ModuleCo
 }
 
 func testApexModuleConfig(ctx android.PathContext, name, apexName string) *ModuleConfig {
-	return createTestModuleConfig(
+	ret := createTestModuleConfig(
 		name,
 		fmt.Sprintf("/apex/%s/javalib/%s.jar", apexName, name),
 		android.PathForOutput(ctx, fmt.Sprintf("%s/dexpreopt/%s.jar", name, name)),
 		android.PathForOutput(ctx, fmt.Sprintf("%s/aligned/%s.jar", name, name)),
 		android.PathForOutput(ctx, fmt.Sprintf("%s/enforce_uses_libraries.status", name)))
+	ret.ApexPartition = "/system"
+	return ret
 }
 
 func testPlatformSystemServerModuleConfig(ctx android.PathContext, name string) *ModuleConfig {
@@ -204,6 +206,49 @@ func TestDexPreoptApexSystemServerJars(t *testing.T) {
 	wantInstalls := android.RuleBuilderInstalls{
 		{android.PathForOutput(ctx, "service-A/dexpreopt/oat/arm/javalib.odex"), "/system/framework/oat/arm/apex@com.android.apex1@javalib@service-A.jar@classes.odex"},
 		{android.PathForOutput(ctx, "service-A/dexpreopt/oat/arm/javalib.vdex"), "/system/framework/oat/arm/apex@com.android.apex1@javalib@service-A.jar@classes.vdex"},
+	}
+
+	android.AssertStringEquals(t, "installs", wantInstalls.String(), rule.Installs().String())
+
+	android.AssertStringListContains(t, "apex sscp jar copy", rule.Outputs().Strings(), "out/soong/system_server_dexjars/service-A.jar")
+
+	// rule with apex sscp cp as false
+	rule, err = GenerateDexpreoptRule(ctx, globalSoong, global, module, productPackages, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	android.AssertStringListDoesNotContain(t, "apex sscp jar copy", rule.Outputs().Strings(), "out/soong/system_server_dexjars/service-A.jar")
+
+	// cleanup the global variable for test
+	DexpreoptRunningInSoong = oldDexpreoptRunningInSoong
+}
+
+// Same as `TestDexPreoptApexSystemServerJars`, but the apex jar is in /system_ext
+func TestDexPreoptApexSystemServerJarsSystemExt(t *testing.T) {
+	// modify the global variable for test
+	var oldDexpreoptRunningInSoong = DexpreoptRunningInSoong
+	DexpreoptRunningInSoong = true
+
+	// test begin
+	config := android.TestConfig("out", nil, "", nil)
+	ctx := android.BuilderContextForTesting(config)
+	globalSoong := globalSoongConfigForTests(ctx)
+	global := GlobalConfigForTests(ctx)
+	module := testApexModuleConfig(ctx, "service-A", "com.android.apex1")
+	module.ApexPartition = "/system_ext"
+	productPackages := android.PathForTesting("product_packages.txt")
+
+	global.ApexSystemServerJars = android.CreateTestConfiguredJarList(
+		[]string{"com.android.apex1:service-A"})
+
+	rule, err := GenerateDexpreoptRule(ctx, globalSoong, global, module, productPackages, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantInstalls := android.RuleBuilderInstalls{
+		{android.PathForOutput(ctx, "service-A/dexpreopt/oat/arm/javalib.odex"), "/system_ext/framework/oat/arm/apex@com.android.apex1@javalib@service-A.jar@classes.odex"},
+		{android.PathForOutput(ctx, "service-A/dexpreopt/oat/arm/javalib.vdex"), "/system_ext/framework/oat/arm/apex@com.android.apex1@javalib@service-A.jar@classes.vdex"},
 	}
 
 	android.AssertStringEquals(t, "installs", wantInstalls.String(), rule.Installs().String())

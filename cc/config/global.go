@@ -72,6 +72,9 @@ var (
 
 		// Warnings disabled by default.
 
+		// We should encourage use of C23 features even when the whole project
+		// isn't C23-ready.
+		"-Wno-c23-extensions",
 		// Designated initializer syntax is recommended by the Google C++ style
 		// and is OK to use even if not formally supported by the chosen C++
 		// version.
@@ -172,7 +175,6 @@ var (
 		"-Werror=address",
 		"-Werror=sequence-point",
 		"-Werror=format-security",
-		"-nostdlibinc",
 	}
 
 	commonGlobalLldflags = []string{
@@ -236,12 +238,14 @@ var (
 	// opting into the warning.
 	noOverrideGlobalCflags = []string{
 		"-Werror=bool-operation",
+		"-Werror=dangling",
 		"-Werror=format-insufficient-args",
 		"-Werror=implicit-int-float-conversion",
 		"-Werror=int-in-bool-context",
 		"-Werror=int-to-pointer-cast",
 		"-Werror=pointer-to-int-cast",
 		"-Werror=xor-used-as-pow",
+		"-Wimplicit-int-float-conversion",
 		// http://b/161386391 for -Wno-void-pointer-to-enum-cast
 		"-Wno-void-pointer-to-enum-cast",
 		// http://b/161386391 for -Wno-void-pointer-to-int-cast
@@ -288,14 +292,13 @@ var (
 		"-Wno-error=deprecated",          // in external/googletest/googletest
 		// Disabling until the warning is fixed in libc++abi header files b/366180429
 		"-Wno-deprecated-dynamic-exception-spec",
-		// New warnings to be fixed after clang-r475365
-		"-Wno-error=enum-constexpr-conversion", // http://b/243964282
 		// New warnings to be fixed after clang-r522817
 		"-Wno-error=invalid-offsetof",
 		"-Wno-error=thread-safety-reference-return",
 
 		// Allow using VLA CXX extension.
 		"-Wno-vla-cxx-extension",
+		"-Wno-cast-function-type-mismatch",
 	}
 
 	noOverride64GlobalCflags = []string{}
@@ -384,7 +387,7 @@ var (
 
 	// prebuilts/clang default settings.
 	ClangDefaultBase         = "prebuilts/clang/host"
-	ClangDefaultVersion      = "clang-r530567"
+	ClangDefaultVersion      = "clang-r536225"
 	ClangDefaultShortVersion = "19"
 
 	// Directories with warnings from Android.bp files.

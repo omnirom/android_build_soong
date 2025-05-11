@@ -1360,10 +1360,9 @@ java_sdk_library_import {
 }
 `),
 		snapshotTestChecker(checkSnapshotWithSourcePreferred, func(t *testing.T, result *android.TestResult) {
-			ctx := android.ModuleInstallPathContextForTesting(result.Config)
 			dexJarBuildPath := func(name string, kind android.SdkKind) string {
-				dep := result.Module(name, "android_common").(java.SdkLibraryDependency)
-				path := dep.SdkApiExportableStubDexJar(ctx, kind).Path()
+				sdkLibInfo, _ := android.OtherModuleProvider(result.TestContext.OtherModuleProviderAdaptor(), result.Module(name, "android_common"), java.SdkLibraryInfoProvider)
+				path := sdkLibInfo.ExportableStubDexJarPaths[kind].Path()
 				return path.RelativeToTop().String()
 			}
 
@@ -1725,7 +1724,7 @@ func TestSnapshotWithJavaSdkLibrary_DoctagFiles(t *testing.T) {
 
 		filegroup {
 			name: "mygroup",
-			srcs: [":myjavalib{.doctags}"],
+			device_common_srcs: [":myjavalib{.doctags}"],
 		}
 	`)
 

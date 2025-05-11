@@ -52,7 +52,6 @@ const (
 
 	soongBuildTag      = "build"
 	jsonModuleGraphTag = "modulegraph"
-	queryviewTag       = "queryview"
 	soongDocsTag       = "soong_docs"
 
 	// bootstrapEpoch is used to determine if an incremental build is incompatible with the current
@@ -288,6 +287,15 @@ func bootstrapBlueprint(ctx Context, config Config) {
 	ctx.BeginTrace(metrics.RunSoong, "blueprint bootstrap")
 	defer ctx.EndTrace()
 
+	st := ctx.Status.StartTool()
+	defer st.Finish()
+	st.SetTotalActions(1)
+	action := &status.Action{
+		Description: "bootstrap blueprint",
+		Outputs:     []string{"bootstrap blueprint"},
+	}
+	st.StartAction(action)
+
 	// Clean up some files for incremental builds across incompatible changes.
 	bootstrapEpochCleanup(ctx, config)
 
@@ -307,8 +315,6 @@ func bootstrapBlueprint(ctx Context, config Config) {
 		mainSoongBuildExtraArgs = append(mainSoongBuildExtraArgs, "--incremental-build-actions")
 	}
 
-	queryviewDir := filepath.Join(config.SoongOutDir(), "queryview")
-
 	pbfs := []PrimaryBuilderFactory{
 		{
 			name:         soongBuildTag,
@@ -325,15 +331,6 @@ func bootstrapBlueprint(ctx Context, config Config) {
 			specificArgs: append(baseArgs,
 				"--module_graph_file", config.ModuleGraphFile(),
 				"--module_actions_file", config.ModuleActionsFile(),
-			),
-		},
-		{
-			name:        queryviewTag,
-			description: fmt.Sprintf("generating the Soong module graph as a Bazel workspace at %s", queryviewDir),
-			config:      config,
-			output:      config.QueryviewMarkerFile(),
-			specificArgs: append(baseArgs,
-				"--bazel_queryview_dir", queryviewDir,
 			),
 		},
 		{
@@ -407,8 +404,17 @@ func bootstrapBlueprint(ctx Context, config Config) {
 	// since `bootstrap.ninja` is regenerated unconditionally, we ignore the deps, i.e. little
 	// reason to write a `bootstrap.ninja.d` file
 	_, err := bootstrap.RunBlueprint(blueprintArgs, bootstrap.DoEverything, blueprintCtx, blueprintConfig)
+
+	result := status.ActionResult{
+		Action: action,
+	}
 	if err != nil {
-		ctx.Fatal(err)
+		result.Error = err
+		result.Output = err.Error()
+	}
+	st.FinishAction(result)
+	if err != nil {
+		ctx.Fatalf("bootstrap failed")
 	}
 }
 
@@ -427,13 +433,13 @@ func checkEnvironmentFile(ctx Context, currentEnv *Environment, envFile string) 
 	}
 }
 
-func updateSymlinks(ctx Context, dir, prevCWD, cwd string) error {
+func updateSymlinks(ctx Context, dir, prevCWD, cwd string, updateSemaphore chan struct{}) error {
 	defer symlinkWg.Done()
 
 	visit := func(path string, d fs.DirEntry, err error) error {
 		if d.IsDir() && path != dir {
 			symlinkWg.Add(1)
-			go updateSymlinks(ctx, path, prevCWD, cwd)
+			go updateSymlinks(ctx, path, prevCWD, cwd, updateSemaphore)
 			return filepath.SkipDir
 		}
 		f, err := d.Info()
@@ -464,10 +470,25 @@ func updateSymlinks(ctx Context, dir, prevCWD, cwd string) error {
 		return nil
 	}
 
+	<-updateSemaphore
+	defer func() { updateSemaphore <- struct{}{} }()
 	if err := filepath.WalkDir(dir, visit); err != nil {
 		return err
 	}
 	return nil
+}
+
+// b/376466642: If the concurrency of updateSymlinks is unbounded, Go's runtime spawns a
+// theoretically unbounded number of threads to handle blocking syscalls. This causes the runtime to
+// panic due to hitting thread limits in rare cases. Limiting to GOMAXPROCS concurrent symlink
+// updates should make this a non-issue.
+func newUpdateSemaphore() chan struct{} {
+	numPermits := runtime.GOMAXPROCS(0)
+	c := make(chan struct{}, numPermits)
+	for i := 0; i < numPermits; i++ {
+		c <- struct{}{}
+	}
+	return c
 }
 
 func fixOutDirSymlinks(ctx Context, config Config, outDir string) error {
@@ -502,7 +523,7 @@ func fixOutDirSymlinks(ctx Context, config Config, outDir string) error {
 	}
 
 	symlinkWg.Add(1)
-	if err := updateSymlinks(ctx, outDir, prevCWD, cwd); err != nil {
+	if err := updateSymlinks(ctx, outDir, prevCWD, cwd, newUpdateSemaphore()); err != nil {
 		return err
 	}
 	symlinkWg.Wait()
@@ -570,10 +591,6 @@ func runSoong(ctx Context, config Config) {
 
 		if config.JsonModuleGraph() {
 			checkEnvironmentFile(ctx, soongBuildEnv, config.UsedEnvFile(jsonModuleGraphTag))
-		}
-
-		if config.Queryview() {
-			checkEnvironmentFile(ctx, soongBuildEnv, config.UsedEnvFile(queryviewTag))
 		}
 
 		if config.SoongDocs() {
@@ -670,10 +687,6 @@ func runSoong(ctx Context, config Config) {
 		targets = append(targets, config.ModuleGraphFile())
 	}
 
-	if config.Queryview() {
-		targets = append(targets, config.QueryviewMarkerFile())
-	}
-
 	if config.SoongDocs() {
 		targets = append(targets, config.SoongDocsHtml())
 	}
@@ -766,7 +779,11 @@ func checkGlobs(ctx Context, finalOutFile string) error {
 	globsChan := make(chan pathtools.GlobResult)
 	errorsChan := make(chan error)
 	wg := sync.WaitGroup{}
+
 	hasChangedGlobs := false
+	var changedGlobNameMutex sync.Mutex
+	var changedGlobName string
+
 	for i := 0; i < runtime.NumCPU()*2; i++ {
 		wg.Add(1)
 		go func() {
@@ -804,6 +821,15 @@ func checkGlobs(ctx Context, finalOutFile string) error {
 				} else {
 					if !slices.Equal(result.Matches, cachedGlob.Matches) {
 						hasChangedGlobs = true
+
+						changedGlobNameMutex.Lock()
+						defer changedGlobNameMutex.Unlock()
+						changedGlobName = result.Pattern
+						if len(result.Excludes) > 2 {
+							changedGlobName += fmt.Sprintf(" (excluding %d other patterns)", len(result.Excludes))
+						} else if len(result.Excludes) > 0 {
+							changedGlobName += " (excluding " + strings.Join(result.Excludes, " and ") + ")"
+						}
 					}
 				}
 			}
@@ -855,6 +881,7 @@ func checkGlobs(ctx Context, finalOutFile string) error {
 
 	if hasChangedGlobs {
 		fmt.Fprintf(os.Stdout, "Globs changed, rerunning soong...\n")
+		fmt.Fprintf(os.Stdout, "One culprit glob (may be more): %s\n", changedGlobName)
 		// Write the current time to the glob_results file. We just need
 		// some unique value to trigger a rerun, it doesn't matter what it is.
 		err = os.WriteFile(

@@ -137,6 +137,9 @@ message MetricsBase {
   // Note that not all changed environment variables result in analysis retriggering.
   // If there was no previous build, this list will be empty.
   repeated string changed_environment_variable = 34;
+
+  // Metrics related to optimized builds.
+  optional OptimizedBuildMetrics optimized_build_metrics = 35;
 }
 
 message BuildConfig {
@@ -182,6 +185,37 @@ message SystemResourceInfo {
 
   // The total of available cores for building
   optional int32 available_cpus = 2;
+
+  // Information about the machine's CPU(s).
+  optional SystemCpuInfo cpu_info = 3;
+
+  // Information about the machine's memory.
+  optional SystemMemInfo mem_info = 4;
+}
+
+message SystemCpuInfo {
+  // The vendor id
+  optional string vendor_id = 1;
+
+  // The model name
+  optional string model_name = 2;
+
+  // The number of CPU cores
+  optional int32 cpu_cores = 3;
+
+  // The CPU flags
+  optional string flags = 4;
+}
+
+message SystemMemInfo {
+  // The total system memory
+  optional uint64 mem_total = 1;
+
+  // The free system memory
+  optional uint64 mem_free = 2;
+
+  // The available system memory
+  optional uint64 mem_available = 3;
 }
 
 message PerfInfo {
@@ -384,4 +418,36 @@ message JobInfo {
   optional uint64 elapsed_time_micros = 1;
   // Description of a job
   optional string job_description = 2;
+}
+
+message OptimizedBuildMetrics {
+  // The total time spent analyzing what/how to optimize everything.
+  optional PerfInfo analysis_perf = 1;
+  // The total time spent packaging artifacts.
+  optional PerfInfo packaging_perf = 2;
+  // Information for a single target (e.g. general-tests).
+  repeated TargetOptimizationResult target_result = 3;
+
+  message TargetOptimizationResult {
+    // Target name (e.g. general-tests).
+    optional string name = 1;
+    // Whether or not this target was optimized.
+    optional bool optimized = 2;
+    // Reasoning for why the target wasn't optimized if it wasn't
+    optional string optimization_rationale = 3;
+    // Time spent packaging this specific target (if it was optimized).
+    optional PerfInfo packaging_perf = 4;
+    // Information for each different artifact produced by this target (if it
+    // was optimized).
+    repeated OutputArtifact output_artifact = 5;
+
+    message OutputArtifact {
+      // Artifact file name (e.g. general-tests.zip)
+      optional string name = 1;
+      // Size of the file.
+      optional int64 size = 2;
+      // Lists of modules packaged into this artifact.
+      repeated string included_modules = 3;
+    }
+  }
 }

@@ -15,9 +15,10 @@
 package cc
 
 import (
-	"github.com/google/blueprint/proptools"
 	"path/filepath"
 	"strconv"
+
+	"github.com/google/blueprint/proptools"
 
 	"android/soong/android"
 	"android/soong/tradefed"
@@ -81,6 +82,16 @@ type TestBinaryProperties struct {
 	// list of files or filegroup modules that provide data that should be installed alongside
 	// the test
 	Data []string `android:"path,arch_variant"`
+
+	// Same as data, but adds depedencies on modules using the device's os variant, and common
+	// architecture's variant. Can be useful to add device-built apps to the data of a host
+	// test.
+	Device_common_data []string `android:"path_device_common"`
+
+	// Same as data, but adds depedencies on modules using the device's os variant, and the device's
+	// first architecture's variant. Can be useful to add device-built apps to the data of a host
+	// test.
+	Device_first_data []string `android:"path_device_first"`
 
 	// list of shared library modules that should be installed alongside the test
 	Data_libs []string `android:"arch_variant"`
@@ -324,6 +335,8 @@ func (test *testBinary) installerProps() []interface{} {
 
 func (test *testBinary) install(ctx ModuleContext, file android.Path) {
 	dataSrcPaths := android.PathsForModuleSrc(ctx, test.Properties.Data)
+	dataSrcPaths = append(dataSrcPaths, android.PathsForModuleSrc(ctx, test.Properties.Device_common_data)...)
+	dataSrcPaths = append(dataSrcPaths, android.PathsForModuleSrc(ctx, test.Properties.Device_first_data)...)
 
 	for _, dataSrcPath := range dataSrcPaths {
 		test.data = append(test.data, android.DataPath{SrcPath: dataSrcPath})

@@ -281,49 +281,24 @@ func (binary *Binary) AndroidMkEntries() []android.AndroidMkEntries {
 		return nil
 	}
 
-	if !binary.isWrapperVariant {
-		return []android.AndroidMkEntries{android.AndroidMkEntries{
-			Class:      "JAVA_LIBRARIES",
-			OutputFile: android.OptionalPathForPath(binary.outputFile),
-			Include:    "$(BUILD_SYSTEM)/soong_java_prebuilt.mk",
-			ExtraEntries: []android.AndroidMkExtraEntriesFunc{
-				func(ctx android.AndroidMkExtraEntriesContext, entries *android.AndroidMkEntries) {
-					entries.SetPath("LOCAL_SOONG_HEADER_JAR", binary.headerJarFile)
-					entries.SetPath("LOCAL_SOONG_CLASSES_JAR", binary.implementationAndResourcesJar)
-					if binary.dexJarFile.IsSet() {
-						entries.SetPath("LOCAL_SOONG_DEX_JAR", binary.dexJarFile.Path())
-					}
-					if len(binary.dexpreopter.builtInstalled) > 0 {
-						entries.SetString("LOCAL_SOONG_BUILT_INSTALLED", binary.dexpreopter.builtInstalled)
-					}
-				},
+	return []android.AndroidMkEntries{{
+		Class:      "JAVA_LIBRARIES",
+		OutputFile: android.OptionalPathForPath(binary.outputFile),
+		Include:    "$(BUILD_SYSTEM)/soong_java_prebuilt.mk",
+		ExtraEntries: []android.AndroidMkExtraEntriesFunc{
+			func(ctx android.AndroidMkExtraEntriesContext, entries *android.AndroidMkEntries) {
+				entries.SetPath("LOCAL_SOONG_HEADER_JAR", binary.headerJarFile)
+				entries.SetPath("LOCAL_SOONG_CLASSES_JAR", binary.implementationAndResourcesJar)
+				if binary.dexJarFile.IsSet() {
+					entries.SetPath("LOCAL_SOONG_DEX_JAR", binary.dexJarFile.Path())
+				}
+				if len(binary.dexpreopter.builtInstalled) > 0 {
+					entries.SetString("LOCAL_SOONG_BUILT_INSTALLED", binary.dexpreopter.builtInstalled)
+				}
+				entries.AddStrings("LOCAL_REQUIRED_MODULES", binary.androidMkNamesOfJniLibs...)
 			},
-			ExtraFooters: []android.AndroidMkExtraFootersFunc{
-				func(w io.Writer, name, prefix, moduleDir string) {
-					fmt.Fprintln(w, "jar_installed_module := $(LOCAL_INSTALLED_MODULE)")
-				},
-			},
-		}}
-	} else {
-		outputFile := binary.wrapperFile
-
-		return []android.AndroidMkEntries{android.AndroidMkEntries{
-			Class:      "EXECUTABLES",
-			OutputFile: android.OptionalPathForPath(outputFile),
-			ExtraEntries: []android.AndroidMkExtraEntriesFunc{
-				func(ctx android.AndroidMkExtraEntriesContext, entries *android.AndroidMkEntries) {
-					entries.SetBool("LOCAL_STRIP_MODULE", false)
-				},
-			},
-			ExtraFooters: []android.AndroidMkExtraFootersFunc{
-				func(w io.Writer, name, prefix, moduleDir string) {
-					// Ensure that the wrapper script timestamp is always updated when the jar is updated
-					fmt.Fprintln(w, "$(LOCAL_INSTALLED_MODULE): $(jar_installed_module)")
-					fmt.Fprintln(w, "jar_installed_module :=")
-				},
-			},
-		}}
-	}
+		},
+	}}
 }
 
 func (app *AndroidApp) AndroidMkEntries() []android.AndroidMkEntries {
@@ -332,15 +307,11 @@ func (app *AndroidApp) AndroidMkEntries() []android.AndroidMkEntries {
 			Disabled: true,
 		}}
 	}
-	var required []string
-	if proptools.Bool(app.appProperties.Generate_product_characteristics_rro) {
-		required = []string{app.productCharacteristicsRROPackageName()}
-	}
 	return []android.AndroidMkEntries{android.AndroidMkEntries{
 		Class:      "APPS",
 		OutputFile: android.OptionalPathForPath(app.outputFile),
 		Include:    "$(BUILD_SYSTEM)/soong_app_prebuilt.mk",
-		Required:   required,
+		Required:   app.requiredModuleNames,
 		ExtraEntries: []android.AndroidMkExtraEntriesFunc{
 			func(ctx android.AndroidMkExtraEntriesContext, entries *android.AndroidMkEntries) {
 				// App module names can be overridden.
@@ -375,31 +346,6 @@ func (app *AndroidApp) AndroidMkEntries() []android.AndroidMkEntries {
 					entries.SetBoolIfTrue("LOCAL_NO_STANDARD_LIBRARIES", true)
 				}
 
-				filterRRO := func(filter overlayType) android.Paths {
-					var paths android.Paths
-					seen := make(map[android.Path]bool)
-					for _, d := range app.rroDirsDepSet.ToList() {
-						if d.overlayType == filter {
-							if seen[d.path] {
-								continue
-							}
-							seen[d.path] = true
-							paths = append(paths, d.path)
-						}
-					}
-					// Reverse the order, Soong stores rroDirs in aapt2 order (low to high priority), but Make
-					// expects it in LOCAL_RESOURCE_DIRS order (high to low priority).
-					return android.ReversePaths(paths)
-				}
-				deviceRRODirs := filterRRO(device)
-				if len(deviceRRODirs) > 0 {
-					entries.AddStrings("LOCAL_SOONG_DEVICE_RRO_DIRS", deviceRRODirs.Strings()...)
-				}
-				productRRODirs := filterRRO(product)
-				if len(productRRODirs) > 0 {
-					entries.AddStrings("LOCAL_SOONG_PRODUCT_RRO_DIRS", productRRODirs.Strings()...)
-				}
-
 				entries.SetBoolIfTrue("LOCAL_EXPORT_PACKAGE_RESOURCES", Bool(app.appProperties.Export_package_resources))
 
 				entries.SetPath("LOCAL_FULL_MANIFEST_FILE", app.manifestPath)
@@ -415,7 +361,7 @@ func (app *AndroidApp) AndroidMkEntries() []android.AndroidMkEntries {
 				} else {
 					var names []string
 					for _, jniLib := range app.jniLibs {
-						names = append(names, jniLib.name)
+						names = append(names, jniLib.name+":"+jniLib.target.Arch.ArchType.Bitness())
 					}
 					entries.AddStrings("LOCAL_REQUIRED_MODULES", names...)
 				}
@@ -448,6 +394,24 @@ func (app *AndroidApp) AndroidMkEntries() []android.AndroidMkEntries {
 			},
 		}},
 	}
+}
+
+func (a *AutogenRuntimeResourceOverlay) AndroidMkEntries() []android.AndroidMkEntries {
+	if a.IsHideFromMake() || a.outputFile == nil {
+		return []android.AndroidMkEntries{android.AndroidMkEntries{
+			Disabled: true,
+		}}
+	}
+	return []android.AndroidMkEntries{android.AndroidMkEntries{
+		Class:      "APPS",
+		OutputFile: android.OptionalPathForPath(a.outputFile),
+		Include:    "$(BUILD_SYSTEM)/soong_app_prebuilt.mk",
+		ExtraEntries: []android.AndroidMkExtraEntriesFunc{
+			func(ctx android.AndroidMkExtraEntriesContext, entries *android.AndroidMkEntries) {
+				entries.SetString("LOCAL_CERTIFICATE", a.certificate.AndroidMkString())
+			},
+		},
+	}}
 }
 
 func (a *AndroidApp) getOverriddenPackages() []string {

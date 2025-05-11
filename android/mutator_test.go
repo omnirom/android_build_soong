@@ -17,6 +17,8 @@ package android
 import (
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/google/blueprint"
@@ -134,10 +136,6 @@ func TestModuleString(t *testing.T) {
 						return []string{"a", "b"}
 					},
 				})
-				ctx.TopDown("rename_top_down", func(ctx TopDownMutatorContext) {
-					moduleStrings = append(moduleStrings, ctx.Module().String())
-					ctx.Rename(ctx.Module().base().Name() + "_renamed1")
-				})
 			})
 
 			ctx.PreDepsMutators(func(ctx RegisterMutatorsContext) {
@@ -161,8 +159,8 @@ func TestModuleString(t *testing.T) {
 				})
 				ctx.BottomUp("rename_bottom_up", func(ctx BottomUpMutatorContext) {
 					moduleStrings = append(moduleStrings, ctx.Module().String())
-					ctx.Rename(ctx.Module().base().Name() + "_renamed2")
-				})
+					ctx.Rename(ctx.Module().base().Name() + "_renamed1")
+				}).UsesRename()
 				ctx.BottomUp("final", func(ctx BottomUpMutatorContext) {
 					moduleStrings = append(moduleStrings, ctx.Module().String())
 				})
@@ -181,17 +179,23 @@ func TestModuleString(t *testing.T) {
 		"foo{pre_arch:b}",
 		"foo{pre_arch:a}",
 
-		// After rename_top_down (reversed because pre_deps TransitionMutator.Split is TopDown).
-		"foo_renamed1{pre_arch:b}",
-		"foo_renamed1{pre_arch:a}",
-
 		// After pre_deps (reversed because post_deps TransitionMutator.Split is TopDown).
-		"foo_renamed1{pre_arch:b,pre_deps:d}",
-		"foo_renamed1{pre_arch:b,pre_deps:c}",
-		"foo_renamed1{pre_arch:a,pre_deps:d}",
-		"foo_renamed1{pre_arch:a,pre_deps:c}",
+		"foo{pre_arch:b,pre_deps:d}",
+		"foo{pre_arch:b,pre_deps:c}",
+		"foo{pre_arch:a,pre_deps:d}",
+		"foo{pre_arch:a,pre_deps:c}",
 
 		// After post_deps.
+		"foo{pre_arch:a,pre_deps:c,post_deps:e}",
+		"foo{pre_arch:a,pre_deps:c,post_deps:f}",
+		"foo{pre_arch:a,pre_deps:d,post_deps:e}",
+		"foo{pre_arch:a,pre_deps:d,post_deps:f}",
+		"foo{pre_arch:b,pre_deps:c,post_deps:e}",
+		"foo{pre_arch:b,pre_deps:c,post_deps:f}",
+		"foo{pre_arch:b,pre_deps:d,post_deps:e}",
+		"foo{pre_arch:b,pre_deps:d,post_deps:f}",
+
+		// After rename_bottom_up.
 		"foo_renamed1{pre_arch:a,pre_deps:c,post_deps:e}",
 		"foo_renamed1{pre_arch:a,pre_deps:c,post_deps:f}",
 		"foo_renamed1{pre_arch:a,pre_deps:d,post_deps:e}",
@@ -200,16 +204,6 @@ func TestModuleString(t *testing.T) {
 		"foo_renamed1{pre_arch:b,pre_deps:c,post_deps:f}",
 		"foo_renamed1{pre_arch:b,pre_deps:d,post_deps:e}",
 		"foo_renamed1{pre_arch:b,pre_deps:d,post_deps:f}",
-
-		// After rename_bottom_up.
-		"foo_renamed2{pre_arch:a,pre_deps:c,post_deps:e}",
-		"foo_renamed2{pre_arch:a,pre_deps:c,post_deps:f}",
-		"foo_renamed2{pre_arch:a,pre_deps:d,post_deps:e}",
-		"foo_renamed2{pre_arch:a,pre_deps:d,post_deps:f}",
-		"foo_renamed2{pre_arch:b,pre_deps:c,post_deps:e}",
-		"foo_renamed2{pre_arch:b,pre_deps:c,post_deps:f}",
-		"foo_renamed2{pre_arch:b,pre_deps:d,post_deps:e}",
-		"foo_renamed2{pre_arch:b,pre_deps:d,post_deps:f}",
 	}
 
 	AssertDeepEquals(t, "module String() values", want, moduleStrings)
@@ -228,7 +222,7 @@ func TestFinalDepsPhase(t *testing.T) {
 		}
 	`
 
-	finalGot := map[string]int{}
+	finalGot := sync.Map{}
 
 	GroupFixturePreparers(
 		FixtureRegisterWithContext(func(ctx RegistrationContext) {
@@ -259,9 +253,11 @@ func TestFinalDepsPhase(t *testing.T) {
 					}
 				})
 				ctx.BottomUp("final", func(ctx BottomUpMutatorContext) {
-					finalGot[ctx.Module().String()] += 1
+					counter, _ := finalGot.LoadOrStore(ctx.Module().String(), &atomic.Int64{})
+					counter.(*atomic.Int64).Add(1)
 					ctx.VisitDirectDeps(func(mod Module) {
-						finalGot[fmt.Sprintf("%s -> %s", ctx.Module().String(), mod)] += 1
+						counter, _ := finalGot.LoadOrStore(fmt.Sprintf("%s -> %s", ctx.Module().String(), mod), &atomic.Int64{})
+						counter.(*atomic.Int64).Add(1)
 					})
 				})
 			})
@@ -284,10 +280,16 @@ func TestFinalDepsPhase(t *testing.T) {
 		"foo{variant:b} -> common_dep_2{variant:a}": 1,
 	}
 
-	AssertDeepEquals(t, "final", finalWant, finalGot)
+	finalGotMap := make(map[string]int)
+	finalGot.Range(func(k, v any) bool {
+		finalGotMap[k.(string)] = int(v.(*atomic.Int64).Load())
+		return true
+	})
+
+	AssertDeepEquals(t, "final", finalWant, finalGotMap)
 }
 
-func TestNoCreateVariationsInFinalDeps(t *testing.T) {
+func TestTransitionMutatorInFinalDeps(t *testing.T) {
 	GroupFixturePreparers(
 		FixtureRegisterWithContext(func(ctx RegistrationContext) {
 			ctx.FinalDepsMutators(func(ctx RegisterMutatorsContext) {

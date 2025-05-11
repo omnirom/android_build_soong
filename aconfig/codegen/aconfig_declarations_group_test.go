@@ -67,7 +67,7 @@ func TestAconfigDeclarationsGroup(t *testing.T) {
 	`)
 
 	// Check if aconfig_declarations_group module depends on the aconfig_library modules
-	java.CheckModuleDependencies(t, result.TestContext, "my_group", "", []string{
+	java.CheckModuleDependencies(t, result.TestContext, "my_group", "android_common", []string{
 		`bar-java`,
 		`foo-java`,
 	})

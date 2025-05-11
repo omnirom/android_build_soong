@@ -16,8 +16,6 @@
 #
 """A tool for checking that a manifest agrees with the build system."""
 
-from __future__ import print_function
-
 import argparse
 import json
 import re

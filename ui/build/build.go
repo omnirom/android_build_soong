@@ -428,7 +428,7 @@ func evaluateWhatToRun(config Config, verboseln func(v ...interface{})) int {
 	if !config.SoongBuildInvocationNeeded() {
 		// This means that the output of soong_build is not needed and thus it would
 		// run unnecessarily. In addition, if this code wasn't there invocations
-		// with only special-cased target names like "m bp2build" would result in
+		// with only special-cased target names would result in
 		// passing Ninja the empty target list and it would then build the default
 		// targets which is not what the user asked for.
 		what = what &^ RunNinja

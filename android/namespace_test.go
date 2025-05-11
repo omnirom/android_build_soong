@@ -646,7 +646,7 @@ var prepareForTestWithNamespace = GroupFixturePreparers(
 		ctx.RegisterModuleType("test_module", newTestModule)
 		ctx.Context.RegisterModuleType("blueprint_test_module", newBlueprintTestModule)
 		ctx.PreDepsMutators(func(ctx RegisterMutatorsContext) {
-			ctx.BottomUp("rename", renameMutator)
+			ctx.BottomUp("rename", renameMutator).UsesRename()
 		})
 	}),
 )
@@ -709,9 +709,6 @@ type testModule struct {
 }
 
 func (m *testModule) DepsMutator(ctx BottomUpMutatorContext) {
-	if m.properties.Rename != "" {
-		ctx.Rename(m.properties.Rename)
-	}
 	for _, d := range m.properties.Deps {
 		ctx.AddDependency(ctx.Module(), nil, d)
 	}

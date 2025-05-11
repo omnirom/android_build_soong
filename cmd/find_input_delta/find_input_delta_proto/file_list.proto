@@ -1,0 +1,59 @@
+//
+// Copyright (C) 2024 The Android Open-Source Project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto2";
+package android.find_input_delta_proto;
+option go_package = "android/soong/cmd/find_input_delta/find_input_delta_proto";
+
+enum FieldNumbers {
+  FIELD_NUMBERS_UNSPECIFIED = 0;
+  FIELD_NUMBERS_FILE_LIST = 1;
+}
+
+message FileList {
+  // The name of the file.
+  // In the outermost message, this is the name of the Ninja target.
+  // When used in `changes`, this is the name of the changed file.
+  optional string name = 1;
+
+  // The added files.
+  repeated string additions = 2;
+
+  // The changed files.
+  repeated FileList changes = 3;
+
+  // The deleted files.
+  repeated string deletions = 4;
+
+  // Count of files added/changed/deleted.
+  optional uint32 total_delta = 5;
+
+  // Counts by extension.
+  repeated FileCount counts = 6;
+}
+
+message FileCount {
+  // The file extension
+  optional string extension = 1;
+
+  // Number of added files with this extension.
+  optional uint32 additions = 2;
+
+  // Number of modified files with this extension.
+  optional uint32 modifications = 3;
+
+  // Number of deleted files with this extension.
+  optional uint32 deletions = 4;
+}

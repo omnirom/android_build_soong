@@ -212,3 +212,48 @@ func TestConfiguredJarList(t *testing.T) {
 		assertStringEquals(t, "apex1:jarA", list5.String())
 	})
 }
+
+func (p partialCompileFlags) updateEnabled(value bool) partialCompileFlags {
+	p.enabled = value
+	return p
+}
+
+func (p partialCompileFlags) updateUseD8(value bool) partialCompileFlags {
+	p.use_d8 = value
+	return p
+}
+
+func TestPartialCompile(t *testing.T) {
+	mockConfig := func(value string) *config {
+		c := &config{
+			env: map[string]string{
+				"SOONG_PARTIAL_COMPILE": value,
+			},
+		}
+		return c
+	}
+	tests := []struct {
+		value      string
+		isEngBuild bool
+		expected   partialCompileFlags
+	}{
+		{"", true, defaultPartialCompileFlags},
+		{"false", true, partialCompileFlags{}},
+		{"true", true, defaultPartialCompileFlags.updateEnabled(true)},
+		{"true", false, partialCompileFlags{}},
+		{"true,use_d8", true, defaultPartialCompileFlags.updateEnabled(true).updateUseD8(true)},
+		{"true,-use_d8", true, defaultPartialCompileFlags.updateEnabled(true).updateUseD8(false)},
+		{"use_d8,false", true, partialCompileFlags{}},
+		{"false,+use_d8", true, partialCompileFlags{}.updateUseD8(true)},
+	}
+
+	for _, test := range tests {
+		t.Run(test.value, func(t *testing.T) {
+			config := mockConfig(test.value)
+			flags, _ := config.parsePartialCompileFlags(test.isEngBuild)
+			if flags != test.expected {
+				t.Errorf("expected %v found %v", test.expected, flags)
+			}
+		})
+	}
+}

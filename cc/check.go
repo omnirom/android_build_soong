@@ -40,6 +40,8 @@ func CheckBadCompilerFlags(ctx BaseModuleContext, prop string, flags []string) {
 			ctx.PropertyErrorf(prop, "Bad flag: `%s`, use native_coverage instead", flag)
 		} else if flag == "-fwhole-program-vtables" {
 			ctx.PropertyErrorf(prop, "Bad flag: `%s`, use whole_program_vtables instead", flag)
+		} else if flag == "-gsplit-dwarf" {
+			ctx.PropertyErrorf(prop, "Bad flag: `%s`, soong cannot track dependencies to split dwarf debuginfo", flag)
 		} else if flag == "-fno-integrated-as" {
 			ctx.PropertyErrorf("Bad flag: `%s` is disallowed as it may invoke the `as` from the build host", flag)
 		} else if flag == "-Weverything" {

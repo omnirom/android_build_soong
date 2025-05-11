@@ -15,9 +15,7 @@
 package android
 
 import (
-	"io"
 	"path/filepath"
-	"strings"
 
 	"github.com/google/blueprint"
 )
@@ -55,21 +53,7 @@ func (this *sbomSingleton) GenerateBuildActions(ctx SingletonContext) {
 	if !ctx.Config().HasDeviceProduct() {
 		return
 	}
-	// Get all METADATA files and add them as implicit input
-	metadataFileListFile := PathForArbitraryOutput(ctx, ".module_paths", "METADATA.list")
-	f, err := ctx.Config().fs.Open(metadataFileListFile.String())
-	if err != nil {
-		panic(err)
-	}
-	b, err := io.ReadAll(f)
-	if err != nil {
-		panic(err)
-	}
-	allMetadataFiles := strings.Split(string(b), "\n")
-	implicits := []Path{metadataFileListFile}
-	for _, path := range allMetadataFiles {
-		implicits = append(implicits, PathForSource(ctx, path))
-	}
+	implicits := []Path{}
 	prodVars := ctx.Config().productVariables
 	buildFingerprintFile := PathForArbitraryOutput(ctx, "target", "product", String(prodVars.DeviceName), "build_fingerprint.txt")
 	implicits = append(implicits, buildFingerprintFile)

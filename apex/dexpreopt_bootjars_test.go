@@ -168,6 +168,7 @@ func testDexpreoptBoot(t *testing.T, ruleFile string, expectedInputs, expectedOu
 }
 
 func TestDexpreoptBootJarsWithSourceArtApex(t *testing.T) {
+	t.Parallel()
 	ruleFile := "out/soong/dexpreopt_arm64/dex_bootjars/android/system/framework/arm64/boot.art"
 
 	expectedInputs := []string{
@@ -206,6 +207,7 @@ func TestDexpreoptBootJarsWithSourceArtApex(t *testing.T) {
 // The only difference is that the ART profile should be deapexed from the prebuilt APEX. Other
 // inputs and outputs should be the same as above.
 func TestDexpreoptBootJarsWithPrebuiltArtApex(t *testing.T) {
+	t.Parallel()
 	ruleFile := "out/soong/dexpreopt_arm64/dex_bootjars/android/system/framework/arm64/boot.art"
 
 	expectedInputs := []string{
@@ -243,6 +245,7 @@ func TestDexpreoptBootJarsWithPrebuiltArtApex(t *testing.T) {
 
 // Changes to the boot.zip structure may break the ART APK scanner.
 func TestDexpreoptBootZip(t *testing.T) {
+	t.Parallel()
 	ruleFile := "boot.zip"
 
 	ctx := android.PathContextForTesting(android.TestArchConfig("", nil, "", nil))
@@ -271,6 +274,7 @@ func TestDexpreoptBootZip(t *testing.T) {
 // Multiple ART apexes might exist in the tree.
 // The profile should correspond to the apex selected using release build flags
 func TestDexpreoptProfileWithMultiplePrebuiltArtApexes(t *testing.T) {
+	t.Parallel()
 	ruleFile := "out/soong/dexpreopt_arm64/dex_bootjars/android/system/framework/arm64/boot.art"
 	bp := `
 		// Platform.
@@ -425,6 +429,7 @@ func TestDexpreoptProfileWithMultiplePrebuiltArtApexes(t *testing.T) {
 
 // Check that dexpreopt works with Google mainline prebuilts even in workspaces where source is missing
 func TestDexpreoptWithMainlinePrebuiltNoSource(t *testing.T) {
+	t.Parallel()
 	bp := `
 		// Platform.
 

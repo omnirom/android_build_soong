@@ -25,14 +25,15 @@ import (
 	"android/soong/dexpreopt"
 
 	"github.com/google/blueprint"
+	"github.com/google/blueprint/depset"
 	"github.com/google/blueprint/proptools"
 )
 
 type AndroidLibraryDependency interface {
 	ExportPackage() android.Path
-	ResourcesNodeDepSet() *android.DepSet[*resourcesNode]
-	RRODirsDepSet() *android.DepSet[rroDir]
-	ManifestsDepSet() *android.DepSet[android.Path]
+	ResourcesNodeDepSet() depset.DepSet[*resourcesNode]
+	RRODirsDepSet() depset.DepSet[rroDir]
+	ManifestsDepSet() depset.DepSet[android.Path]
 	SetRROEnforcedForDependent(enforce bool)
 	IsRROEnforced(ctx android.BaseModuleContext) bool
 }
@@ -45,7 +46,7 @@ func RegisterAARBuildComponents(ctx android.RegistrationContext) {
 	ctx.RegisterModuleType("android_library_import", AARImportFactory)
 	ctx.RegisterModuleType("android_library", AndroidLibraryFactory)
 	ctx.PostDepsMutators(func(ctx android.RegisterMutatorsContext) {
-		ctx.TopDown("propagate_rro_enforcement", propagateRROEnforcementMutator)
+		ctx.Transition("propagate_rro_enforcement", &propagateRROEnforcementTransitionMutator{})
 	})
 }
 
@@ -76,7 +77,7 @@ type aaptProperties struct {
 	// list of directories relative to the Blueprints file containing
 	// Android resources.  Defaults to ["res"] if a directory called res exists.
 	// Set to [] to disable the default.
-	Resource_dirs []string `android:"path"`
+	Resource_dirs proptools.Configurable[[]string] `android:"path"`
 
 	// list of zip files containing Android resources.
 	Resource_zips []string `android:"path"`
@@ -136,9 +137,9 @@ type aapt struct {
 
 	aaptProperties aaptProperties
 
-	resourcesNodesDepSet *android.DepSet[*resourcesNode]
-	rroDirsDepSet        *android.DepSet[rroDir]
-	manifestsDepSet      *android.DepSet[android.Path]
+	resourcesNodesDepSet depset.DepSet[*resourcesNode]
+	rroDirsDepSet        depset.DepSet[rroDir]
+	manifestsDepSet      depset.DepSet[android.Path]
 
 	manifestValues struct {
 		applicationId string
@@ -151,15 +152,67 @@ type split struct {
 	path   android.Path
 }
 
-// Propagate RRO enforcement flag to static lib dependencies transitively.
-func propagateRROEnforcementMutator(ctx android.TopDownMutatorContext) {
+// Propagate RRO enforcement flag to static lib dependencies transitively.  If EnforceRROGlobally is set then
+// all modules will use the "" variant.  If specific modules have RRO enforced, then modules (usually apps) with
+// RRO enabled will use the "" variation for themselves, but use the "rro" variant of direct and transitive static
+// android_library dependencies.
+type propagateRROEnforcementTransitionMutator struct{}
+
+func (p propagateRROEnforcementTransitionMutator) Split(ctx android.BaseModuleContext) []string {
+	// Never split modules, apps with or without RRO enabled use the "" variant, static android_library dependencies
+	// will use create the "rro" variant from incoming tranisitons.
+	return []string{""}
+}
+
+func (p propagateRROEnforcementTransitionMutator) OutgoingTransition(ctx android.OutgoingTransitionContext, sourceVariation string) string {
+	// Non-static dependencies are not involved in RRO and always use the empty variant.
+	if ctx.DepTag() != staticLibTag {
+		return ""
+	}
+
 	m := ctx.Module()
-	if d, ok := m.(AndroidLibraryDependency); ok && d.IsRROEnforced(ctx) {
-		ctx.VisitDirectDepsWithTag(staticLibTag, func(d android.Module) {
-			if a, ok := d.(AndroidLibraryDependency); ok {
-				a.SetRROEnforcedForDependent(true)
-			}
-		})
+	if _, ok := m.(AndroidLibraryDependency); ok {
+		// If RRO is enforced globally don't bother using "rro" variants, the empty variant will have RRO enabled.
+		if ctx.Config().EnforceRROGlobally() {
+			return ""
+		}
+
+		// If RRO is enabled for this module use the "rro" variants of static dependencies.  IncomingTransition will
+		// rewrite this back to "" if the dependency is not an android_library.
+		if ctx.Config().EnforceRROForModule(ctx.Module().Name()) {
+			return "rro"
+		}
+	}
+
+	return sourceVariation
+}
+
+func (p propagateRROEnforcementTransitionMutator) IncomingTransition(ctx android.IncomingTransitionContext, incomingVariation string) string {
+	// Propagate the "rro" variant to android_library modules, but use the empty variant for everything else.
+	if incomingVariation == "rro" {
+		m := ctx.Module()
+		if _, ok := m.(AndroidLibraryDependency); ok {
+			return "rro"
+		}
+		return ""
+	}
+
+	return ""
+}
+
+func (p propagateRROEnforcementTransitionMutator) Mutate(ctx android.BottomUpMutatorContext, variation string) {
+	m := ctx.Module()
+	if d, ok := m.(AndroidLibraryDependency); ok {
+		if variation == "rro" {
+			// This is the "rro" variant of a module that has both variants, mark this one as RRO enabled and
+			// hide it from make to avoid collisions with the non-RRO empty variant.
+			d.SetRROEnforcedForDependent(true)
+			m.HideFromMake()
+		} else if ctx.Config().EnforceRROGlobally() {
+			// RRO is enabled globally, mark it enabled for this module, but there is only one variant so no
+			// need to hide it from make.
+			d.SetRROEnforcedForDependent(true)
+		}
 	}
 }
 
@@ -180,15 +233,15 @@ func (a *aapt) filterProduct() string {
 func (a *aapt) ExportPackage() android.Path {
 	return a.exportPackage
 }
-func (a *aapt) ResourcesNodeDepSet() *android.DepSet[*resourcesNode] {
+func (a *aapt) ResourcesNodeDepSet() depset.DepSet[*resourcesNode] {
 	return a.resourcesNodesDepSet
 }
 
-func (a *aapt) RRODirsDepSet() *android.DepSet[rroDir] {
+func (a *aapt) RRODirsDepSet() depset.DepSet[rroDir] {
 	return a.rroDirsDepSet
 }
 
-func (a *aapt) ManifestsDepSet() *android.DepSet[android.Path] {
+func (a *aapt) ManifestsDepSet() depset.DepSet[android.Path] {
 	return a.manifestsDepSet
 }
 
@@ -204,7 +257,7 @@ func (a *aapt) IsRROEnforced(ctx android.BaseModuleContext) bool {
 }
 
 func (a *aapt) aapt2Flags(ctx android.ModuleContext, sdkContext android.SdkContext,
-	manifestPath android.Path) (compileFlags, linkFlags []string, linkDeps android.Paths,
+	manifestPath android.Path, doNotIncludeAssetDirImplicitly bool) (compileFlags, linkFlags []string, linkDeps android.Paths,
 	resDirs, overlayDirs []globbedResourceDir, rroDirs []rroDir, resZips android.Paths) {
 
 	hasVersionCode := android.PrefixInList(a.aaptProperties.Aaptflags, "--version-code")
@@ -221,8 +274,13 @@ func (a *aapt) aapt2Flags(ctx android.ModuleContext, sdkContext android.SdkConte
 		Paths:       a.aaptProperties.Assets,
 		IncludeDirs: false,
 	})
-	assetDirs := android.PathsWithOptionalDefaultForModuleSrc(ctx, a.aaptProperties.Asset_dirs, "assets")
-	resourceDirs := android.PathsWithOptionalDefaultForModuleSrc(ctx, a.aaptProperties.Resource_dirs, "res")
+	var assetDirs android.Paths
+	if doNotIncludeAssetDirImplicitly {
+		assetDirs = android.PathsForModuleSrc(ctx, a.aaptProperties.Asset_dirs)
+	} else {
+		assetDirs = android.PathsWithOptionalDefaultForModuleSrc(ctx, a.aaptProperties.Asset_dirs, "assets")
+	}
+	resourceDirs := android.PathsWithOptionalDefaultForModuleSrc(ctx, a.aaptProperties.Resource_dirs.GetOrDefault(ctx, nil), "res")
 	resourceZips := android.PathsForModuleSrc(ctx, a.aaptProperties.Resource_zips)
 
 	// Glob directories into lists of paths
@@ -367,6 +425,25 @@ type aaptBuildActionOptions struct {
 	extraLinkFlags                 []string
 	aconfigTextFiles               android.Paths
 	usesLibrary                    *usesLibrary
+	// If rroDirs is provided, it will be used to generate package-res.apk
+	rroDirs *android.Paths
+	// If manifestForAapt is not nil, it will be used for aapt instead of the default source manifest.
+	manifestForAapt android.Path
+}
+
+func filterRRO(rroDirsDepSet depset.DepSet[rroDir], filter overlayType) android.Paths {
+	var paths android.Paths
+	seen := make(map[android.Path]bool)
+	for _, d := range rroDirsDepSet.ToList() {
+		if d.overlayType == filter {
+			if seen[d.path] {
+				continue
+			}
+			seen[d.path] = true
+			paths = append(paths, d.path)
+		}
+	}
+	return paths
 }
 
 func (a *aapt) buildActions(ctx android.ModuleContext, opts aaptBuildActionOptions) {
@@ -378,10 +455,15 @@ func (a *aapt) buildActions(ctx android.ModuleContext, opts aaptBuildActionOptio
 	opts.classLoaderContexts = opts.classLoaderContexts.ExcludeLibs(opts.excludedLibs)
 
 	// App manifest file
-	manifestFile := proptools.StringDefault(a.aaptProperties.Manifest, "AndroidManifest.xml")
-	manifestSrcPath := android.PathForModuleSrc(ctx, manifestFile)
+	var manifestFilePath android.Path
+	if opts.manifestForAapt != nil {
+		manifestFilePath = opts.manifestForAapt
+	} else {
+		manifestFile := proptools.StringDefault(a.aaptProperties.Manifest, "AndroidManifest.xml")
+		manifestFilePath = android.PathForModuleSrc(ctx, manifestFile)
+	}
 
-	manifestPath := ManifestFixer(ctx, manifestSrcPath, ManifestFixerParams{
+	manifestPath := ManifestFixer(ctx, manifestFilePath, ManifestFixerParams{
 		SdkContext:                     opts.sdkContext,
 		ClassLoaderContexts:            opts.classLoaderContexts,
 		IsLibrary:                      a.isLibrary,
@@ -420,7 +502,12 @@ func (a *aapt) buildActions(ctx android.ModuleContext, opts aaptBuildActionOptio
 		a.mergedManifestFile = manifestPath
 	}
 
-	compileFlags, linkFlags, linkDeps, resDirs, overlayDirs, rroDirs, resZips := a.aapt2Flags(ctx, opts.sdkContext, manifestPath)
+	// do not include assets in autogenerated RRO.
+	compileFlags, linkFlags, linkDeps, resDirs, overlayDirs, rroDirs, resZips := a.aapt2Flags(ctx, opts.sdkContext, manifestPath, opts.rroDirs != nil)
+
+	a.rroDirsDepSet = depset.NewBuilder[rroDir](depset.TOPOLOGICAL).
+		Direct(rroDirs...).
+		Transitive(staticRRODirsDepSet).Build()
 
 	linkFlags = append(linkFlags, libFlags...)
 	linkDeps = append(linkDeps, sharedExportPackages...)
@@ -434,9 +521,9 @@ func (a *aapt) buildActions(ctx android.ModuleContext, opts aaptBuildActionOptio
 	}
 
 	linkFlags = append(linkFlags, "--no-static-lib-packages")
-	if a.isLibrary && a.useResourceProcessorBusyBox(ctx) {
-		// When building an android_library using ResourceProcessorBusyBox pass --merge-only to skip resource
-		// references validation until the final app link step when all static libraries are present.
+	if a.isLibrary {
+		// Pass --merge-only to skip resource references validation until the final
+		// app link step when when all static libraries are present.
 		linkFlags = append(linkFlags, "--merge-only")
 	}
 
@@ -510,9 +597,16 @@ func (a *aapt) buildActions(ctx android.ModuleContext, opts aaptBuildActionOptio
 		}
 	}
 
-	for _, dir := range overlayDirs {
-		compiledOverlay = append(compiledOverlay, aapt2Compile(ctx, dir.dir, dir.files,
-			compileFlags, a.filterProduct(), opts.aconfigTextFiles).Paths()...)
+	var compiledRro, compiledRroOverlay android.Paths
+	if opts.rroDirs != nil {
+		compiledRro, compiledRroOverlay = a.compileResInDir(ctx, *opts.rroDirs, compileFlags, opts.aconfigTextFiles)
+	} else {
+		// RRO enforcement is done based on module name. Compile the overlayDirs only if rroDirs is nil.
+		// This ensures that the autogenerated RROs do not compile the overlay dirs twice.
+		for _, dir := range overlayDirs {
+			compiledOverlay = append(compiledOverlay, aapt2Compile(ctx, dir.dir, dir.files,
+				compileFlags, a.filterProduct(), opts.aconfigTextFiles).Paths()...)
+		}
 	}
 
 	var splitPackages android.WritablePaths
@@ -541,10 +635,20 @@ func (a *aapt) buildActions(ctx android.ModuleContext, opts aaptBuildActionOptio
 	if !a.isLibrary {
 		transitiveAssets = android.ReverseSliceInPlace(staticDeps.assets())
 	}
-	aapt2Link(ctx, packageRes, srcJar, proguardOptionsFile, rTxt,
-		linkFlags, linkDeps, compiledRes, compiledOverlay, transitiveAssets, splitPackages,
-		opts.aconfigTextFiles)
-	ctx.CheckbuildFile(packageRes)
+	if opts.rroDirs == nil { // link resources and overlay
+		aapt2Link(ctx, packageRes, srcJar, proguardOptionsFile, rTxt,
+			linkFlags, linkDeps, compiledRes, compiledOverlay, transitiveAssets, splitPackages,
+			opts.aconfigTextFiles)
+		ctx.CheckbuildFile(packageRes)
+	} else { // link autogenerated rro
+		if len(compiledRro) == 0 {
+			return
+		}
+		aapt2Link(ctx, packageRes, srcJar, proguardOptionsFile, rTxt,
+			linkFlags, linkDeps, compiledRro, compiledRroOverlay, nil, nil,
+			opts.aconfigTextFiles)
+		ctx.CheckbuildFile(packageRes)
+	}
 
 	// Extract assets from the resource package output so that they can be used later in aapt2link
 	// for modules that depend on this one.
@@ -590,7 +694,7 @@ func (a *aapt) buildActions(ctx android.ModuleContext, opts aaptBuildActionOptio
 	a.extraAaptPackagesFile = extraPackages
 	a.rTxt = rTxt
 	a.splits = splits
-	a.resourcesNodesDepSet = android.NewDepSetBuilder[*resourcesNode](android.TOPOLOGICAL).
+	a.resourcesNodesDepSet = depset.NewBuilder[*resourcesNode](depset.TOPOLOGICAL).
 		Direct(&resourcesNode{
 			resPackage:          a.exportPackage,
 			manifest:            a.manifestPath,
@@ -602,13 +706,44 @@ func (a *aapt) buildActions(ctx android.ModuleContext, opts aaptBuildActionOptio
 			usedResourceProcessor: a.useResourceProcessorBusyBox(ctx),
 		}).
 		Transitive(staticResourcesNodesDepSet).Build()
-	a.rroDirsDepSet = android.NewDepSetBuilder[rroDir](android.TOPOLOGICAL).
-		Direct(rroDirs...).
-		Transitive(staticRRODirsDepSet).Build()
-	a.manifestsDepSet = android.NewDepSetBuilder[android.Path](android.TOPOLOGICAL).
+	a.manifestsDepSet = depset.NewBuilder[android.Path](depset.TOPOLOGICAL).
 		Direct(a.manifestPath).
 		DirectSlice(additionalManifests).
 		Transitive(staticManifestsDepSet).Build()
+}
+
+// comileResInDir finds the resource files in dirs by globbing and then compiles them using aapt2
+// returns the file paths of compiled resources
+// dirs[0] is used as compileRes
+// dirs[1:] is used as compileOverlay
+func (a *aapt) compileResInDir(ctx android.ModuleContext, dirs android.Paths, compileFlags []string, aconfig android.Paths) (android.Paths, android.Paths) {
+	filesInDir := func(dir android.Path) android.Paths {
+		files, err := ctx.GlobWithDeps(filepath.Join(dir.String(), "**/*"), androidResourceIgnoreFilenames)
+		if err != nil {
+			ctx.ModuleErrorf("failed to glob overlay resource dir %q: %s", dir, err.Error())
+			return nil
+		}
+		var filePaths android.Paths
+		for _, file := range files {
+			if strings.HasSuffix(file, "/") {
+				continue // ignore directories
+			}
+			filePaths = append(filePaths, android.PathForSource(ctx, file))
+		}
+		return filePaths
+	}
+
+	var compiledRes, compiledOverlay android.Paths
+	if len(dirs) == 0 {
+		return nil, nil
+	}
+	compiledRes = append(compiledRes, aapt2Compile(ctx, dirs[0], filesInDir(dirs[0]), compileFlags, a.filterProduct(), aconfig).Paths()...)
+	if len(dirs) > 0 {
+		for _, dir := range dirs[1:] {
+			compiledOverlay = append(compiledOverlay, aapt2Compile(ctx, dir, filesInDir(dir), compileFlags, a.filterProduct(), aconfig).Paths()...)
+		}
+	}
+	return compiledRes, compiledOverlay
 }
 
 var resourceProcessorBusyBox = pctx.AndroidStaticRule("resourceProcessorBusyBox",
@@ -724,8 +859,8 @@ func (t transitiveAarDeps) assets() android.Paths {
 // aaptLibs collects libraries from dependencies and sdk_version and converts them into paths
 func aaptLibs(ctx android.ModuleContext, sdkContext android.SdkContext,
 	classLoaderContexts dexpreopt.ClassLoaderContextMap, usesLibrary *usesLibrary) (
-	staticResourcesNodes, sharedResourcesNodes *android.DepSet[*resourcesNode], staticRRODirs *android.DepSet[rroDir],
-	staticManifests *android.DepSet[android.Path], sharedLibs android.Paths, flags []string) {
+	staticResourcesNodes, sharedResourcesNodes depset.DepSet[*resourcesNode], staticRRODirs depset.DepSet[rroDir],
+	staticManifests depset.DepSet[android.Path], sharedLibs android.Paths, flags []string) {
 
 	if classLoaderContexts == nil {
 		// Not all callers need to compute class loader context, those who don't just pass nil.
@@ -738,10 +873,10 @@ func aaptLibs(ctx android.ModuleContext, sdkContext android.SdkContext,
 		sharedLibs = append(sharedLibs, sdkDep.jars...)
 	}
 
-	var staticResourcesNodeDepSets []*android.DepSet[*resourcesNode]
-	var sharedResourcesNodeDepSets []*android.DepSet[*resourcesNode]
-	rroDirsDepSetBuilder := android.NewDepSetBuilder[rroDir](android.TOPOLOGICAL)
-	manifestsDepSetBuilder := android.NewDepSetBuilder[android.Path](android.TOPOLOGICAL)
+	var staticResourcesNodeDepSets []depset.DepSet[*resourcesNode]
+	var sharedResourcesNodeDepSets []depset.DepSet[*resourcesNode]
+	rroDirsDepSetBuilder := depset.NewBuilder[rroDir](depset.TOPOLOGICAL)
+	manifestsDepSetBuilder := depset.NewBuilder[android.Path](depset.TOPOLOGICAL)
 
 	ctx.VisitDirectDeps(func(module android.Module) {
 		depTag := ctx.OtherModuleDependencyTag(module)
@@ -755,7 +890,7 @@ func aaptLibs(ctx android.ModuleContext, sdkContext android.SdkContext,
 		switch depTag {
 		case instrumentationForTag:
 			// Nothing, instrumentationForTag is treated as libTag for javac but not for aapt2.
-		case sdkLibTag, libTag:
+		case sdkLibTag, libTag, rroDepTag:
 			if exportPackage != nil {
 				sharedResourcesNodeDepSets = append(sharedResourcesNodeDepSets, aarDep.ResourcesNodeDepSet())
 				sharedLibs = append(sharedLibs, exportPackage)
@@ -785,9 +920,9 @@ func aaptLibs(ctx android.ModuleContext, sdkContext android.SdkContext,
 	// dependencies) the highest priority dependency is listed first, but for resources the highest priority
 	// dependency has to be listed last.  This is also inconsistent with the way manifests from the same
 	// transitive dependencies are merged.
-	staticResourcesNodes = android.NewDepSet(android.TOPOLOGICAL, nil,
+	staticResourcesNodes = depset.New(depset.TOPOLOGICAL, nil,
 		android.ReverseSliceInPlace(staticResourcesNodeDepSets))
-	sharedResourcesNodes = android.NewDepSet(android.TOPOLOGICAL, nil,
+	sharedResourcesNodes = depset.New(depset.TOPOLOGICAL, nil,
 		android.ReverseSliceInPlace(sharedResourcesNodeDepSets))
 
 	staticRRODirs = rroDirsDepSetBuilder.Build()
@@ -1015,8 +1150,8 @@ type AARImport struct {
 	rTxt                               android.Path
 	rJar                               android.Path
 
-	resourcesNodesDepSet *android.DepSet[*resourcesNode]
-	manifestsDepSet      *android.DepSet[android.Path]
+	resourcesNodesDepSet depset.DepSet[*resourcesNode]
+	manifestsDepSet      depset.DepSet[android.Path]
 
 	hideApexVariantFromMake bool
 
@@ -1062,15 +1197,15 @@ var _ AndroidLibraryDependency = (*AARImport)(nil)
 func (a *AARImport) ExportPackage() android.Path {
 	return a.exportPackage
 }
-func (a *AARImport) ResourcesNodeDepSet() *android.DepSet[*resourcesNode] {
+func (a *AARImport) ResourcesNodeDepSet() depset.DepSet[*resourcesNode] {
 	return a.resourcesNodesDepSet
 }
 
-func (a *AARImport) RRODirsDepSet() *android.DepSet[rroDir] {
-	return android.NewDepSet[rroDir](android.TOPOLOGICAL, nil, nil)
+func (a *AARImport) RRODirsDepSet() depset.DepSet[rroDir] {
+	return depset.New[rroDir](depset.TOPOLOGICAL, nil, nil)
 }
 
-func (a *AARImport) ManifestsDepSet() *android.DepSet[android.Path] {
+func (a *AARImport) ManifestsDepSet() depset.DepSet[android.Path] {
 	return a.manifestsDepSet
 }
 
@@ -1187,13 +1322,13 @@ func (a *AARImport) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	proguardFlags := extractedAARDir.Join(ctx, "proguard.txt")
 	transitiveProguardFlags, transitiveUnconditionalExportedFlags := collectDepProguardSpecInfo(ctx)
 	android.SetProvider(ctx, ProguardSpecInfoProvider, ProguardSpecInfo{
-		ProguardFlagsFiles: android.NewDepSet[android.Path](
-			android.POSTORDER,
+		ProguardFlagsFiles: depset.New[android.Path](
+			depset.POSTORDER,
 			android.Paths{proguardFlags},
 			transitiveProguardFlags,
 		),
-		UnconditionallyExportedProguardFlags: android.NewDepSet[android.Path](
-			android.POSTORDER,
+		UnconditionallyExportedProguardFlags: depset.New[android.Path](
+			depset.POSTORDER,
 			nil,
 			transitiveUnconditionalExportedFlags,
 		),
@@ -1274,7 +1409,7 @@ func (a *AARImport) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	aapt2ExtractExtraPackages(ctx, extraAaptPackagesFile, a.rJar)
 	a.extraAaptPackagesFile = extraAaptPackagesFile
 
-	resourcesNodesDepSetBuilder := android.NewDepSetBuilder[*resourcesNode](android.TOPOLOGICAL)
+	resourcesNodesDepSetBuilder := depset.NewBuilder[*resourcesNode](depset.TOPOLOGICAL)
 	resourcesNodesDepSetBuilder.Direct(&resourcesNode{
 		resPackage: a.exportPackage,
 		manifest:   a.manifest,
@@ -1287,7 +1422,7 @@ func (a *AARImport) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	resourcesNodesDepSetBuilder.Transitive(staticResourcesNodesDepSet)
 	a.resourcesNodesDepSet = resourcesNodesDepSetBuilder.Build()
 
-	manifestDepSetBuilder := android.NewDepSetBuilder[android.Path](android.TOPOLOGICAL).Direct(a.manifest)
+	manifestDepSetBuilder := depset.NewBuilder[android.Path](depset.TOPOLOGICAL).Direct(a.manifest)
 	manifestDepSetBuilder.Transitive(staticManifestsDepSet)
 	a.manifestsDepSet = manifestDepSetBuilder.Build()
 
@@ -1306,9 +1441,9 @@ func (a *AARImport) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	var staticJars android.Paths
 	var staticHeaderJars android.Paths
 	var staticResourceJars android.Paths
-	var transitiveStaticLibsHeaderJars []*android.DepSet[android.Path]
-	var transitiveStaticLibsImplementationJars []*android.DepSet[android.Path]
-	var transitiveStaticLibsResourceJars []*android.DepSet[android.Path]
+	var transitiveStaticLibsHeaderJars []depset.DepSet[android.Path]
+	var transitiveStaticLibsImplementationJars []depset.DepSet[android.Path]
+	var transitiveStaticLibsResourceJars []depset.DepSet[android.Path]
 
 	ctx.VisitDirectDeps(func(module android.Module) {
 		if dep, ok := android.OtherModuleProvider(ctx, module, JavaInfoProvider); ok {
@@ -1318,24 +1453,18 @@ func (a *AARImport) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 				staticJars = append(staticJars, dep.ImplementationJars...)
 				staticHeaderJars = append(staticHeaderJars, dep.HeaderJars...)
 				staticResourceJars = append(staticResourceJars, dep.ResourceJars...)
-				if dep.TransitiveStaticLibsHeaderJars != nil {
-					transitiveStaticLibsHeaderJars = append(transitiveStaticLibsHeaderJars, dep.TransitiveStaticLibsHeaderJars)
-				}
-				if dep.TransitiveStaticLibsImplementationJars != nil {
-					transitiveStaticLibsImplementationJars = append(transitiveStaticLibsImplementationJars, dep.TransitiveStaticLibsImplementationJars)
-				}
-				if dep.TransitiveStaticLibsResourceJars != nil {
-					transitiveStaticLibsResourceJars = append(transitiveStaticLibsResourceJars, dep.TransitiveStaticLibsResourceJars)
-				}
+				transitiveStaticLibsHeaderJars = append(transitiveStaticLibsHeaderJars, dep.TransitiveStaticLibsHeaderJars)
+				transitiveStaticLibsImplementationJars = append(transitiveStaticLibsImplementationJars, dep.TransitiveStaticLibsImplementationJars)
+				transitiveStaticLibsResourceJars = append(transitiveStaticLibsResourceJars, dep.TransitiveStaticLibsResourceJars)
 			}
 		}
 		addCLCFromDep(ctx, module, a.classLoaderContexts)
 		addMissingOptionalUsesLibsFromDep(ctx, module, &a.usesLibrary)
 	})
 
-	completeStaticLibsHeaderJars := android.NewDepSet(android.PREORDER, android.Paths{classpathFile}, transitiveStaticLibsHeaderJars)
-	completeStaticLibsImplementationJars := android.NewDepSet(android.PREORDER, android.Paths{classpathFile}, transitiveStaticLibsImplementationJars)
-	completeStaticLibsResourceJars := android.NewDepSet(android.PREORDER, nil, transitiveStaticLibsResourceJars)
+	completeStaticLibsHeaderJars := depset.New(depset.PREORDER, android.Paths{classpathFile}, transitiveStaticLibsHeaderJars)
+	completeStaticLibsImplementationJars := depset.New(depset.PREORDER, android.Paths{classpathFile}, transitiveStaticLibsImplementationJars)
+	completeStaticLibsResourceJars := depset.New(depset.PREORDER, nil, transitiveStaticLibsResourceJars)
 
 	var implementationJarFile android.Path
 	var combineJars android.Paths

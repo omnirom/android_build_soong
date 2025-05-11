@@ -74,14 +74,14 @@ func GetProtoFlags(ctx ModuleContext, p *ProtoProperties) ProtoFlags {
 		flags = append(flags, JoinWithPrefix(rootProtoIncludeDirs.Strings(), "-I"))
 	}
 
-	ctx.VisitDirectDepsWithTag(ProtoPluginDepTag, func(dep Module) {
-		if hostTool, ok := dep.(HostToolProvider); !ok || !hostTool.HostToolPath().Valid() {
+	ctx.VisitDirectDepsProxyWithTag(ProtoPluginDepTag, func(dep ModuleProxy) {
+		if h, ok := OtherModuleProvider(ctx, dep, HostToolProviderKey); !ok || !h.HostToolPath.Valid() {
 			ctx.PropertyErrorf("proto.plugin", "module %q is not a host tool provider",
 				ctx.OtherModuleName(dep))
 		} else {
 			plugin := String(p.Proto.Plugin)
-			deps = append(deps, hostTool.HostToolPath().Path())
-			flags = append(flags, "--plugin=protoc-gen-"+plugin+"="+hostTool.HostToolPath().String())
+			deps = append(deps, h.HostToolPath.Path())
+			flags = append(flags, "--plugin=protoc-gen-"+plugin+"="+h.HostToolPath.String())
 		}
 	})
 

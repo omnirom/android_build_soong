@@ -94,14 +94,6 @@ var hwasanFlags = []string{
 	"-C llvm-args=--hwasan-with-ifunc",
 }
 
-func boolPtr(v bool) *bool {
-	if v {
-		return &v
-	} else {
-		return nil
-	}
-}
-
 func init() {
 }
 func (sanitize *sanitize) props() []interface{} {
@@ -110,6 +102,11 @@ func (sanitize *sanitize) props() []interface{} {
 
 func (sanitize *sanitize) begin(ctx BaseModuleContext) {
 	s := &sanitize.Properties.Sanitize
+
+	// Disable sanitizers for musl x86 modules, rustc does not support any sanitizers.
+	if ctx.Os() == android.LinuxMusl && ctx.Arch().ArchType == android.X86 {
+		s.Never = proptools.BoolPtr(true)
+	}
 
 	// Never always wins.
 	if Bool(s.Never) {
@@ -210,11 +207,6 @@ func (sanitize *sanitize) begin(ctx BaseModuleContext) {
 	// Memtag_heap is only implemented on AArch64.
 	if ctx.Arch().ArchType != android.Arm64 || !ctx.Os().Bionic() {
 		s.Memtag_heap = nil
-	}
-
-	// Disable sanitizers for musl x86 modules, rustc does not support any sanitizers.
-	if ctx.Os() == android.LinuxMusl && ctx.Arch().ArchType == android.X86 {
-		s.Never = boolPtr(true)
 	}
 
 	// TODO:(b/178369775)
@@ -318,16 +310,16 @@ func (sanitize *sanitize) SetSanitizer(t cc.SanitizerType, b bool) {
 	sanitizerSet := false
 	switch t {
 	case cc.Fuzzer:
-		sanitize.Properties.Sanitize.Fuzzer = boolPtr(b)
+		sanitize.Properties.Sanitize.Fuzzer = proptools.BoolPtr(b)
 		sanitizerSet = true
 	case cc.Asan:
-		sanitize.Properties.Sanitize.Address = boolPtr(b)
+		sanitize.Properties.Sanitize.Address = proptools.BoolPtr(b)
 		sanitizerSet = true
 	case cc.Hwasan:
-		sanitize.Properties.Sanitize.Hwaddress = boolPtr(b)
+		sanitize.Properties.Sanitize.Hwaddress = proptools.BoolPtr(b)
 		sanitizerSet = true
 	case cc.Memtag_heap:
-		sanitize.Properties.Sanitize.Memtag_heap = boolPtr(b)
+		sanitize.Properties.Sanitize.Memtag_heap = proptools.BoolPtr(b)
 		sanitizerSet = true
 	default:
 		panic(fmt.Errorf("setting unsupported sanitizerType %d", t))

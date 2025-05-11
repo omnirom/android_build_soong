@@ -184,12 +184,21 @@ python_binary_host {
     libs: ["ninja_rsp"],
 }
 
-python_test_host {
-    name: "lint_project_xml_test",
-    main: "lint_project_xml_test.py",
+python_binary_host {
+    name: "lint_strict_updatability_checks",
+    main: "lint_strict_updatability_checks.py",
     srcs: [
-        "lint_project_xml_test.py",
-        "lint_project_xml.py",
+        "lint_strict_updatability_checks.py",
+    ],
+    libs: ["ninja_rsp"],
+}
+
+python_test_host {
+    name: "lint_strict_updatability_checks_test",
+    main: "lint_strict_updatability_checks_test.py",
+    srcs: [
+        "lint_strict_updatability_checks_test.py",
+        "lint_strict_updatability_checks.py",
     ],
     libs: ["ninja_rsp"],
     test_suites: ["general-tests"],

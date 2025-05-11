@@ -196,16 +196,16 @@ func AutoGenTestConfig(ctx android.ModuleContext, options AutoGenTestConfigOptio
 }
 
 var autogenInstrumentationTest = pctx.StaticRule("autogenInstrumentationTest", blueprint.RuleParams{
-	Command: "${AutoGenTestConfigScript} $out $in ${EmptyTestConfig} $template ${extraConfigs}",
+	Command: "${AutoGenTestConfigScript} $out $in ${EmptyTestConfig} $template ${extraConfigs} ${extraTestRunnerConfigs}",
 	CommandDeps: []string{
 		"${AutoGenTestConfigScript}",
 		"${EmptyTestConfig}",
 		"$template",
 	},
-}, "name", "template", "extraConfigs")
+}, "name", "template", "extraConfigs", "extraTestRunnerConfigs")
 
 func AutoGenInstrumentationTestConfig(ctx android.ModuleContext, testConfigProp *string,
-	testConfigTemplateProp *string, manifest android.Path, testSuites []string, autoGenConfig *bool, configs []Config) android.Path {
+	testConfigTemplateProp *string, manifest android.Path, testSuites []string, autoGenConfig *bool, configs []Config, testRunnerConfigs []Option) android.Path {
 	path, autogenPath := testConfigPath(ctx, testConfigProp, testSuites, autoGenConfig, testConfigTemplateProp)
 	var configStrings []string
 	if autogenPath != nil {
@@ -220,15 +220,26 @@ func AutoGenInstrumentationTestConfig(ctx android.ModuleContext, testConfigProp 
 		extraConfigs := strings.Join(configStrings, fmt.Sprintf("\\n%s", test_xml_indent))
 		extraConfigs = fmt.Sprintf("--extra-configs '%s'", extraConfigs)
 
+		var testRunnerConfigStrings []string
+		for _, config := range testRunnerConfigs {
+			testRunnerConfigStrings = append(testRunnerConfigStrings, config.Config())
+		}
+		extraTestRunnerConfigs := strings.Join(testRunnerConfigStrings, fmt.Sprintf("\\n%s%s", test_xml_indent, test_xml_indent))
+		if len(extraTestRunnerConfigs) > 0 {
+			extraTestRunnerConfigs += fmt.Sprintf("\\n%s%s", test_xml_indent, test_xml_indent)
+		}
+		extraTestRunnerConfigs = fmt.Sprintf("--extra-test-runner-configs '%s'", extraTestRunnerConfigs)
+
 		ctx.Build(pctx, android.BuildParams{
 			Rule:        autogenInstrumentationTest,
 			Description: "test config",
 			Input:       manifest,
 			Output:      autogenPath,
 			Args: map[string]string{
-				"name":         ctx.ModuleName(),
-				"template":     template,
-				"extraConfigs": extraConfigs,
+				"name":                   ctx.ModuleName(),
+				"template":               template,
+				"extraConfigs":           extraConfigs,
+				"extraTestRunnerConfigs": extraTestRunnerConfigs,
 			},
 		})
 		return autogenPath

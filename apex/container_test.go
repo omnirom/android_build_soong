@@ -15,10 +15,11 @@
 package apex
 
 import (
-	"android/soong/android"
-	"android/soong/java"
 	"fmt"
 	"testing"
+
+	"android/soong/android"
+	"android/soong/java"
 )
 
 var checkContainerMatch = func(t *testing.T, name string, container string, expected bool, actual bool) {
@@ -27,6 +28,7 @@ var checkContainerMatch = func(t *testing.T, name string, container string, expe
 }
 
 func TestApexDepsContainers(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		prepareForApexTest,
 		java.PrepareForTestWithJavaSdkLibraryFiles,
@@ -163,6 +165,7 @@ func TestApexDepsContainers(t *testing.T) {
 }
 
 func TestNonUpdatableApexDepsContainers(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		prepareForApexTest,
 		java.PrepareForTestWithJavaSdkLibraryFiles,
@@ -277,6 +280,7 @@ func TestNonUpdatableApexDepsContainers(t *testing.T) {
 }
 
 func TestUpdatableAndNonUpdatableApexesIdenticalMinSdkVersion(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		prepareForApexTest,
 		java.PrepareForTestWithJavaSdkLibraryFiles,
@@ -326,6 +330,7 @@ func TestUpdatableAndNonUpdatableApexesIdenticalMinSdkVersion(t *testing.T) {
 			],
 			min_sdk_version: "30",
 			sdk_version: "current",
+			compile_dex: true,
 		}
 	`)
 

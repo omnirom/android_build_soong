@@ -2,3 +2,12 @@
 // subdirs= and optional_subdirs= are obsolete and this file no longer
 // needs a list of the top level directories that may contain Android.bp
 // files.
+
+// TODO(b/253827323) Remove this. A module in internal builds needs to disable a new check,
+// IdentifierName, when errorprone is updated. In order to avoid having the update errorprone
+// in internal first, and then aosp, create this variable that we can fill out in internal in the
+// same topic as the errorprone update, then move the flag out of the variable after the update,
+// then remove the variable.
+disable_identifiername_for_errorprone_update = [
+    "-Xep:IdentifierName:OFF",
+]

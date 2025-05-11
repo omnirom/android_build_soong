@@ -22,9 +22,15 @@ import (
 )
 
 var (
-	lsdumpPaths     []string
 	lsdumpPathsLock sync.Mutex
+	lsdumpKey       = android.NewOnceKey("lsdump")
 )
+
+func lsdumpPaths(config android.Config) *[]string {
+	return config.Once(lsdumpKey, func() any {
+		return &[]string{}
+	}).(*[]string)
+}
 
 type lsdumpTag string
 
@@ -84,8 +90,8 @@ func (props *headerAbiCheckerProperties) explicitlyDisabled() bool {
 
 type SAbiProperties struct {
 	// Whether ABI dump should be created for this module.
-	// Set by `sabiDepsMutator` if this module is a shared library that needs ABI check, or a static
-	// library that is depended on by an ABI checked library.
+	// Set by `sabiTransitionMutator` if this module is a shared library that needs ABI check,
+	// or a static library that is depended on by an ABI checked library.
 	ShouldCreateSourceAbiDump bool `blueprint:"mutated"`
 
 	// Include directories that may contain ABI information exported by a library.
@@ -121,10 +127,9 @@ func (sabi *sabi) shouldCreateSourceAbiDump() bool {
 }
 
 // Returns a slice of strings that represent the ABI dumps generated for this module.
-func classifySourceAbiDump(ctx android.BaseModuleContext) []lsdumpTag {
+func classifySourceAbiDump(m *Module) []lsdumpTag {
 	result := []lsdumpTag{}
-	m := ctx.Module().(*Module)
-	headerAbiChecker := m.library.getHeaderAbiCheckerProperties(ctx)
+	headerAbiChecker := m.library.getHeaderAbiCheckerProperties(m)
 	if headerAbiChecker.explicitlyDisabled() {
 		return result
 	}
@@ -149,24 +154,37 @@ func classifySourceAbiDump(ctx android.BaseModuleContext) []lsdumpTag {
 	return result
 }
 
-// Called from sabiDepsMutator to check whether ABI dumps should be created for this module.
+type shouldCreateAbiDumpContext interface {
+	android.ModuleProviderContext
+	Module() android.Module
+	Config() android.Config
+}
+
+var _ shouldCreateAbiDumpContext = android.ModuleContext(nil)
+var _ shouldCreateAbiDumpContext = android.OutgoingTransitionContext(nil)
+
+// Called from sabiTransitionMutator to check whether ABI dumps should be created for this module.
 // ctx should be wrapping a native library type module.
-func shouldCreateSourceAbiDumpForLibrary(ctx android.BaseModuleContext) bool {
-	// Only generate ABI dump for device modules.
-	if !ctx.Device() {
+func shouldCreateSourceAbiDumpForLibrary(ctx shouldCreateAbiDumpContext) bool {
+	m, ok := ctx.Module().(*Module)
+	if !ok {
 		return false
 	}
 
-	m := ctx.Module().(*Module)
+	// Only generate ABI dump for device modules.
+	if !m.Device() {
+		return false
+	}
 
 	// Only create ABI dump for native library module types.
 	if m.library == nil {
 		return false
 	}
 
-	// Create ABI dump for static libraries only if they are dependencies of ABI checked libraries.
+	// Don't create ABI dump for static libraries
+	// The sabi variant will be propagated to dependencies of ABI checked libraries.
 	if m.library.static() {
-		return m.sabi.shouldCreateSourceAbiDump()
+		return false
 	}
 
 	// Module is shared library type.
@@ -215,39 +233,73 @@ func shouldCreateSourceAbiDumpForLibrary(ctx android.BaseModuleContext) bool {
 			return false
 		}
 	}
-	return len(classifySourceAbiDump(ctx)) > 0
+	return len(classifySourceAbiDump(m)) > 0
 }
 
 // Mark the direct and transitive dependencies of libraries that need ABI check, so that ABI dumps
 // of their dependencies would be generated.
-func sabiDepsMutator(mctx android.TopDownMutatorContext) {
+type sabiTransitionMutator struct{}
+
+func (s *sabiTransitionMutator) Split(ctx android.BaseModuleContext) []string {
+	return []string{""}
+}
+
+func (s *sabiTransitionMutator) OutgoingTransition(ctx android.OutgoingTransitionContext, sourceVariation string) string {
 	// Escape hatch to not check any ABI dump.
-	if mctx.Config().IsEnvTrue("SKIP_ABI_CHECKS") {
-		return
+	if ctx.Config().IsEnvTrue("SKIP_ABI_CHECKS") {
+		return ""
 	}
+
 	// Only create ABI dump for native shared libraries and their static library dependencies.
-	if m, ok := mctx.Module().(*Module); ok && m.sabi != nil {
-		if shouldCreateSourceAbiDumpForLibrary(mctx) {
-			// Mark this module so that .sdump / .lsdump for this library can be generated.
+	if m, ok := ctx.Module().(*Module); ok && m.sabi != nil {
+		if shouldCreateSourceAbiDumpForLibrary(ctx) {
+			if IsStaticDepTag(ctx.DepTag()) || ctx.DepTag() == reuseObjTag {
+				return "sabi"
+			}
+		} else if sourceVariation == "sabi" {
+			if IsWholeStaticLib(ctx.DepTag()) || ctx.DepTag() == reuseObjTag {
+				return "sabi"
+			}
+		}
+	}
+
+	return ""
+}
+
+func (s *sabiTransitionMutator) IncomingTransition(ctx android.IncomingTransitionContext, incomingVariation string) string {
+	if incomingVariation == "" {
+		return ""
+	}
+
+	if incomingVariation == "sabi" {
+		if m, ok := ctx.Module().(*Module); ok && m.sabi != nil {
+			return "sabi"
+		}
+	}
+
+	return ""
+}
+
+func (s *sabiTransitionMutator) Mutate(ctx android.BottomUpMutatorContext, variation string) {
+	if m, ok := ctx.Module().(*Module); ok && m.sabi != nil {
+		if variation == "sabi" {
 			m.sabi.Properties.ShouldCreateSourceAbiDump = true
-			// Mark all of its static library dependencies.
-			mctx.VisitDirectDeps(func(child android.Module) {
-				depTag := mctx.OtherModuleDependencyTag(child)
-				if IsStaticDepTag(depTag) || depTag == reuseObjTag {
-					if c, ok := child.(*Module); ok && c.sabi != nil {
-						// Mark this module so that .sdump for this static library can be generated.
-						c.sabi.Properties.ShouldCreateSourceAbiDump = true
-					}
-				}
-			})
+			m.HideFromMake()
+			m.Properties.PreventInstall = true
+		} else if shouldCreateSourceAbiDumpForLibrary(ctx) {
+			// Escape hatch to not check any ABI dump.
+			if !ctx.Config().IsEnvTrue("SKIP_ABI_CHECKS") {
+				m.sabi.Properties.ShouldCreateSourceAbiDump = true
+			}
 		}
 	}
 }
 
 // Add an entry to the global list of lsdump. The list is exported to a Make variable by
 // `cc.makeVarsProvider`.
-func addLsdumpPath(lsdumpPath string) {
+func addLsdumpPath(config android.Config, lsdumpPath string) {
+	lsdumpPaths := lsdumpPaths(config)
 	lsdumpPathsLock.Lock()
 	defer lsdumpPathsLock.Unlock()
-	lsdumpPaths = append(lsdumpPaths, lsdumpPath)
+	*lsdumpPaths = append(*lsdumpPaths, lsdumpPath)
 }

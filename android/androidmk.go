@@ -463,18 +463,18 @@ func (a *AndroidMkEntries) getDistContributions(mod blueprint.Module) *distContr
 func generateDistContributionsForMake(distContributions *distContributions) []string {
 	var ret []string
 	for _, d := range distContributions.copiesForGoals {
-		ret = append(ret, fmt.Sprintf(".PHONY: %s\n", d.goals))
+		ret = append(ret, fmt.Sprintf(".PHONY: %s", d.goals))
 		// Create dist-for-goals calls for each of the copy instructions.
 		for _, c := range d.copies {
 			if distContributions.licenseMetadataFile != nil {
 				ret = append(
 					ret,
-					fmt.Sprintf("$(if $(strip $(ALL_TARGETS.%s.META_LIC)),,$(eval ALL_TARGETS.%s.META_LIC := %s))\n",
+					fmt.Sprintf("$(if $(strip $(ALL_TARGETS.%s.META_LIC)),,$(eval ALL_TARGETS.%s.META_LIC := %s))",
 						c.from.String(), c.from.String(), distContributions.licenseMetadataFile.String()))
 			}
 			ret = append(
 				ret,
-				fmt.Sprintf("$(call dist-for-goals,%s,%s:%s)\n", d.goals, c.from.String(), c.dest))
+				fmt.Sprintf("$(call dist-for-goals,%s,%s:%s)", d.goals, c.from.String(), c.dest))
 		}
 	}
 
@@ -523,7 +523,7 @@ func (a *AndroidMkEntries) fillInEntries(ctx fillInEntriesContext, mod blueprint
 	a.Target_required = append(a.Target_required, amod.TargetRequiredModuleNames()...)
 
 	for _, distString := range a.GetDistForGoals(mod) {
-		fmt.Fprintf(&a.header, distString)
+		fmt.Fprintln(&a.header, distString)
 	}
 
 	fmt.Fprintf(&a.header, "\ninclude $(CLEAR_VARS)  # type: %s, name: %s, variant: %s\n", ctx.ModuleType(mod), base.BaseModuleName(), ctx.ModuleSubDir(mod))
@@ -807,9 +807,8 @@ func translateAndroidMkModule(ctx SingletonContext, w io.Writer, moduleInfoJSONs
 	// Additional cases here require review for correct license propagation to make.
 	var err error
 
-	if info, ok := ctx.otherModuleProvider(mod, AndroidMkInfoProvider); ok {
-		androidMkEntriesInfos := info.(*AndroidMkProviderInfo)
-		err = translateAndroidMkEntriesInfoModule(ctx, w, moduleInfoJSONs, mod, androidMkEntriesInfos)
+	if info, ok := OtherModuleProvider(ctx, mod, AndroidMkInfoProvider); ok {
+		err = translateAndroidMkEntriesInfoModule(ctx, w, moduleInfoJSONs, mod, info)
 	} else {
 		switch x := mod.(type) {
 		case AndroidMkDataProvider:
@@ -1100,6 +1099,10 @@ type AndroidMkInfo struct {
 	EntryOrder []string
 }
 
+type AndroidMkProviderInfoProducer interface {
+	PrepareAndroidMKProviderInfo(config Config) *AndroidMkProviderInfo
+}
+
 // TODO: rename it to AndroidMkEntriesProvider after AndroidMkEntriesProvider interface is gone.
 var AndroidMkInfoProvider = blueprint.NewProvider[*AndroidMkProviderInfo]()
 
@@ -1272,7 +1275,7 @@ func (a *AndroidMkInfo) fillInEntries(ctx fillInEntriesContext, mod blueprint.Mo
 		a.HeaderStrings = append(a.HeaderStrings, distString)
 	}
 
-	a.HeaderStrings = append(a.HeaderStrings, fmt.Sprintf("\ninclude $(CLEAR_VARS)  # type: %s, name: %s, variant: %s\n", ctx.ModuleType(mod), base.BaseModuleName(), ctx.ModuleSubDir(mod)))
+	a.HeaderStrings = append(a.HeaderStrings, fmt.Sprintf("\ninclude $(CLEAR_VARS)  # type: %s, name: %s, variant: %s", ctx.ModuleType(mod), base.BaseModuleName(), ctx.ModuleSubDir(mod)))
 
 	// Collect make variable assignment entries.
 	helperInfo.SetString("LOCAL_PATH", ctx.ModuleDir(mod))
@@ -1298,6 +1301,14 @@ func (a *AndroidMkInfo) fillInEntries(ctx fillInEntriesContext, mod blueprint.Mo
 		// Mark this module as uninstallable in order to prevent Make from creating an
 		// install rule there.
 		helperInfo.SetBoolIfTrue("LOCAL_UNINSTALLABLE_MODULE", proptools.Bool(base.commonProperties.No_full_install))
+	}
+
+	if info.UncheckedModule {
+		helperInfo.SetBool("LOCAL_DONT_CHECK_MODULE", true)
+	} else if info.CheckbuildTarget != nil {
+		helperInfo.SetPath("LOCAL_CHECKED_MODULE", info.CheckbuildTarget)
+	} else {
+		helperInfo.SetOptionalPath("LOCAL_CHECKED_MODULE", a.OutputFile)
 	}
 
 	if len(info.TestData) > 0 {
@@ -1364,25 +1375,6 @@ func (a *AndroidMkInfo) fillInEntries(ctx fillInEntriesContext, mod blueprint.Mo
 		helperInfo.SetString("LOCAL_IS_HOST_MODULE", "true")
 	}
 
-	prefix := ""
-	if base.ArchSpecific() {
-		switch base.Os().Class {
-		case Host:
-			if base.Target().HostCross {
-				prefix = "HOST_CROSS_"
-			} else {
-				prefix = "HOST_"
-			}
-		case Device:
-			prefix = "TARGET_"
-
-		}
-
-		if base.Arch().ArchType != ctx.Config().Targets[base.Os()][0].Arch.ArchType {
-			prefix = "2ND_" + prefix
-		}
-	}
-
 	if licenseMetadata, ok := OtherModuleProvider(ctx, mod, LicenseMetadataProvider); ok {
 		helperInfo.SetPath("LOCAL_SOONG_LICENSE_METADATA", licenseMetadata.LicenseMetadataPath)
 	}
@@ -1423,8 +1415,8 @@ func (a *AndroidMkInfo) write(w io.Writer) {
 		return
 	}
 
-	combinedHeaderString := strings.Join(a.HeaderStrings, "\n")
-	combinedFooterString := strings.Join(a.FooterStrings, "\n")
+	combinedHeaderString := strings.Join(a.HeaderStrings, "\n") + "\n"
+	combinedFooterString := strings.Join(a.FooterStrings, "\n") + "\n"
 	w.Write([]byte(combinedHeaderString))
 	for _, name := range a.EntryOrder {
 		AndroidMkEmitAssignList(w, name, a.EntryMap[name])

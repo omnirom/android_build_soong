@@ -138,6 +138,16 @@ func (a ArchType) String() string {
 	return a.Name
 }
 
+func (a ArchType) Bitness() string {
+	if a.Multilib == "lib32" {
+		return "32"
+	}
+	if a.Multilib == "lib64" {
+		return "64"
+	}
+	panic("Bitness is not defined for the common variant")
+}
+
 const COMMON_VARIANT = "common"
 
 var (
@@ -557,10 +567,6 @@ var DarwinUniversalVariantTag = archDepTag{name: "darwin universal binary"}
 //	"32": compile for only a single 32-bit Target supported by the OsClass.
 //	"64": compile for only a single 64-bit Target supported by the OsClass.
 //	"common": compile a for a single Target that will work on all Targets supported by the OsClass (for example Java).
-//	"common_first": compile a for a Target that will work on all Targets supported by the OsClass
-//	    (same as "common"), plus a second Target for the preferred Target supported by the OsClass
-//	    (same as "first").  This is used for java_binary that produces a common .jar and a wrapper
-//	    executable script.
 //
 // Once the list of Targets is determined, the module is split into a variant for each Target.
 //
@@ -692,11 +698,9 @@ func (a *archTransitionMutator) IncomingTransition(ctx IncomingTransitionContext
 		return ""
 	}
 
-	if incomingVariation == "" {
-		multilib, _ := decodeMultilib(ctx, base)
-		if multilib == "common" {
-			return "common"
-		}
+	multilib, _ := decodeMultilib(ctx, base)
+	if multilib == "common" {
+		return "common"
 	}
 	return incomingVariation
 }
@@ -746,8 +750,7 @@ func (a *archTransitionMutator) Mutate(ctx BottomUpMutatorContext, variation str
 	// Create a dependency for Darwin Universal binaries from the primary to secondary
 	// architecture. The module itself will be responsible for calling lipo to merge the outputs.
 	if os == Darwin {
-		isUniversalBinary := (allArchInfo.Multilib == "darwin_universal" && len(allArchInfo.Targets) == 2) ||
-			allArchInfo.Multilib == "darwin_universal_common_first" && len(allArchInfo.Targets) == 3
+		isUniversalBinary := allArchInfo.Multilib == "darwin_universal" && len(allArchInfo.Targets) == 2
 		isPrimary := variation == ctx.Config().BuildArch.String()
 		hasSecondaryConfigured := len(ctx.Config().Targets[Darwin]) > 1
 		if isUniversalBinary && isPrimary && hasSecondaryConfigured {
@@ -815,11 +818,7 @@ func decodeMultilib(ctx ConfigContext, base *ModuleBase) (multilib, extraMultili
 		//  !UseTargetVariants, as the module has opted into handling the arch-specific logic on
 		//    its own.
 		if os == Darwin && multilib != "common" && multilib != "32" {
-			if multilib == "common_first" {
-				multilib = "darwin_universal_common_first"
-			} else {
-				multilib = "darwin_universal"
-			}
+			multilib = "darwin_universal"
 		}
 
 		return multilib, ""
@@ -1359,7 +1358,7 @@ func GetCompoundTargetField(os OsType, arch ArchType) string {
 
 // Returns the structs corresponding to the properties specific to the given
 // architecture and OS in archProperties.
-func getArchProperties(ctx BaseMutatorContext, archProperties interface{}, arch Arch, os OsType, nativeBridgeEnabled bool) []reflect.Value {
+func getArchProperties(ctx BaseModuleContext, archProperties interface{}, arch Arch, os OsType, nativeBridgeEnabled bool) []reflect.Value {
 	result := make([]reflect.Value, 0)
 	archPropValues := reflect.ValueOf(archProperties).Elem()
 
@@ -1931,13 +1930,6 @@ func decodeMultilibTargets(multilib string, targets []Target, prefer32 bool) ([]
 	switch multilib {
 	case "common":
 		buildTargets = getCommonTargets(targets)
-	case "common_first":
-		buildTargets = getCommonTargets(targets)
-		if prefer32 {
-			buildTargets = append(buildTargets, FirstTarget(targets, "lib32", "lib64")...)
-		} else {
-			buildTargets = append(buildTargets, FirstTarget(targets, "lib64", "lib32")...)
-		}
 	case "both":
 		if prefer32 {
 			buildTargets = append(buildTargets, filterMultilibTargets(targets, "lib32")...)
@@ -1968,10 +1960,6 @@ func decodeMultilibTargets(multilib string, targets []Target, prefer32 bool) ([]
 		// Reverse the targets so that the first architecture can depend on the second
 		// architecture module in order to merge the outputs.
 		ReverseSliceInPlace(buildTargets)
-	case "darwin_universal_common_first":
-		archTargets := filterMultilibTargets(targets, "lib64")
-		ReverseSliceInPlace(archTargets)
-		buildTargets = append(getCommonTargets(targets), archTargets...)
 	default:
 		return nil, fmt.Errorf(`compile_multilib must be "both", "first", "32", "64", "prefer32" or "first_prefer32" found %q`,
 			multilib)

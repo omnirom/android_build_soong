@@ -344,23 +344,6 @@ var neverallowTests = []struct {
 			`module "outside_allowed_list": violates neverallow`,
 		},
 	},
-	// Test for the rule restricting use of exclude_static_libs
-	{
-		name: `"exclude_static_libs" outside allowed directory`,
-		fs: map[string][]byte{
-			"a/b/Android.bp": []byte(`
-				java_library {
-					name: "baz",
-					exclude_static_libs: [
-						"bar",
-					],
-				}
-			`),
-		},
-		expectedErrors: []string{
-			`exclude_static_libs property is only allowed for java modules defined in build/soong, libcore, and frameworks/base/api`,
-		},
-	},
 	// Test for only allowing headers_only for framework-minus-apex-headers
 	{
 		name: `"headers_only" outside framework-minus-apex-headers modules`,
@@ -376,6 +359,35 @@ var neverallowTests = []struct {
 			`headers_only can only be used for generating framework-minus-apex headers for non-updatable modules`,
 		},
 	},
+	// Test for the rule restricting use of is_auto_generated
+	{
+		name: `"is_auto_generated" outside allowed directory`,
+		fs: map[string][]byte{
+			"a/b/Android.bp": []byte(`
+				filesystem {
+					name: "baaz",
+					is_auto_generated: true,
+				}
+			`),
+		},
+		expectedErrors: []string{
+			`is_auto_generated property is only allowed for filesystem modules in build/soong/fsgen directory`,
+		},
+	},
+	// Test for the rule restricting use of prebuilt_* module
+	{
+		name: `"prebuilt_usr_srec" defined in Android.bp file`,
+		fs: map[string][]byte{
+			"a/b/Android.bp": []byte(`
+				prebuilt_usr_srec {
+					name: "foo",
+				}
+			`),
+		},
+		expectedErrors: []string{
+			`module type not allowed to be defined in bp file`,
+		},
+	},
 }
 
 var prepareForNeverAllowTest = GroupFixturePreparers(
@@ -384,6 +396,8 @@ var prepareForNeverAllowTest = GroupFixturePreparers(
 		ctx.RegisterModuleType("java_library", newMockJavaLibraryModule)
 		ctx.RegisterModuleType("java_library_host", newMockJavaLibraryModule)
 		ctx.RegisterModuleType("java_device_for_host", newMockJavaLibraryModule)
+		ctx.RegisterModuleType("filesystem", newMockFilesystemModule)
+		ctx.RegisterModuleType("prebuilt_usr_srec", newMockPrebuiltUsrSrecModule)
 	}),
 )
 
@@ -482,4 +496,17 @@ func newMockJavaLibraryModule() Module {
 }
 
 func (p *mockJavaLibraryModule) GenerateAndroidBuildActions(ModuleContext) {
+}
+
+type mockPrebuiltUsrSrecModule struct {
+	ModuleBase
+}
+
+func (p *mockPrebuiltUsrSrecModule) GenerateAndroidBuildActions(ModuleContext) {
+}
+
+func newMockPrebuiltUsrSrecModule() Module {
+	m := &mockPrebuiltUsrSrecModule{}
+	InitAndroidModule(m)
+	return m
 }

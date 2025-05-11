@@ -77,41 +77,41 @@ func genruleCmdModifier(ctx android.ModuleContext, cmd string) string {
 
 var _ android.ImageInterface = (*GenruleExtraProperties)(nil)
 
-func (g *GenruleExtraProperties) ImageMutatorBegin(ctx android.BaseModuleContext) {}
+func (g *GenruleExtraProperties) ImageMutatorBegin(ctx android.ImageInterfaceContext) {}
 
-func (g *GenruleExtraProperties) VendorVariantNeeded(ctx android.BaseModuleContext) bool {
+func (g *GenruleExtraProperties) VendorVariantNeeded(ctx android.ImageInterfaceContext) bool {
 	return Bool(g.Vendor_available) || Bool(g.Odm_available) || ctx.SocSpecific() || ctx.DeviceSpecific()
 }
 
-func (g *GenruleExtraProperties) ProductVariantNeeded(ctx android.BaseModuleContext) bool {
+func (g *GenruleExtraProperties) ProductVariantNeeded(ctx android.ImageInterfaceContext) bool {
 	return Bool(g.Product_available) || ctx.ProductSpecific()
 }
 
-func (g *GenruleExtraProperties) CoreVariantNeeded(ctx android.BaseModuleContext) bool {
+func (g *GenruleExtraProperties) CoreVariantNeeded(ctx android.ImageInterfaceContext) bool {
 	return !(ctx.SocSpecific() || ctx.DeviceSpecific() || ctx.ProductSpecific())
 }
 
-func (g *GenruleExtraProperties) RamdiskVariantNeeded(ctx android.BaseModuleContext) bool {
+func (g *GenruleExtraProperties) RamdiskVariantNeeded(ctx android.ImageInterfaceContext) bool {
 	return Bool(g.Ramdisk_available)
 }
 
-func (g *GenruleExtraProperties) VendorRamdiskVariantNeeded(ctx android.BaseModuleContext) bool {
+func (g *GenruleExtraProperties) VendorRamdiskVariantNeeded(ctx android.ImageInterfaceContext) bool {
 	return Bool(g.Vendor_ramdisk_available)
 }
 
-func (g *GenruleExtraProperties) DebugRamdiskVariantNeeded(ctx android.BaseModuleContext) bool {
+func (g *GenruleExtraProperties) DebugRamdiskVariantNeeded(ctx android.ImageInterfaceContext) bool {
 	return false
 }
 
-func (g *GenruleExtraProperties) RecoveryVariantNeeded(ctx android.BaseModuleContext) bool {
+func (g *GenruleExtraProperties) RecoveryVariantNeeded(ctx android.ImageInterfaceContext) bool {
 	// If the build is using a snapshot, the recovery variant under AOSP directories
 	// is not needed.
 	return Bool(g.Recovery_available)
 }
 
-func (g *GenruleExtraProperties) ExtraImageVariations(ctx android.BaseModuleContext) []string {
+func (g *GenruleExtraProperties) ExtraImageVariations(ctx android.ImageInterfaceContext) []string {
 	return nil
 }
 
-func (g *GenruleExtraProperties) SetImageVariation(ctx android.BaseModuleContext, variation string) {
+func (g *GenruleExtraProperties) SetImageVariation(ctx android.ImageInterfaceContext, variation string) {
 }

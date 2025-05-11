@@ -93,7 +93,7 @@ var globallyAllowlistedDependencies = []string{
 
 	// TODO(b/363016634): Remove from the allowlist when the module is converted
 	// to java_sdk_library and the java_aconfig_library modules depend on the stub.
-	"aconfig_storage_reader_java",
+	"aconfig_storage_stub",
 
 	// framework-res provides core resources essential for building apps and system UI.
 	// This module is implicitly added as a dependency for java modules even when the
@@ -382,7 +382,7 @@ func (c *ContainersInfo) BelongingContainers() []*container {
 
 func (c *ContainersInfo) ApexNames() (ret []string) {
 	for _, apex := range c.belongingApexes {
-		ret = append(ret, apex.InApexModules...)
+		ret = append(ret, apex.InApexVariants...)
 	}
 	slices.Sort(ret)
 	return ret
@@ -479,7 +479,7 @@ func setContainerInfo(ctx ModuleContext) {
 func checkContainerViolations(ctx ModuleContext) {
 	if _, ok := ctx.Module().(InstallableModule); ok {
 		containersInfo, _ := getContainerModuleInfo(ctx, ctx.Module())
-		ctx.VisitDirectDepsIgnoreBlueprint(func(dep Module) {
+		ctx.VisitDirectDeps(func(dep Module) {
 			if !dep.Enabled(ctx) {
 				return
 			}

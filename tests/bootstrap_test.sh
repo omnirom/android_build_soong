@@ -577,20 +577,6 @@ function test_json_module_graph_back_and_forth_null_build() {
 
 }
 
-function test_queryview_null_build() {
-  setup
-
-  run_soong queryview
-  local -r output_mtime1=$(stat -c "%y" out/soong/queryview.marker)
-
-  run_soong queryview
-  local -r output_mtime2=$(stat -c "%y" out/soong/queryview.marker)
-
-  if [[ "$output_mtime1" != "$output_mtime2" ]]; then
-    fail "Queryview marker file changed on null build"
-  fi
-}
-
 # This test verifies that adding a new glob to a blueprint file only
 # causes build."${target_product}".ninja to be regenerated on the *next* build, and *not*
 # the build after. (This is a regression test for a bug where globs

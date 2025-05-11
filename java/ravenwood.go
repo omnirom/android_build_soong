@@ -14,6 +14,8 @@
 package java
 
 import (
+	"strconv"
+
 	"android/soong/android"
 	"android/soong/tradefed"
 
@@ -36,6 +38,14 @@ var ravenwoodRuntimeTag = dependencyTag{name: "ravenwoodruntime"}
 var ravenwoodTestResourceApkTag = dependencyTag{name: "ravenwoodtestresapk"}
 var ravenwoodTestInstResourceApkTag = dependencyTag{name: "ravenwoodtest-inst-res-apk"}
 
+var genManifestProperties = pctx.AndroidStaticRule("genManifestProperties",
+	blueprint.RuleParams{
+		Command: "echo targetSdkVersionInt=$targetSdkVersionInt > $out && " +
+			"echo targetSdkVersionRaw=$targetSdkVersionRaw >> $out && " +
+			"echo packageName=$packageName >> $out && " +
+			"echo instPackageName=$instPackageName >> $out",
+	}, "targetSdkVersionInt", "targetSdkVersionRaw", "packageName", "instPackageName")
+
 const ravenwoodUtilsName = "ravenwood-utils"
 const ravenwoodRuntimeName = "ravenwood-runtime"
 
@@ -54,7 +64,7 @@ func getLibPath(archType android.ArchType) string {
 }
 
 type ravenwoodTestProperties struct {
-	Jni_libs []string
+	Jni_libs proptools.Configurable[[]string]
 
 	// Specify another android_app module here to copy it to the test directory, so that
 	// the ravenwood test can access it. This APK will be loaded as resources of the test
@@ -68,6 +78,17 @@ type ravenwoodTestProperties struct {
 	// the ravenwood test can access it. This APK will be loaded as resources of the test
 	// instrumentation app itself.
 	Inst_resource_apk *string
+
+	// Specify the package name of the test target apk.
+	// This will be set to the target Context's package name.
+	// (i.e. Instrumentation.getTargetContext().getPackageName())
+	// If this is omitted, Package_name will be used.
+	Package_name *string
+
+	// Specify the package name of this test module.
+	// This will be set to the test Context's package name.
+	//(i.e. Instrumentation.getContext().getPackageName())
+	Inst_package_name *string
 }
 
 type ravenwoodTest struct {
@@ -126,7 +147,7 @@ func (r *ravenwoodTest) DepsMutator(ctx android.BottomUpMutatorContext) {
 	}
 
 	// Add jni libs
-	for _, lib := range r.ravenwoodTestProperties.Jni_libs {
+	for _, lib := range r.ravenwoodTestProperties.Jni_libs.GetOrDefault(ctx, nil) {
 		ctx.AddVariationDependencies(ctx.Config().BuildOSTarget.Variations(), jniLibTag, lib)
 	}
 
@@ -216,6 +237,27 @@ func (r *ravenwoodTest) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	copyResApk(ravenwoodTestResourceApkTag, "ravenwood-res.apk")
 	copyResApk(ravenwoodTestInstResourceApkTag, "ravenwood-inst-res.apk")
 
+	// Generate manifest properties
+	propertiesOutputPath := android.PathForModuleGen(ctx, "ravenwood.properties")
+
+	targetSdkVersion := proptools.StringDefault(r.deviceProperties.Target_sdk_version, "")
+	targetSdkVersionInt := r.TargetSdkVersion(ctx).FinalOrFutureInt() // FinalOrFutureInt may be 10000.
+	packageName := proptools.StringDefault(r.ravenwoodTestProperties.Package_name, "")
+	instPackageName := proptools.StringDefault(r.ravenwoodTestProperties.Inst_package_name, "")
+	ctx.Build(pctx, android.BuildParams{
+		Rule:        genManifestProperties,
+		Description: "genManifestProperties",
+		Output:      propertiesOutputPath,
+		Args: map[string]string{
+			"targetSdkVersionInt": strconv.Itoa(targetSdkVersionInt),
+			"targetSdkVersionRaw": targetSdkVersion,
+			"packageName":         packageName,
+			"instPackageName":     instPackageName,
+		},
+	})
+	installProps := ctx.InstallFile(installPath, "ravenwood.properties", propertiesOutputPath)
+	installDeps = append(installDeps, installProps)
+
 	// Install our JAR with all dependencies
 	ctx.InstallFile(installPath, ctx.ModuleName()+".jar", r.outputFile, installDeps...)
 }
@@ -238,7 +280,7 @@ func (r *ravenwoodTest) AndroidMkEntries() []android.AndroidMkEntries {
 type ravenwoodLibgroupProperties struct {
 	Libs []string
 
-	Jni_libs []string
+	Jni_libs proptools.Configurable[[]string]
 
 	// We use this to copy framework-res.apk to the ravenwood runtime directory.
 	Data []string `android:"path,arch_variant"`
@@ -280,7 +322,7 @@ func (r *ravenwoodLibgroup) DepsMutator(ctx android.BottomUpMutatorContext) {
 	for _, lib := range r.ravenwoodLibgroupProperties.Libs {
 		ctx.AddVariationDependencies(nil, ravenwoodLibContentTag, lib)
 	}
-	for _, lib := range r.ravenwoodLibgroupProperties.Jni_libs {
+	for _, lib := range r.ravenwoodLibgroupProperties.Jni_libs.GetOrDefault(ctx, nil) {
 		ctx.AddVariationDependencies(ctx.Config().BuildOSTarget.Variations(), jniLibTag, lib)
 	}
 }

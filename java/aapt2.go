@@ -15,7 +15,9 @@
 package java
 
 import (
+	"fmt"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,19 +33,35 @@ func isPathValueResource(res android.Path) bool {
 	return strings.HasPrefix(lastDir, "values")
 }
 
+func isFlagsPath(subDir string) bool {
+	re := regexp.MustCompile(`flag\(!?([a-zA-Z_-]+\.)*[a-zA-Z0-9_-]+\)`)
+	lastDir := filepath.Base(subDir)
+	return re.MatchString(lastDir)
+}
+
 // Convert input resource file path to output file path.
 // values-[config]/<file>.xml -> values-[config]_<file>.arsc.flat;
+// flag(fully.qualified.flag_name)/values-[config]/<file>.xml -> /values-[config]_<file>.(fully.qualified.flag_name).arsc.flat;
 // For other resource file, just replace the last "/" with "_" and add .flat extension.
 func pathToAapt2Path(ctx android.ModuleContext, res android.Path) android.WritablePath {
 
-	name := res.Base()
+	extension := filepath.Ext(res.Base())
+	name := strings.TrimSuffix(res.Base(), extension)
 	if isPathValueResource(res) {
-		name = strings.TrimSuffix(name, ".xml") + ".arsc"
+		extension = ".arsc"
 	}
 	subDir := filepath.Dir(res.String())
 	subDir, lastDir := filepath.Split(subDir)
-	name = lastDir + "_" + name + ".flat"
-	return android.PathForModuleOut(ctx, "aapt2", subDir, name)
+	if isFlagsPath(subDir) {
+		var flag string
+		subDir, flag = filepath.Split(filepath.Dir(subDir))
+		flag = strings.TrimPrefix(flag, "flag")
+		name = fmt.Sprintf("%s_%s.%s%s.flat", lastDir, name, flag, extension)
+	} else {
+		name = fmt.Sprintf("%s_%s%s.flat", lastDir, name, extension)
+	}
+	out := android.PathForModuleOut(ctx, "aapt2", subDir, name)
+	return out
 }
 
 // pathsToAapt2Paths Calls pathToAapt2Path on each entry of the given Paths, i.e. []Path.

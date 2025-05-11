@@ -460,7 +460,7 @@ func NamespaceFactory() Module {
 }
 
 func RegisterNamespaceMutator(ctx RegisterMutatorsContext) {
-	ctx.BottomUp("namespace_deps", namespaceMutator).Parallel()
+	ctx.BottomUp("namespace_deps", namespaceMutator).MutatesGlobalState()
 }
 
 func namespaceMutator(ctx BottomUpMutatorContext) {

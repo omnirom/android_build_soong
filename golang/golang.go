@@ -22,6 +22,7 @@ package golang
 
 import (
 	"android/soong/android"
+
 	"github.com/google/blueprint"
 	"github.com/google/blueprint/bootstrap"
 )
@@ -73,7 +74,7 @@ type GoBinary struct {
 func goBinaryModuleFactory() android.Module {
 	module := &GoBinary{}
 	module.AddProperties(module.Properties()...)
-	android.InitAndroidArchModule(module, android.HostSupportedNoCross, android.MultilibFirst)
+	android.InitAndroidArchModule(module, android.HostSupported, android.MultilibFirst)
 	return module
 }
 

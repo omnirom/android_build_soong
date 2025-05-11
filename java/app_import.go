@@ -61,6 +61,9 @@ var (
 func RegisterAppImportBuildComponents(ctx android.RegistrationContext) {
 	ctx.RegisterModuleType("android_app_import", AndroidAppImportFactory)
 	ctx.RegisterModuleType("android_test_import", AndroidTestImportFactory)
+	ctx.PreArchMutators(func(ctx android.RegisterMutatorsContext) {
+		ctx.BottomUp("disable_prebuilts_without_apk", disablePrebuiltsWithoutApkMutator)
+	})
 }
 
 type AndroidAppImport struct {
@@ -85,16 +88,16 @@ type AndroidAppImport struct {
 
 	hideApexVariantFromMake bool
 
-	provenanceMetaDataFile android.OutputPath
+	provenanceMetaDataFile android.Path
 }
 
 type AndroidAppImportProperties struct {
 	// A prebuilt apk to import
-	Apk *string `android:"path"`
+	Apk proptools.Configurable[string] `android:"path,replace_instead_of_append"`
 
 	// The name of a certificate in the default certificate directory or an android_app_certificate
 	// module name in the form ":module". Should be empty if presigned or default_dev_cert is set.
-	Certificate *string
+	Certificate proptools.Configurable[string] `android:"replace_instead_of_append"`
 
 	// Names of extra android_app_certificate modules to sign the apk with in the form ":module".
 	Additional_certificates []string
@@ -193,13 +196,6 @@ func (a *AndroidAppImport) processVariants(ctx android.DefaultableHookContext) {
 			}
 		}
 	}
-
-	if String(a.properties.Apk) == "" {
-		// Disable this module since the apk property is still empty after processing all matching
-		// variants. This likely means there is no matching variant, and the default variant doesn't
-		// have an apk property value either.
-		a.Disable()
-	}
 }
 
 func MergePropertiesFromVariant(ctx android.EarlyModuleContext,
@@ -219,8 +215,32 @@ func MergePropertiesFromVariant(ctx android.EarlyModuleContext,
 	}
 }
 
+// disablePrebuiltsWithoutApkMutator is a pre-arch mutator that disables AndroidAppImport or
+// AndroidTestImport modules that don't have an apk set. We need this separate mutator instead
+// of doing it in processVariants because processVariants is a defaultable hook, and configurable
+// properties can only be evaluated after the defaults (and eventually, base configurabtion)
+// mutators.
+func disablePrebuiltsWithoutApkMutator(ctx android.BottomUpMutatorContext) {
+	switch a := ctx.Module().(type) {
+	case *AndroidAppImport:
+		if a.properties.Apk.GetOrDefault(ctx, "") == "" {
+			// Disable this module since the apk property is still empty after processing all
+			// matching variants. This likely means there is no matching variant, and the default
+			// variant doesn't have an apk property value either.
+			a.Disable()
+		}
+	case *AndroidTestImport:
+		if a.properties.Apk.GetOrDefault(ctx, "") == "" {
+			// Disable this module since the apk property is still empty after processing all
+			// matching variants. This likely means there is no matching variant, and the default
+			// variant doesn't have an apk property value either.
+			a.Disable()
+		}
+	}
+}
+
 func (a *AndroidAppImport) DepsMutator(ctx android.BottomUpMutatorContext) {
-	cert := android.SrcIsModule(String(a.properties.Certificate))
+	cert := android.SrcIsModule(a.properties.Certificate.GetOrDefault(ctx, ""))
 	if cert != "" {
 		ctx.AddDependency(ctx.Module(), certificateTag, cert)
 	}
@@ -239,7 +259,7 @@ func (a *AndroidAppImport) DepsMutator(ctx android.BottomUpMutatorContext) {
 }
 
 func (a *AndroidAppImport) uncompressEmbeddedJniLibs(
-	ctx android.ModuleContext, inputPath android.Path, outputPath android.OutputPath) {
+	ctx android.ModuleContext, inputPath android.Path, outputPath android.WritablePath) {
 	// Test apps don't need their JNI libraries stored uncompressed. As a matter of fact, messing
 	// with them may invalidate pre-existing signature data.
 	if ctx.InstallInTestcases() && (Bool(a.properties.Presigned) || Bool(a.properties.Preprocessed)) {
@@ -303,7 +323,7 @@ func (a *AndroidAppImport) generateAndroidBuildActions(ctx android.ModuleContext
 	}
 
 	numCertPropsSet := 0
-	if String(a.properties.Certificate) != "" {
+	if a.properties.Certificate.GetOrDefault(ctx, "") != "" {
 		numCertPropsSet++
 	}
 	if Bool(a.properties.Presigned) {
@@ -325,7 +345,7 @@ func (a *AndroidAppImport) generateAndroidBuildActions(ctx android.ModuleContext
 
 	// Uncompress JNI libraries in the apk
 	jnisUncompressed := android.PathForModuleOut(ctx, "jnis-uncompressed", ctx.ModuleName()+".apk")
-	a.uncompressEmbeddedJniLibs(ctx, srcApk, jnisUncompressed.OutputPath)
+	a.uncompressEmbeddedJniLibs(ctx, srcApk, jnisUncompressed)
 
 	var pathFragments []string
 	relInstallPath := String(a.properties.Relative_install_path)
@@ -344,13 +364,13 @@ func (a *AndroidAppImport) generateAndroidBuildActions(ctx android.ModuleContext
 	a.dexpreopter.isPresignedPrebuilt = Bool(a.properties.Presigned)
 	a.dexpreopter.uncompressedDex = a.shouldUncompressDex(ctx)
 
-	a.dexpreopter.enforceUsesLibs = a.usesLibrary.enforceUsesLibraries()
+	a.dexpreopter.enforceUsesLibs = a.usesLibrary.enforceUsesLibraries(ctx)
 	a.dexpreopter.classLoaderContexts = a.usesLibrary.classLoaderContextForUsesLibDeps(ctx)
 	if a.usesLibrary.shouldDisableDexpreopt {
 		a.dexpreopter.disableDexpreopt()
 	}
 
-	if a.usesLibrary.enforceUsesLibraries() {
+	if a.usesLibrary.enforceUsesLibraries(ctx) {
 		a.usesLibrary.verifyUsesLibrariesAPK(ctx, srcApk, &a.dexpreopter.classLoaderContexts)
 	}
 
@@ -386,7 +406,7 @@ func (a *AndroidAppImport) generateAndroidBuildActions(ctx android.ModuleContext
 		// If the certificate property is empty at this point, default_dev_cert must be set to true.
 		// Which makes processMainCert's behavior for the empty cert string WAI.
 		_, _, certificates := collectAppDeps(ctx, a, false, false)
-		a.certificate, certificates = processMainCert(a.ModuleBase, String(a.properties.Certificate), certificates, ctx)
+		a.certificate, certificates = processMainCert(a.ModuleBase, a.properties.Certificate.GetOrDefault(ctx, ""), certificates, ctx)
 		signed := android.PathForModuleOut(ctx, "signed", apkFilename)
 		var lineageFile android.Path
 		if lineage := String(a.properties.Lineage); lineage != "" {
@@ -409,7 +429,7 @@ func (a *AndroidAppImport) generateAndroidBuildActions(ctx android.ModuleContext
 
 	if apexInfo.IsForPlatform() {
 		a.installPath = ctx.InstallFile(installDir, apkFilename, a.outputFile)
-		artifactPath := android.PathForModuleSrc(ctx, *a.properties.Apk)
+		artifactPath := android.PathForModuleSrc(ctx, a.properties.Apk.GetOrDefault(ctx, ""))
 		a.provenanceMetaDataFile = provenance.GenerateArtifactProvenanceMetaData(ctx, artifactPath, a.installPath)
 	}
 
@@ -473,7 +493,7 @@ func (a *AndroidAppImport) Certificate() Certificate {
 	return a.certificate
 }
 
-func (a *AndroidAppImport) ProvenanceMetaDataFile() android.OutputPath {
+func (a *AndroidAppImport) ProvenanceMetaDataFile() android.Path {
 	return a.provenanceMetaDataFile
 }
 
@@ -531,10 +551,6 @@ func (a *AndroidAppImport) SdkVersion(ctx android.EarlyModuleContext) android.Sd
 
 func (a *AndroidAppImport) MinSdkVersion(ctx android.EarlyModuleContext) android.ApiLevel {
 	return android.SdkSpecPrivate.ApiLevel
-}
-
-func (a *AndroidAppImport) LintDepSets() LintDepSets {
-	return LintDepSets{}
 }
 
 var _ android.ApexModule = (*AndroidAppImport)(nil)
@@ -637,7 +653,7 @@ func AndroidAppImportFactory() android.Module {
 	android.InitApexModule(module)
 	android.InitAndroidMultiTargetsArchModule(module, android.DeviceSupported, android.MultilibCommon)
 	android.InitDefaultableModule(module)
-	android.InitSingleSourcePrebuiltModule(module, &module.properties, "Apk")
+	android.InitConfigurablePrebuiltModuleString(module, &module.properties.Apk, "Apk")
 
 	module.usesLibrary.enforce = true
 
@@ -690,7 +706,7 @@ func AndroidTestImportFactory() android.Module {
 	android.InitApexModule(module)
 	android.InitAndroidMultiTargetsArchModule(module, android.DeviceSupported, android.MultilibCommon)
 	android.InitDefaultableModule(module)
-	android.InitSingleSourcePrebuiltModule(module, &module.properties, "Apk")
+	android.InitConfigurablePrebuiltModuleString(module, &module.properties.Apk, "Apk")
 
 	return module
 }

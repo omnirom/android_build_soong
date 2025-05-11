@@ -14,18 +14,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+source $(cd $(dirname $BASH_SOURCE) &> /dev/null && pwd)/../make/shell_utils.sh
+require_top
+
 # To track how long we took to startup.
 case $(uname -s) in
   Darwin)
-    export TRACE_BEGIN_SOONG=`$T/prebuilts/build-tools/path/darwin-x86/date +%s%3N`
+    export TRACE_BEGIN_SOONG=`$TOP/prebuilts/build-tools/path/darwin-x86/date +%s%3N`
     ;;
   *)
     export TRACE_BEGIN_SOONG=$(date +%s%N)
     ;;
 esac
 
-source $(cd $(dirname $BASH_SOURCE) &> /dev/null && pwd)/../make/shell_utils.sh
-require_top
+setup_cog_env_if_needed
 
 # Save the current PWD for use in soong_ui
 export ORIGINAL_PWD=${PWD}

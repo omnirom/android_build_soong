@@ -20,6 +20,7 @@ import (
 	"android/soong/android"
 	"android/soong/cc"
 
+	"github.com/google/blueprint"
 	"github.com/google/blueprint/proptools"
 )
 
@@ -66,7 +67,14 @@ func apexVndkDepsMutator(mctx android.BottomUpMutatorContext) {
 		vndkApexName := "com.android.vndk." + vndkVersion
 
 		if mctx.OtherModuleExists(vndkApexName) {
-			mctx.AddReverseDependency(mctx.Module(), sharedLibTag, vndkApexName)
+			// Reverse dependencies must exactly specify the variant they want, starting from the
+			// current module's variant. But unlike cc modules, the vndk apex doesn't have
+			// arch/image/link variations, so we explicitly remove them here.
+			mctx.AddReverseVariationDependency([]blueprint.Variation{
+				{Mutator: "arch", Variation: "common"},
+				{Mutator: "image", Variation: ""},
+				{Mutator: "link", Variation: ""},
+			}, sharedLibTag, vndkApexName)
 		}
 	} else if a, ok := mctx.Module().(*apexBundle); ok && a.vndkApex {
 		if a.IsNativeBridgeSupported() {
@@ -87,7 +95,11 @@ func apexVndkDepsMutator(mctx android.BottomUpMutatorContext) {
 				// level for the primary architecture.
 				a.Disable()
 			} else {
-				mctx.AddDependency(mctx.Module(), prebuiltTag, cc.VndkLibrariesTxtModules(vndkVersion, mctx)...)
+				mctx.AddVariationDependencies(
+					mctx.Config().AndroidFirstDeviceTarget.Variations(),
+					prebuiltTag,
+					cc.VndkLibrariesTxtModules(vndkVersion, mctx)...,
+				)
 			}
 		}
 	}

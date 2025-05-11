@@ -11,6 +11,8 @@ bootstrap_go_package {
         "soong-android",
     ],
     srcs: [
+        "adb_keys.go",
+        "avbpubkey.go",
         "install_symlink.go",
         "otacerts_zip.go",
         "prebuilt_etc.go",

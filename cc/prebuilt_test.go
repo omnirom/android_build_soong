@@ -50,6 +50,7 @@ func TestPrebuilt(t *testing.T) {
 		cc_prebuilt_library_shared {
 			name: "liba",
 			srcs: ["liba.so"],
+			prefer: true,
 		}
 
 		cc_library {
@@ -59,6 +60,7 @@ func TestPrebuilt(t *testing.T) {
 		cc_prebuilt_library_static {
 			name: "libb",
 			srcs: ["libb.a"],
+			prefer: true,
 		}
 
 		cc_library_shared {
@@ -169,9 +171,9 @@ func TestPrebuilt(t *testing.T) {
 		t.Errorf("crtx missing dependency on prebuilt_crtx")
 	}
 
-	entries := android.AndroidMkEntriesForTest(t, ctx, prebuiltLiba)[0]
+	entries := android.AndroidMkInfoForTest(t, ctx, prebuiltLiba).PrimaryInfo
 	android.AssertStringEquals(t, "unexpected LOCAL_SOONG_MODULE_TYPE", "cc_prebuilt_library_shared", entries.EntryMap["LOCAL_SOONG_MODULE_TYPE"][0])
-	entries = android.AndroidMkEntriesForTest(t, ctx, prebuiltLibb)[0]
+	entries = android.AndroidMkInfoForTest(t, ctx, prebuiltLibb).PrimaryInfo
 	android.AssertStringEquals(t, "unexpected LOCAL_SOONG_MODULE_TYPE", "cc_prebuilt_library_static", entries.EntryMap["LOCAL_SOONG_MODULE_TYPE"][0])
 }
 
@@ -486,7 +488,7 @@ func TestMultiplePrebuilts(t *testing.T) {
 		expectedDependency := ctx.ModuleForTests(tc.expectedDependencyName, "android_arm64_armv8-a_shared").Module()
 		android.AssertBoolEquals(t, fmt.Sprintf("expected dependency from %s to %s\n", libfoo.Name(), tc.expectedDependencyName), true, hasDep(ctx, libfoo, expectedDependency))
 		// check that LOCAL_SHARED_LIBRARIES contains libbar and not libbar.v<N>
-		entries := android.AndroidMkEntriesForTest(t, ctx, libfoo)[0]
+		entries := android.AndroidMkInfoForTest(t, ctx, libfoo).PrimaryInfo
 		android.AssertStringListContains(t, "Version should not be present in LOCAL_SHARED_LIBRARIES", entries.EntryMap["LOCAL_SHARED_LIBRARIES"], "libbar")
 
 		// check installation rules
@@ -496,7 +498,7 @@ func TestMultiplePrebuilts(t *testing.T) {
 
 		// check LOCAL_MODULE of the selected module name
 		// the prebuilt should have the same LOCAL_MODULE when exported to make
-		entries = android.AndroidMkEntriesForTest(t, ctx, libbar)[0]
+		entries = android.AndroidMkInfoForTest(t, ctx, libbar).PrimaryInfo
 		android.AssertStringEquals(t, "unexpected LOCAL_MODULE", "libbar", entries.EntryMap["LOCAL_MODULE"][0])
 	}
 }

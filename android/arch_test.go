@@ -560,15 +560,7 @@ func TestArchMutatorNativeBridge(t *testing.T) {
 				prepareForArchTest,
 				// Test specific preparer
 				OptionalFixturePreparer(tt.preparer),
-				// Prepare for native bridge test
-				FixtureModifyConfig(func(config Config) {
-					config.Targets[Android] = []Target{
-						{Android, Arch{ArchType: X86_64, ArchVariant: "silvermont", Abi: []string{"arm64-v8a"}}, NativeBridgeDisabled, "", "", false},
-						{Android, Arch{ArchType: X86, ArchVariant: "silvermont", Abi: []string{"armeabi-v7a"}}, NativeBridgeDisabled, "", "", false},
-						{Android, Arch{ArchType: Arm64, ArchVariant: "armv8-a", Abi: []string{"arm64-v8a"}}, NativeBridgeEnabled, "x86_64", "arm64", false},
-						{Android, Arch{ArchType: Arm, ArchVariant: "armv7-a-neon", Abi: []string{"armeabi-v7a"}}, NativeBridgeEnabled, "x86", "arm", false},
-					}
-				}),
+				PrepareForNativeBridgeEnabled,
 				FixtureWithRootAndroidBp(bp),
 			).RunTest(t)
 

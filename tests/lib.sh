@@ -91,7 +91,6 @@ function symlink_directory {
 }
 
 function create_mock_soong {
-  create_mock_bazel
   copy_directory build/blueprint
   copy_directory build/soong
   copy_directory build/make
@@ -141,41 +140,6 @@ function setup {
 # shellcheck disable=SC2120
 function run_soong {
   USE_RBE=false TARGET_PRODUCT=aosp_arm TARGET_RELEASE=trunk_staging TARGET_BUILD_VARIANT=userdebug build/soong/soong_ui.bash --make-mode --skip-ninja --skip-config --soong-only --skip-soong-tests "$@"
-}
-
-function create_mock_bazel {
-  copy_directory build/bazel
-  copy_directory build/bazel_common_rules
-
-  # This requires pulling more tools into the mock top to build partitions
-  delete_directory build/bazel/examples/partitions
-
-  symlink_directory packages/modules/common/build
-  symlink_directory prebuilts/bazel
-  symlink_directory prebuilts/clang
-  symlink_directory prebuilts/jdk
-  symlink_directory external/bazel-skylib
-  symlink_directory external/bazelbuild-rules_android
-  symlink_directory external/bazelbuild-rules_go
-  symlink_directory external/bazelbuild-rules_license
-  symlink_directory external/bazelbuild-kotlin-rules
-  symlink_directory external/bazelbuild-rules_cc
-  symlink_directory external/bazelbuild-rules_python
-  symlink_directory external/bazelbuild-rules_java
-  symlink_directory external/bazelbuild-rules_rust
-  symlink_directory external/bazelbuild-rules_testing
-  symlink_directory external/rust/crates/tinyjson
-
-  symlink_file WORKSPACE
-  symlink_file BUILD
-}
-
-function run_bazel {
-  # Remove the ninja_build output marker file to communicate to buildbot that this is not a regular Ninja build, and its
-  # output should not be parsed as such.
-  rm -rf out/ninja_build
-
-  build/bazel/bin/bazel "$@"
 }
 
 function run_ninja {

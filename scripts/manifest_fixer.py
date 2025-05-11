@@ -16,8 +16,6 @@
 #
 """A tool for inserting values from the build system into a manifest."""
 
-from __future__ import print_function
-
 import argparse
 import sys
 from xml.dom import minidom

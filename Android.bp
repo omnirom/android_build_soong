@@ -3,6 +3,7 @@ package {
     default_visibility: [
         "//build/soong:__subpackages__",
     ],
+    default_team: "trendy_team_build",
 }
 
 subdirs = [
@@ -116,6 +117,11 @@ dex_bootjars {
     visibility: ["//visibility:public"],
 }
 
+art_boot_images {
+    name: "art_boot_images",
+    visibility: ["//art:__subpackages__"],
+}
+
 // Pseudo-test that's run on checkbuilds to ensure that get_clang_version can
 // parse cc/config/global.go.
 genrule {
@@ -136,19 +142,45 @@ all_apex_contributions {
     visibility: ["//visibility:public"],
 }
 
+// Defaults to share configs between "baremetal" Soong modules, currently only
+// used for code running in kernel context within Android Virtualization
+// Framework guests.
+cc_defaults {
+    name: "cc_baremetal_defaults",
+    arch: {
+        arm64: {
+            cflags: [
+                // Prevent the compiler from optimizing code using SVE, as the
+                // baremetal environment might not have configured the hardware.
+                "-Xclang -target-feature",
+                "-Xclang -sve",
+            ],
+        },
+    },
+    defaults_visibility: ["//visibility:public"],
+}
+
 product_config {
     name: "product_config",
-    visibility: ["//device/google/cuttlefish/system_image"],
+    visibility: [
+        "//build/make/target/product/generic",
+        "//build/soong/fsgen",
+    ],
 }
 
 build_prop {
     name: "system-build.prop",
     stem: "build.prop",
     product_config: ":product_config",
-    // Currently, only microdroid and cf system image can refer to system-build.prop
+    footer_files: [
+        ":applied_backported_fixes",
+    ],
+    // Currently, only microdroid, Ravenwood, and cf system image can refer to system-build.prop
     visibility: [
-        "//device/google/cuttlefish/system_image",
+        "//build/make/target/product/generic",
+        "//build/make/target/product/gsi",
         "//packages/modules/Virtualization/build/microdroid",
+        "//frameworks/base/ravenwood",
     ],
 }
 
@@ -158,7 +190,7 @@ build_prop {
     system_ext_specific: true,
     product_config: ":product_config",
     relative_install_path: "etc", // system_ext/etc/build.prop
-    visibility: ["//visibility:private"],
+    visibility: ["//build/make/target/product/gsi"],
 }
 
 build_prop {
@@ -167,7 +199,7 @@ build_prop {
     product_specific: true,
     product_config: ":product_config",
     relative_install_path: "etc", // product/etc/build.prop
-    visibility: ["//visibility:private"],
+    visibility: ["//build/make/target/product/gsi"],
 }
 
 build_prop {
@@ -176,5 +208,41 @@ build_prop {
     device_specific: true,
     product_config: ":product_config",
     relative_install_path: "etc", // odm/etc/build.prop
+    visibility: ["//visibility:private"],
+}
+
+build_prop {
+    name: "system_dlkm-build.prop",
+    stem: "build.prop",
+    system_dlkm_specific: true,
+    product_config: ":product_config",
+    relative_install_path: "etc", // system_dlkm/etc/build.prop
+    visibility: ["//visibility:private"],
+}
+
+build_prop {
+    name: "vendor_dlkm-build.prop",
+    stem: "build.prop",
+    vendor_dlkm_specific: true,
+    product_config: ":product_config",
+    relative_install_path: "etc", // vendor_dlkm/etc/build.prop
+    visibility: ["//visibility:private"],
+}
+
+build_prop {
+    name: "odm_dlkm-build.prop",
+    stem: "build.prop",
+    odm_dlkm_specific: true,
+    product_config: ":product_config",
+    relative_install_path: "etc", // odm_dlkm/etc/build.prop
+    visibility: ["//visibility:private"],
+}
+
+build_prop {
+    name: "ramdisk-build.prop",
+    stem: "build.prop",
+    ramdisk: true,
+    product_config: ":product_config",
+    relative_install_path: "etc/ramdisk", // ramdisk/system/etc/ramdisk/build.prop
     visibility: ["//visibility:private"],
 }

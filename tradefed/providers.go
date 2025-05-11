@@ -9,8 +9,8 @@ import (
 // Data that test_module_config[_host] modules types will need from
 // their dependencies to write out build rules and AndroidMkEntries.
 type BaseTestProviderData struct {
-	// data files and apps for android_test
-	InstalledFiles android.Paths
+	// data files and apps installed for tests, relative to testcases dir.
+	TestcaseRelDataFiles []string
 	// apk for android_test
 	OutputFile android.Path
 	// Either handwritten or generated TF xml.
@@ -28,6 +28,12 @@ type BaseTestProviderData struct {
 	LocalCertificate string
 	// Indicates if the base module was a unit test.
 	IsUnitTest bool
+	// The .mk file is used AndroidMkEntries for base (soong_java_prebuilt, etc.)
+	MkInclude string
+	// The AppClass to use for the AndroidMkEntries for the base.
+	MkAppClass string
+	// value for LOCAL_MODULE_PATH.  The directory where the module is installed.
+	InstallDir android.InstallPath
 }
 
 var BaseTestProviderKey = blueprint.NewProvider[BaseTestProviderData]()

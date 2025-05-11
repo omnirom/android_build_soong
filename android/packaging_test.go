@@ -64,7 +64,7 @@ type packageTestModule struct {
 	ModuleBase
 	PackagingBase
 	properties struct {
-		Install_deps []string `android:`
+		Install_deps []string
 	}
 	entries []string
 }

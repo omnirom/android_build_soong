@@ -484,7 +484,7 @@ func (m *CmakeSnapshot) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	// Packaging all make files into the zip file
 	makefilesRspFile := android.PathForModuleObj(ctx, ctx.ModuleName()+"_makefiles.rsp")
 	zipCmd.
-		FlagWithArg("-C ", android.PathForModuleGen(ctx).OutputPath.String()).
+		FlagWithArg("-C ", android.PathForModuleGen(ctx).String()).
 		FlagWithRspFileInputList("-r ", makefilesRspFile, makefilesList)
 
 	// Packaging all prebuilts into the zip file
@@ -533,6 +533,8 @@ func getModuleType(m *Module) string {
 		return "test"
 	case *benchmarkDecorator:
 		return "test"
+	case *objectLinker:
+		return "object"
 	}
 	panic(fmt.Sprintf("Unexpected module type: %T", m.linker))
 }

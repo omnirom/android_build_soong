@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/google/blueprint"
+	"github.com/google/blueprint/depset"
 	"github.com/google/blueprint/proptools"
 
 	"android/soong/android"
@@ -129,7 +130,7 @@ type SystemModulesProviderInfo struct {
 	OutputDirDeps android.Paths
 
 	// depset of header jars for this module and all transitive static dependencies
-	TransitiveStaticLibsHeaderJars *android.DepSet[android.Path]
+	TransitiveStaticLibsHeaderJars depset.DepSet[android.Path]
 }
 
 var SystemModulesProvider = blueprint.NewProvider[*SystemModulesProviderInfo]()
@@ -152,13 +153,11 @@ type SystemModulesProperties struct {
 func (system *SystemModules) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	var jars android.Paths
 
-	var transitiveStaticLibsHeaderJars []*android.DepSet[android.Path]
+	var transitiveStaticLibsHeaderJars []depset.DepSet[android.Path]
 	ctx.VisitDirectDepsWithTag(systemModulesLibsTag, func(module android.Module) {
 		if dep, ok := android.OtherModuleProvider(ctx, module, JavaInfoProvider); ok {
 			jars = append(jars, dep.HeaderJars...)
-			if dep.TransitiveStaticLibsHeaderJars != nil {
-				transitiveStaticLibsHeaderJars = append(transitiveStaticLibsHeaderJars, dep.TransitiveStaticLibsHeaderJars)
-			}
+			transitiveStaticLibsHeaderJars = append(transitiveStaticLibsHeaderJars, dep.TransitiveStaticLibsHeaderJars)
 		}
 	})
 
@@ -168,7 +167,7 @@ func (system *SystemModules) GenerateAndroidBuildActions(ctx android.ModuleConte
 		HeaderJars:                     jars,
 		OutputDir:                      system.outputDir,
 		OutputDirDeps:                  system.outputDeps,
-		TransitiveStaticLibsHeaderJars: android.NewDepSet(android.PREORDER, nil, transitiveStaticLibsHeaderJars),
+		TransitiveStaticLibsHeaderJars: depset.New(depset.PREORDER, nil, transitiveStaticLibsHeaderJars),
 	})
 }
 

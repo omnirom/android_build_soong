@@ -21,20 +21,34 @@ bootstrap_go_package {
     pkgPath: "android/soong/ui/metrics",
     deps: [
         "golang-protobuf-proto",
-        "soong-ui-bp2build_metrics_proto",
-        "soong-ui-bazel_metrics_proto",
+        "soong-finder-fs",
         "soong-ui-metrics_upload_proto",
         "soong-ui-metrics_proto",
         "soong-ui-mk_metrics_proto",
         "soong-shared",
+        "soong-ui-metrics_combined_proto",
     ],
     srcs: [
+        "hostinfo.go",
         "metrics.go",
         "event.go",
     ],
     testSrcs: [
         "event_test.go",
     ],
+    linux: {
+        srcs: [
+            "hostinfo_linux.go",
+        ],
+        testSrcs: [
+            "hostinfo_linux_test.go",
+        ],
+    },
+    darwin: {
+        srcs: [
+            "hostinfo_darwin.go",
+        ],
+    },
 }
 
 bootstrap_go_package {
@@ -50,6 +64,19 @@ bootstrap_go_package {
 }
 
 bootstrap_go_package {
+    name: "soong-ui-metrics_combined_proto",
+    pkgPath: "android/soong/ui/metrics/combined_metrics_proto",
+    deps: [
+        "golang-protobuf-reflect-protoreflect",
+        "golang-protobuf-runtime-protoimpl",
+        "soong-cmd-find_input_delta-proto",
+    ],
+    srcs: [
+        "metrics_proto/metrics.pb.go",
+    ],
+}
+
+bootstrap_go_package {
     name: "soong-ui-metrics_upload_proto",
     pkgPath: "android/soong/ui/metrics/upload_proto",
     deps: [
@@ -58,30 +85,6 @@ bootstrap_go_package {
     ],
     srcs: [
         "upload_proto/upload.pb.go",
-    ],
-}
-
-bootstrap_go_package {
-    name: "soong-ui-bp2build_metrics_proto",
-    pkgPath: "android/soong/ui/metrics/bp2build_metrics_proto",
-    deps: [
-        "golang-protobuf-reflect-protoreflect",
-        "golang-protobuf-runtime-protoimpl",
-    ],
-    srcs: [
-        "bp2build_metrics_proto/bp2build_metrics.pb.go",
-    ],
-}
-
-bootstrap_go_package {
-    name: "soong-ui-bazel_metrics_proto",
-    pkgPath: "android/soong/ui/metrics/bazel_metrics_proto",
-    deps: [
-        "golang-protobuf-reflect-protoreflect",
-        "golang-protobuf-runtime-protoimpl",
-    ],
-    srcs: [
-        "bazel_metrics_proto/bazel_metrics.pb.go",
     ],
 }
 

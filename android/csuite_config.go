@@ -30,11 +30,11 @@ type csuiteConfigProperties struct {
 type CSuiteConfig struct {
 	ModuleBase
 	properties     csuiteConfigProperties
-	OutputFilePath OutputPath
+	OutputFilePath Path
 }
 
 func (me *CSuiteConfig) GenerateAndroidBuildActions(ctx ModuleContext) {
-	me.OutputFilePath = PathForModuleOut(ctx, me.BaseModuleName()).OutputPath
+	me.OutputFilePath = PathForModuleOut(ctx, me.BaseModuleName())
 }
 
 func (me *CSuiteConfig) AndroidMkEntries() []AndroidMkEntries {

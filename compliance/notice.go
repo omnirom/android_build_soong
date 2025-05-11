@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 
 	"android/soong/android"
+
 	"github.com/google/blueprint"
 )
 
@@ -62,8 +63,7 @@ type NoticeXmlModule struct {
 
 	props noticeXmlProperties
 
-	outputFile  android.OutputPath
-	installPath android.InstallPath
+	outputFile android.OutputPath
 }
 
 type noticeXmlProperties struct {
@@ -86,10 +86,8 @@ func (nx *NoticeXmlModule) GenerateAndroidBuildActions(ctx android.ModuleContext
 
 	nx.outputFile = output.OutputPath
 
-	if android.Bool(ctx.Config().ProductVariables().UseSoongSystemImage) {
-		nx.installPath = android.PathForModuleInPartitionInstall(ctx, nx.props.Partition_name, "etc")
-		ctx.InstallFile(nx.installPath, "NOTICE.xml.gz", nx.outputFile)
-	}
+	installPath := android.PathForModuleInPartitionInstall(ctx, nx.props.Partition_name, "etc")
+	ctx.PackageFile(installPath, "NOTICE.xml.gz", nx.outputFile)
 }
 
 func (nx *NoticeXmlModule) AndroidMkEntries() []android.AndroidMkEntries {

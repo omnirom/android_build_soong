@@ -177,10 +177,7 @@ type ImageMutatableModule interface {
 	IsSnapshotPrebuilt() bool
 
 	// SnapshotVersion returns the snapshot version for this module.
-	SnapshotVersion(mctx android.BaseModuleContext) string
-
-	// SdkVersion returns the SDK version for this module.
-	SdkVersion() string
+	SnapshotVersion(mctx android.ImageInterfaceContext) string
 
 	// ExtraVariants returns the list of extra variants this module requires.
 	ExtraVariants() []string
@@ -209,7 +206,7 @@ type ImageMutatableModule interface {
 
 var _ ImageMutatableModule = (*Module)(nil)
 
-func (m *Module) ImageMutatorBegin(mctx android.BaseModuleContext) {
+func (m *Module) ImageMutatorBegin(mctx android.ImageInterfaceContext) {
 	MutateImage(mctx, m)
 }
 
@@ -273,7 +270,7 @@ func (m *Module) SetVendorVariantNeeded(b bool) {
 	m.Properties.VendorVariantNeeded = b
 }
 
-func (m *Module) SnapshotVersion(mctx android.BaseModuleContext) string {
+func (m *Module) SnapshotVersion(mctx android.ImageInterfaceContext) string {
 	if snapshot, ok := m.linker.(SnapshotInterface); ok {
 		return snapshot.Version()
 	} else {
@@ -291,7 +288,7 @@ func (m *Module) KernelHeadersDecorator() bool {
 }
 
 // MutateImage handles common image mutations for ImageMutatableModule interfaces.
-func MutateImage(mctx android.BaseModuleContext, m ImageMutatableModule) {
+func MutateImage(mctx android.ImageInterfaceContext, m ImageMutatableModule) {
 	// Validation check
 	vendorSpecific := mctx.SocSpecific() || mctx.DeviceSpecific()
 	productSpecific := mctx.ProductSpecific()
@@ -370,7 +367,7 @@ func MutateImage(mctx android.BaseModuleContext, m ImageMutatableModule) {
 		if m.HasProductVariant() {
 			productVariantNeeded = true
 		}
-	} else if vendorSpecific && m.SdkVersion() == "" {
+	} else if vendorSpecific {
 		// This will be available in /vendor (or /odm) only
 		vendorVariantNeeded = true
 	} else {
@@ -380,7 +377,7 @@ func MutateImage(mctx android.BaseModuleContext, m ImageMutatableModule) {
 		coreVariantNeeded = true
 	}
 
-	if coreVariantNeeded && productSpecific && m.SdkVersion() == "" {
+	if coreVariantNeeded && productSpecific {
 		// The module has "product_specific: true" that does not create core variant.
 		coreVariantNeeded = false
 		productVariantNeeded = true
@@ -431,35 +428,35 @@ func MutateImage(mctx android.BaseModuleContext, m ImageMutatableModule) {
 	}
 }
 
-func (c *Module) VendorVariantNeeded(ctx android.BaseModuleContext) bool {
+func (c *Module) VendorVariantNeeded(ctx android.ImageInterfaceContext) bool {
 	return c.Properties.VendorVariantNeeded
 }
 
-func (c *Module) ProductVariantNeeded(ctx android.BaseModuleContext) bool {
+func (c *Module) ProductVariantNeeded(ctx android.ImageInterfaceContext) bool {
 	return c.Properties.ProductVariantNeeded
 }
 
-func (c *Module) CoreVariantNeeded(ctx android.BaseModuleContext) bool {
+func (c *Module) CoreVariantNeeded(ctx android.ImageInterfaceContext) bool {
 	return c.Properties.CoreVariantNeeded
 }
 
-func (c *Module) RamdiskVariantNeeded(ctx android.BaseModuleContext) bool {
+func (c *Module) RamdiskVariantNeeded(ctx android.ImageInterfaceContext) bool {
 	return c.Properties.RamdiskVariantNeeded
 }
 
-func (c *Module) VendorRamdiskVariantNeeded(ctx android.BaseModuleContext) bool {
+func (c *Module) VendorRamdiskVariantNeeded(ctx android.ImageInterfaceContext) bool {
 	return c.Properties.VendorRamdiskVariantNeeded
 }
 
-func (c *Module) DebugRamdiskVariantNeeded(ctx android.BaseModuleContext) bool {
+func (c *Module) DebugRamdiskVariantNeeded(ctx android.ImageInterfaceContext) bool {
 	return false
 }
 
-func (c *Module) RecoveryVariantNeeded(ctx android.BaseModuleContext) bool {
+func (c *Module) RecoveryVariantNeeded(ctx android.ImageInterfaceContext) bool {
 	return c.Properties.RecoveryVariantNeeded
 }
 
-func (c *Module) ExtraImageVariations(ctx android.BaseModuleContext) []string {
+func (c *Module) ExtraImageVariations(ctx android.ImageInterfaceContext) []string {
 	return c.Properties.ExtraVersionedImageVariations
 }
 
@@ -513,7 +510,7 @@ func squashRamdiskSrcs(m *Module) {
 	}
 }
 
-func (c *Module) SetImageVariation(ctx android.BaseModuleContext, variant string) {
+func (c *Module) SetImageVariation(ctx android.ImageInterfaceContext, variant string) {
 	if variant == android.RamdiskVariation {
 		c.MakeAsPlatform()
 		squashRamdiskSrcs(c)

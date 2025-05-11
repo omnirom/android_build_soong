@@ -104,41 +104,41 @@ type libbpfProg struct {
 
 var _ android.ImageInterface = (*libbpfProg)(nil)
 
-func (libbpf *libbpfProg) ImageMutatorBegin(ctx android.BaseModuleContext) {}
+func (libbpf *libbpfProg) ImageMutatorBegin(ctx android.ImageInterfaceContext) {}
 
-func (libbpf *libbpfProg) VendorVariantNeeded(ctx android.BaseModuleContext) bool {
+func (libbpf *libbpfProg) VendorVariantNeeded(ctx android.ImageInterfaceContext) bool {
 	return false
 }
 
-func (libbpf *libbpfProg) ProductVariantNeeded(ctx android.BaseModuleContext) bool {
+func (libbpf *libbpfProg) ProductVariantNeeded(ctx android.ImageInterfaceContext) bool {
 	return false
 }
 
-func (libbpf *libbpfProg) CoreVariantNeeded(ctx android.BaseModuleContext) bool {
+func (libbpf *libbpfProg) CoreVariantNeeded(ctx android.ImageInterfaceContext) bool {
 	return true
 }
 
-func (libbpf *libbpfProg) RamdiskVariantNeeded(ctx android.BaseModuleContext) bool {
+func (libbpf *libbpfProg) RamdiskVariantNeeded(ctx android.ImageInterfaceContext) bool {
 	return false
 }
 
-func (libbpf *libbpfProg) VendorRamdiskVariantNeeded(ctx android.BaseModuleContext) bool {
+func (libbpf *libbpfProg) VendorRamdiskVariantNeeded(ctx android.ImageInterfaceContext) bool {
 	return false
 }
 
-func (libbpf *libbpfProg) DebugRamdiskVariantNeeded(ctx android.BaseModuleContext) bool {
+func (libbpf *libbpfProg) DebugRamdiskVariantNeeded(ctx android.ImageInterfaceContext) bool {
 	return false
 }
 
-func (libbpf *libbpfProg) RecoveryVariantNeeded(ctx android.BaseModuleContext) bool {
+func (libbpf *libbpfProg) RecoveryVariantNeeded(ctx android.ImageInterfaceContext) bool {
 	return false
 }
 
-func (libbpf *libbpfProg) ExtraImageVariations(ctx android.BaseModuleContext) []string {
+func (libbpf *libbpfProg) ExtraImageVariations(ctx android.ImageInterfaceContext) []string {
 	return nil
 }
 
-func (libbpf *libbpfProg) SetImageVariation(ctx android.BaseModuleContext, variation string) {
+func (libbpf *libbpfProg) SetImageVariation(ctx android.ImageInterfaceContext, variation string) {
 }
 
 func (libbpf *libbpfProg) DepsMutator(ctx android.BottomUpMutatorContext) {
@@ -158,7 +158,8 @@ func (libbpf *libbpfProg) GenerateAndroidBuildActions(ctx android.ModuleContext)
 		"-Wall",
 		"-Werror",
 		"-Wextra",
-
+		// Flag to assist with the transition to libbpf
+		"-DENABLE_LIBBPF",
 		"-isystem bionic/libc/include",
 		"-isystem bionic/libc/kernel/uapi",
 		// The architecture doesn't matter here, but asm/types.h is included by linux/types.h.
@@ -205,7 +206,7 @@ func (libbpf *libbpfProg) GenerateAndroidBuildActions(ctx android.ModuleContext)
 		if strings.ContainsRune(src.Base(), '_') {
 			ctx.ModuleErrorf("invalid character '_' in source name")
 		}
-		obj := android.ObjPathWithExt(ctx, "unstripped", src, "o")
+		obj := android.ObjPathWithExt(ctx, "unstripped", src, "bpf")
 
 		ctx.Build(pctx, android.BuildParams{
 			Rule:      libbpfProgCcRule,
@@ -218,7 +219,7 @@ func (libbpf *libbpfProg) GenerateAndroidBuildActions(ctx android.ModuleContext)
 			},
 		})
 
-		objStripped := android.ObjPathWithExt(ctx, "", src, "o")
+		objStripped := android.ObjPathWithExt(ctx, "", src, "bpf")
 		ctx.Build(pctx, android.BuildParams{
 			Rule:   libbpfProgStripRule,
 			Input:  obj,
@@ -230,7 +231,7 @@ func (libbpf *libbpfProg) GenerateAndroidBuildActions(ctx android.ModuleContext)
 		libbpf.objs = append(libbpf.objs, objStripped.WithoutRel())
 	}
 
-	installDir := android.PathForModuleInstall(ctx, "etc", "bpf/libbpf")
+	installDir := android.PathForModuleInstall(ctx, "etc", "bpf")
 	if len(libbpf.properties.Relative_install_path) > 0 {
 		installDir = installDir.Join(ctx, libbpf.properties.Relative_install_path)
 	}
@@ -251,7 +252,7 @@ func (libbpf *libbpfProg) AndroidMk() android.AndroidMkData {
 			fmt.Fprintln(w, "LOCAL_PATH :=", moduleDir)
 			fmt.Fprintln(w)
 			var localModulePath string
-			localModulePath = "LOCAL_MODULE_PATH := $(TARGET_OUT_ETC)/bpf/libbpf"
+			localModulePath = "LOCAL_MODULE_PATH := $(TARGET_OUT_ETC)/bpf"
 			if len(libbpf.properties.Relative_install_path) > 0 {
 				localModulePath += "/" + libbpf.properties.Relative_install_path
 			}

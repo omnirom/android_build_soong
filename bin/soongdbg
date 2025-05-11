@@ -393,12 +393,42 @@ class QueryCommand:
                 print(f"    dep:      {d.id}")
 
 
+class StarCommand:
+    help = "Print the dependencies and reverse dependencies of a module"
+
+    def args(self, parser):
+        parser.add_argument("module", nargs="+",
+                            help="Module to print dependencies of")
+        parser.add_argument("--depth", type=int, required=True,
+                            help="max depth of dependencies")
+        print_args(parser)
+
+    def run(self, args):
+        graph = load_graph()
+        nodes = set()
+        err = False
+        for id in args.module:
+            root = graph.nodes.get(id)
+            if not root:
+                sys.stderr.write(f"error: Can't find root: {id}\n")
+                err = True
+                continue
+            get_deps(nodes, root, args.depth, False, set(args.tag))
+            nodes.remove(root) # Remove it so get_deps doesn't bail out
+            get_deps(nodes, root, args.depth, True, set(args.tag))
+        if err:
+            sys.exit(1)
+        print_nodes(args, nodes, new_module_formatter(args))
+
+
+
 COMMANDS = {
     "between": BetweenCommand(),
     "deps": DepsCommand(),
     "id": IdCommand(),
     "json": JsonCommand(),
     "query": QueryCommand(),
+    "star": StarCommand(),
 }
 
 

@@ -211,7 +211,7 @@ func TestAndroidMkCcLibrary(t *testing.T) {
 
 	module := result.ModuleForTests("my_cc_library", "android_vendor_arm64_armv8-a_shared").Module()
 
-	entry := android.AndroidMkEntriesForTest(t, result.TestContext, module)[0]
+	entry := android.AndroidMkInfoForTest(t, result.TestContext, module).PrimaryInfo
 
 	makeVar := entry.EntryMap["LOCAL_ACONFIG_FILES"]
 	android.EnsureListContainsSuffix(t, makeVar, "my_aconfig_declarations_foo/intermediate.pb")

@@ -142,7 +142,7 @@ endif
 		t.Fatalf("Unexpected errors while parsing: %v", errs)
 	}
 
-	if got[0].End() < got[len(got) -1].Pos() {
-		t.Errorf("Rule's end (%d) is smaller than directive that inside of rule's start (%v)\n", got[0].End(), got[len(got) -1].Pos())
+	if got[0].End() < got[len(got)-1].Pos() {
+		t.Errorf("Rule's end (%d) is smaller than directive that inside of rule's start (%v)\n", got[0].End(), got[len(got)-1].Pos())
 	}
 }

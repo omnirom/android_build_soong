@@ -128,6 +128,7 @@ func FindSources(ctx Context, config Config, f *finder.Finder) {
 
 	// Stop searching a subdirectory recursively after finding an Android.mk.
 	androidMks := f.FindFirstNamedAt(".", "Android.mk")
+	androidMks = ignoreNdkAndroidMks(androidMks)
 	blockAndroidMks(ctx, androidMks)
 	err := dumpListToFile(ctx, config, androidMks, filepath.Join(dumpDir, "Android.mk.list"))
 	if err != nil {
@@ -170,6 +171,7 @@ func FindSources(ctx Context, config Config, f *finder.Finder) {
 
 	// Recursively look for all METADATA files.
 	metadataFiles := f.FindNamedAt(".", "METADATA")
+	metadataFiles = ignoreNonAndroidMetadataFiles(metadataFiles)
 	err = dumpListToFile(ctx, config, metadataFiles, filepath.Join(dumpDir, "METADATA.list"))
 	if err != nil {
 		ctx.Fatalf("Could not find METADATA: %v", err)
@@ -221,4 +223,17 @@ func dumpListToFile(ctx Context, config Config, list []string, filePath string) 
 	distFile(ctx, config, filePath, "module_paths")
 
 	return nil
+}
+
+func ignoreNonAndroidMetadataFiles(metadataFiles []string) []string {
+	result := make([]string, 0, len(metadataFiles))
+	for _, file := range metadataFiles {
+		// Ignore files like prebuilts/clang/host/linux-x86/clang-r536225/python3/lib/python3.11/site-packages/pip-23.1.2.dist-info/METADATA
+		// these METADATA files are from upstream and are not the METADATA files used in Android codebase.
+		if strings.Contains(file, "prebuilts/clang/host/") && strings.Contains(file, "/site-packages/") {
+			continue
+		}
+		result = append(result, file)
+	}
+	return result
 }

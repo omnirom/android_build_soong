@@ -90,6 +90,9 @@ func MarshalFlagValue(config *rc_lib.ReleaseConfig, name string) (ret string, er
 	if !ok {
 		return "", fmt.Errorf("%s not found in %s", name, config.Name)
 	}
+	if fa.Redacted {
+		return "==REDACTED==", nil
+	}
 	return rc_lib.MarshalValue(fa.Value), nil
 }
 
@@ -329,7 +332,7 @@ func SetCommand(configs *rc_lib.ReleaseConfigs, commonFlags Flags, cmd string, a
 		return err
 	}
 	updatedFiles = append(updatedFiles, flagPath)
-	fmt.Printf("Added/Updated: %s\n", strings.Join(updatedFiles, " "))
+	fmt.Printf("\033[1mAdded/Updated: %s\033[0m\n", strings.Join(updatedFiles, " "))
 	return nil
 }
 

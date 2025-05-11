@@ -248,6 +248,18 @@ func (configs *ReleaseConfigs) GetFlagValueDirectory(config *ReleaseConfig, flag
 	return configs.configDirs[index], nil
 }
 
+// Return the (unsorted) release configs contributed to by `dir`.
+func EnumerateReleaseConfigs(dir string) ([]string, error) {
+	var ret []string
+	err := WalkTextprotoFiles(dir, "release_configs", func(path string, d fs.DirEntry, err error) error {
+		// Strip off the trailing `.textproto` from the name.
+		name := filepath.Base(path)
+		ret = append(ret, name[:len(name)-10])
+		return err
+	})
+	return ret, err
+}
+
 func (configs *ReleaseConfigs) LoadReleaseConfigMap(path string, ConfigDirIndex int) error {
 	if _, err := os.Stat(path); err != nil {
 		return fmt.Errorf("%s does not exist\n", path)
@@ -349,10 +361,22 @@ func (configs *ReleaseConfigs) LoadReleaseConfigMap(path string, ConfigDirIndex 
 		if fmt.Sprintf("%s.textproto", name) != filepath.Base(path) {
 			return fmt.Errorf("%s incorrectly declares release config %s", path, name)
 		}
+		releaseConfigType := releaseConfigContribution.proto.ReleaseConfigType
+		if releaseConfigType == nil {
+			if name == "root" {
+				releaseConfigType = rc_proto.ReleaseConfigType_EXPLICIT_INHERITANCE_CONFIG.Enum()
+			} else {
+				releaseConfigType = rc_proto.ReleaseConfigType_RELEASE_CONFIG.Enum()
+			}
+		}
 		if _, ok := configs.ReleaseConfigs[name]; !ok {
 			configs.ReleaseConfigs[name] = ReleaseConfigFactory(name, ConfigDirIndex)
+			configs.ReleaseConfigs[name].ReleaseConfigType = *releaseConfigType
 		}
 		config := configs.ReleaseConfigs[name]
+		if config.ReleaseConfigType != *releaseConfigType {
+			return fmt.Errorf("%s mismatching ReleaseConfigType value %s", path, *releaseConfigType)
+		}
 		config.FilesUsedMap[path] = true
 		inheritNames := make(map[string]bool)
 		for _, inh := range config.InheritNames {
@@ -398,6 +422,14 @@ func (configs *ReleaseConfigs) LoadReleaseConfigMap(path string, ConfigDirIndex 
 }
 
 func (configs *ReleaseConfigs) GetReleaseConfig(name string) (*ReleaseConfig, error) {
+	return configs.getReleaseConfig(name, configs.allowMissing)
+}
+
+func (configs *ReleaseConfigs) GetReleaseConfigStrict(name string) (*ReleaseConfig, error) {
+	return configs.getReleaseConfig(name, false)
+}
+
+func (configs *ReleaseConfigs) getReleaseConfig(name string, allow_missing bool) (*ReleaseConfig, error) {
 	trace := []string{name}
 	for target, ok := configs.Aliases[name]; ok; target, ok = configs.Aliases[name] {
 		name = *target
@@ -406,7 +438,7 @@ func (configs *ReleaseConfigs) GetReleaseConfig(name string) (*ReleaseConfig, er
 	if config, ok := configs.ReleaseConfigs[name]; ok {
 		return config, nil
 	}
-	if configs.allowMissing {
+	if allow_missing {
 		if config, ok := configs.ReleaseConfigs["trunk_staging"]; ok {
 			return config, nil
 		}
@@ -417,8 +449,10 @@ func (configs *ReleaseConfigs) GetReleaseConfig(name string) (*ReleaseConfig, er
 func (configs *ReleaseConfigs) GetAllReleaseNames() []string {
 	var allReleaseNames []string
 	for _, v := range configs.ReleaseConfigs {
-		allReleaseNames = append(allReleaseNames, v.Name)
-		allReleaseNames = append(allReleaseNames, v.OtherNames...)
+		if v.isConfigListable() {
+			allReleaseNames = append(allReleaseNames, v.Name)
+			allReleaseNames = append(allReleaseNames, v.OtherNames...)
+		}
 	}
 	slices.Sort(allReleaseNames)
 	return allReleaseNames
@@ -455,7 +489,7 @@ func (configs *ReleaseConfigs) GenerateReleaseConfigs(targetRelease string) erro
 		dirName := filepath.Dir(contrib.path)
 		for k, names := range contrib.FlagValueDirs {
 			for _, rcName := range names {
-				if config, err := configs.GetReleaseConfig(rcName); err == nil {
+				if config, err := configs.getReleaseConfig(rcName, false); err == nil {
 					rcPath := filepath.Join(dirName, "release_configs", fmt.Sprintf("%s.textproto", config.Name))
 					if _, err := os.Stat(rcPath); err != nil {
 						errors = append(errors, fmt.Sprintf("%s exists but %s does not contribute to %s",

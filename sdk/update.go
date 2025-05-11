@@ -1201,7 +1201,7 @@ func (s *snapshotBuilder) OptionalSdkMemberReferencePropertyTag() android.BpProp
 // the snapshot.
 func (s *snapshotBuilder) snapshotSdkMemberName(name string, required bool) string {
 	if _, ok := s.allMembersByName[name]; !ok {
-		if required {
+		if required && !s.ctx.Config().AllowMissingDependencies() {
 			s.ctx.ModuleErrorf("Required member reference %s is not a member of the sdk", name)
 		}
 		return name

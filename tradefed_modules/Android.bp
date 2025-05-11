@@ -9,13 +9,16 @@ bootstrap_go_package {
         "blueprint",
         "soong-android",
         "soong-java",
+        "soong-sh",
         "soong-tradefed",
     ],
     srcs: [
         "test_module_config.go",
+        "test_suite.go",
     ],
     testSrcs: [
         "test_module_config_test.go",
+        "test_suite_test.go",
     ],
     pluginFor: ["soong_build"],
 }

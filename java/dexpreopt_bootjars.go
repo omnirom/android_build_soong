@@ -463,8 +463,9 @@ func dexpreoptBootJarsFactory() android.SingletonModule {
 
 func RegisterDexpreoptBootJarsComponents(ctx android.RegistrationContext) {
 	ctx.RegisterParallelSingletonModuleType("dex_bootjars", dexpreoptBootJarsFactory)
+	ctx.RegisterModuleType("art_boot_images", artBootImagesFactory)
 	ctx.FinalDepsMutators(func(ctx android.RegisterMutatorsContext) {
-		ctx.BottomUp("dex_bootjars_deps", DexpreoptBootJarsMutator).Parallel()
+		ctx.BottomUp("dex_bootjars_deps", DexpreoptBootJarsMutator)
 	})
 }
 
@@ -601,6 +602,7 @@ func (d *dexpreoptBootJars) GenerateAndroidBuildActions(ctx android.ModuleContex
 	d.defaultBootImage = defaultBootImageConfig(ctx)
 	d.otherImages = make([]*bootImageConfig, 0, len(imageConfigs)-1)
 	var profileInstalls android.RuleBuilderInstalls
+	var artBootImageHostInstalls android.RuleBuilderInstalls
 	for _, name := range getImageNames() {
 		config := imageConfigs[name]
 		if config != d.defaultBootImage {
@@ -616,6 +618,18 @@ func (d *dexpreoptBootJars) GenerateAndroidBuildActions(ctx android.ModuleContex
 			d.bootFrameworkProfile = bootProfile
 			profileInstalls = append(profileInstalls, installs...)
 		}
+		// Gather the install files of the host variant of the ART boot image.
+		// These installed files will be used in ART tests.
+		if config.name == "art" {
+			for _, variant := range config.variants {
+				if variant.target.Os != ctx.Config().BuildOS {
+					// not a host variant
+					continue
+				}
+				artBootImageHostInstalls = append(artBootImageHostInstalls, variant.installs...)
+				artBootImageHostInstalls = append(artBootImageHostInstalls, variant.vdexInstalls...)
+			}
+		}
 	}
 	if len(profileInstalls) > 0 {
 		android.SetProvider(ctx, profileInstallInfoProvider, profileInstallInfo{
@@ -626,6 +640,15 @@ func (d *dexpreoptBootJars) GenerateAndroidBuildActions(ctx android.ModuleContex
 			installFile(ctx, install)
 		}
 	}
+	// Set a provider containing the install files of the host variant of the ART boot image.
+	// The actual install rules will be created by `art_boot_images`
+	android.SetProvider(
+		ctx,
+		artBootImageHostInfoProvider,
+		artBootImageHostInfo{
+			installs: artBootImageHostInstalls,
+		},
+	)
 }
 
 // GenerateSingletonBuildActions generates build rules for the dexpreopt config for Make.
@@ -968,6 +991,14 @@ func packageFileForTargetImage(ctx android.ModuleContext, image *bootImageVarian
 	}
 }
 
+var artBootImageHostInfoProvider = blueprint.NewProvider[artBootImageHostInfo]()
+
+// artBootImageHostInfo contains the install locations of the host variant of ART boot image
+// this contains both the primary and secondary arch locations
+type artBootImageHostInfo struct {
+	installs android.RuleBuilderInstalls
+}
+
 // Generate boot image build rules for a specific target.
 func buildBootImageVariant(ctx android.ModuleContext, image *bootImageVariant, profile android.Path) bootImageVariantOutputs {
 
@@ -1186,8 +1217,13 @@ func bootImageProfileRuleCommon(ctx android.ModuleContext, name string, dexFiles
 		return nil
 	}
 
-	defaultProfile := "frameworks/base/config/boot-image-profile.txt"
-	extraProfile := "frameworks/base/config/boot-image-profile-extra.txt"
+	defaultProfile := "frameworks/base/boot/boot-image-profile.txt"
+	// If ART is prebuilt, primarily in next release configs, this will still use
+	// the profile from source which represent the latest code, so it may not
+	// correspond to the BCP jars in the prebuilt APEX, but this is the profile we
+	// have access to.
+	artProfile := "art/build/boot/boot-image-profile.txt"
+	extraProfile := "frameworks/base/boot/boot-image-profile-extra.txt"
 
 	rule := android.NewRuleBuilder(pctx, ctx)
 
@@ -1201,6 +1237,9 @@ func bootImageProfileRuleCommon(ctx android.ModuleContext, name string, dexFiles
 		// like master-art-host that don't have frameworks/base).
 		// Return nil and continue without profile.
 		return nil
+	}
+	if path := android.ExistentPathForSource(ctx, artProfile); path.Valid() {
+		profiles = append(profiles, path.Path())
 	}
 	if path := android.ExistentPathForSource(ctx, extraProfile); path.Valid() {
 		profiles = append(profiles, path.Path())
@@ -1259,7 +1298,7 @@ func bootFrameworkProfileRule(ctx android.ModuleContext, image *bootImageConfig)
 		return nil, nil
 	}
 
-	defaultProfile := "frameworks/base/config/boot-profile.txt"
+	defaultProfile := "frameworks/base/boot/boot-profile.txt"
 	bootFrameworkProfile := android.PathForSource(ctx, defaultProfile)
 
 	profile := image.dir.Join(ctx, "boot.bprof")
@@ -1344,18 +1383,7 @@ func (d *dexpreoptBootJars) MakeVars(ctx android.MakeVarsContext) {
 	}
 
 	image := d.defaultBootImage
-	if image != nil {
-		if profileInstallInfo, ok := android.OtherModuleProvider(ctx, d, profileInstallInfoProvider); ok {
-			ctx.Strict("DEXPREOPT_IMAGE_PROFILE_BUILT_INSTALLED", profileInstallInfo.profileInstalls.String())
-			if profileInstallInfo.profileLicenseMetadataFile.Valid() {
-				ctx.Strict("DEXPREOPT_IMAGE_PROFILE_LICENSE_METADATA", profileInstallInfo.profileLicenseMetadataFile.String())
-			}
-		}
-
-		if SkipDexpreoptBootJars(ctx) {
-			return
-		}
-
+	if image != nil && !SkipDexpreoptBootJars(ctx) {
 		global := dexpreopt.GetGlobalConfig(ctx)
 		dexPaths, dexLocations := bcpForDexpreopt(ctx, global.PreoptWithUpdatableBcp)
 		ctx.Strict("DEXPREOPT_BOOTCLASSPATH_DEX_FILES", strings.Join(dexPaths.Strings(), " "))
@@ -1394,5 +1422,72 @@ func (d *dexpreoptBootJars) AndroidMkEntries() []android.AndroidMkEntries {
 	return []android.AndroidMkEntries{{
 		Class:      "ETC",
 		OutputFile: android.OptionalPathForPath(d.bootFrameworkProfile),
+	}}
+}
+
+// artBootImages is a thin wrapper around `dex_bootjars`.
+// it creates the installation rules for the host variant of the ART boot image.
+type artBootImages struct {
+	android.ModuleBase
+
+	// A non-empty file that will be written as `LOCAL_SOONG_INSTALLED_MODULE` in out/soong/Android-*.mk
+	outputFile android.OptionalPath
+}
+
+func artBootImagesFactory() android.Module {
+	m := &artBootImages{}
+	android.InitAndroidMultiTargetsArchModule(m, android.HostSupported, android.MultilibCommon)
+	return m
+}
+
+func (dbj *artBootImages) DepsMutator(ctx android.BottomUpMutatorContext) {
+	// Create a dependency on `dex_bootjars` to access the intermediate locations of host art boot image.
+	ctx.AddVariationDependencies(ctx.Config().AndroidCommonTarget.Variations(), dexpreoptBootJarDepTag, "dex_bootjars")
+}
+
+func (d *artBootImages) GenerateAndroidBuildActions(ctx android.ModuleContext) {
+	ctx.VisitDirectDepsWithTag(dexpreoptBootJarDepTag, func(m android.Module) {
+		hostInstallsInfo, ok := android.OtherModuleProvider(ctx, m, artBootImageHostInfoProvider)
+		if !ok {
+			ctx.ModuleErrorf("Could not find information about the host variant of ART boot image")
+		}
+		installs := d.installFile(ctx, hostInstallsInfo.installs)
+		if len(installs) > 0 {
+			d.outputFile = android.OptionalPathForPath(installs[0])
+			// Create a phony target that can ART run-tests can depend on.
+			ctx.Phony(d.Name(), installs...)
+		} else {
+			// this might be true e.g. when building with `WITH_DEXPREOPT=false`
+			// create an empty file so that the `art_boot_images` is known to the packaging system.
+			d.outputFile = android.OptionalPathForPath(android.PathForModuleOut(ctx, "undefined_art_boot_images"))
+		}
+	})
+}
+
+// Creates an installation rule for host variant of ART boot image files.
+// Returns the list of install locations (out/host/linux-x86/...)
+func (d *artBootImages) installFile(ctx android.ModuleContext, ruleBuilderInstalls android.RuleBuilderInstalls) android.Paths {
+	var ret android.Paths
+	for _, ruleBuilderInstall := range ruleBuilderInstalls {
+		installDir := android.PathForModuleInstall(
+			ctx,
+			strings.TrimPrefix(filepath.Dir(ruleBuilderInstall.To), "/"),
+		)
+		filename := filepath.Base(ruleBuilderInstall.To)
+		ctx.InstallFile(
+			installDir,
+			filename,
+			ruleBuilderInstall.From,
+		)
+		ret = append(ret, installDir.Join(ctx, filename))
+	}
+	return ret
+}
+
+// Set `OutputFile` expclitly so that this module does not get elided when generating out/soong/Android-*.mk
+func (d *artBootImages) AndroidMkEntries() []android.AndroidMkEntries {
+	return []android.AndroidMkEntries{{
+		Class:      "ETC",
+		OutputFile: d.outputFile,
 	}}
 }

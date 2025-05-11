@@ -84,8 +84,10 @@ func FlagArtifactsFactory(artifactsPath string) *FlagArtifacts {
 
 func (fas *FlagArtifacts) SortedFlagNames() []string {
 	var names []string
-	for k, _ := range *fas {
-		names = append(names, k)
+	for k, v := range *fas {
+		if !v.Redacted {
+			names = append(names, k)
+		}
 	}
 	slices.Sort(names)
 	return names
@@ -98,6 +100,9 @@ func (fa *FlagArtifact) GenerateFlagDeclarationArtifact() *rc_proto.FlagDeclarat
 	}
 	if namespace := fa.FlagDeclaration.GetNamespace(); namespace != "" {
 		ret.Namespace = proto.String(namespace)
+	}
+	if bugs := fa.FlagDeclaration.GetBugs(); bugs != nil {
+		ret.Bugs = bugs
 	}
 	if description := fa.FlagDeclaration.GetDescription(); description != "" {
 		ret.Description = proto.String(description)
@@ -180,15 +185,20 @@ func (src FlagArtifacts) Clone() (dst FlagArtifacts) {
 //	error: any error encountered
 func (fa *FlagArtifact) UpdateValue(flagValue FlagValue) error {
 	name := *flagValue.proto.Name
-	fa.Traces = append(fa.Traces, &rc_proto.Tracepoint{Source: proto.String(flagValue.path), Value: flagValue.proto.Value})
-	if flagValue.proto.GetRedacted() {
-		fa.Redacted = true
+	redacted := flagValue.proto.GetRedacted()
+	if redacted {
+		fa.Redact()
+		flagValue.proto.Value = fa.Value
 		fmt.Printf("Redacting flag %s in %s\n", name, flagValue.path)
-		return nil
+	} else {
+		// If we are assigning a value, then the flag is no longer redacted.
+		fa.Redacted = false
 	}
+	fa.Traces = append(fa.Traces, &rc_proto.Tracepoint{Source: proto.String(flagValue.path), Value: flagValue.proto.Value})
 	if fa.Value.GetObsolete() {
 		return fmt.Errorf("Attempting to set obsolete flag %s. Trace=%v", name, fa.Traces)
 	}
+
 	var newValue *rc_proto.Value
 	switch val := flagValue.proto.Value.Val.(type) {
 	case *rc_proto.Value_StringValue:
@@ -208,6 +218,11 @@ func (fa *FlagArtifact) UpdateValue(flagValue FlagValue) error {
 	}
 	fa.Value = newValue
 	return nil
+}
+
+func (fa *FlagArtifact) Redact() {
+	fa.Redacted = true
+	fa.Value = &rc_proto.Value{Val: &rc_proto.Value_StringValue{StringValue: "*REDACTED*"}}
 }
 
 // Marshal the FlagArtifact into a flag_artifact message.

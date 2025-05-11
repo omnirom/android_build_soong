@@ -44,6 +44,32 @@ const (
 	UnknownFramework Framework = "unknownframework"
 )
 
+func (f Framework) Variant() string {
+	switch f {
+	case AFL:
+		return "afl"
+	case LibFuzzer:
+		return "libfuzzer"
+	case Jazzer:
+		return "jazzer"
+	default:
+		panic(fmt.Errorf("unknown fuzzer %q when getting variant", f))
+	}
+}
+
+func FrameworkFromVariant(v string) Framework {
+	switch v {
+	case "afl":
+		return AFL
+	case "libfuzzer":
+		return LibFuzzer
+	case "jazzer":
+		return Jazzer
+	default:
+		panic(fmt.Errorf("unknown variant %q when getting fuzzer", v))
+	}
+}
+
 var BoolDefault = proptools.BoolDefault
 
 type FuzzModule struct {
@@ -385,6 +411,11 @@ type FuzzProperties struct {
 	// Optional list of seed files to be installed to the fuzz target's output
 	// directory.
 	Corpus []string `android:"path"`
+
+	// Same as corpus, but adds dependencies on module references using the device's os variant
+	// and the common arch variant.
+	Device_common_corpus []string `android:"path_device_common"`
+
 	// Optional list of data files to be installed to the fuzz target's output
 	// directory. Directory structure relative to the module is preserved.
 	Data []string `android:"path"`

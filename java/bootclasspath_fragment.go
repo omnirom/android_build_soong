@@ -23,7 +23,6 @@ import (
 
 	"android/soong/android"
 	"android/soong/dexpreopt"
-	"android/soong/testing"
 
 	"github.com/google/blueprint/proptools"
 
@@ -84,10 +83,6 @@ func (b bootclasspathFragmentContentDependencyTag) ExportMember() bool {
 	return true
 }
 
-// Contents of bootclasspath fragments in an apex are considered to be directly in the apex, as if
-// they were listed in java_libs.
-func (b bootclasspathFragmentContentDependencyTag) CopyDirectlyInAnyApex() {}
-
 // Contents of bootclasspath fragments require files from prebuilt apex files.
 func (b bootclasspathFragmentContentDependencyTag) RequiresFilesFromPrebuiltApex() {}
 
@@ -97,7 +92,6 @@ var bootclasspathFragmentContentDepTag = bootclasspathFragmentContentDependencyT
 var _ android.ExcludeFromVisibilityEnforcementTag = bootclasspathFragmentContentDepTag
 var _ android.ReplaceSourceWithPrebuilt = bootclasspathFragmentContentDepTag
 var _ android.SdkMemberDependencyTag = bootclasspathFragmentContentDepTag
-var _ android.CopyDirectlyInAnyApexTag = bootclasspathFragmentContentDepTag
 var _ android.RequiresFilesFromPrebuiltApexTag = bootclasspathFragmentContentDepTag
 
 func IsBootclasspathFragmentContentDepTag(tag blueprint.DependencyTag) bool {
@@ -112,7 +106,7 @@ type BootclasspathFragmentCoverageAffectedProperties struct {
 	// property.
 	//
 	// The order of this list matters as it is the order that is used in the bootclasspath.
-	Contents []string
+	Contents proptools.Configurable[[]string] `android:"arch_variant"`
 
 	// The properties for specifying the API stubs provided by this fragment.
 	BootclasspathAPIProperties
@@ -296,8 +290,8 @@ func testBootclasspathFragmentFactory() android.Module {
 	return m
 }
 
-func (m *BootclasspathFragmentModule) bootclasspathFragmentPropertyCheck(ctx android.EarlyModuleContext) {
-	contents := m.properties.Contents
+func (m *BootclasspathFragmentModule) bootclasspathFragmentPropertyCheck(ctx android.ModuleContext) {
+	contents := m.properties.Contents.GetOrDefault(ctx, nil)
 	if len(contents) == 0 {
 		ctx.PropertyErrorf("contents", "required property is missing")
 		return
@@ -435,7 +429,7 @@ func (b *BootclasspathFragmentModule) ComponentDepsMutator(ctx android.BottomUpM
 	module := ctx.Module()
 	_, isSourceModule := module.(*BootclasspathFragmentModule)
 
-	for _, name := range b.properties.Contents {
+	for _, name := range b.properties.Contents.GetOrDefault(ctx, nil) {
 		// A bootclasspath_fragment must depend only on other source modules, while the
 		// prebuilt_bootclasspath_fragment must only depend on other prebuilt modules.
 		//
@@ -521,10 +515,9 @@ func (b *BootclasspathFragmentModule) GenerateAndroidBuildActions(ctx android.Mo
 	// be output to Make but it does not really matter which variant is output. The default/platform
 	// variant is the first (ctx.PrimaryModule()) and is usually hidden from make so this just picks
 	// the last variant (ctx.FinalModule()).
-	if ctx.Module() != ctx.FinalModule() {
+	if !ctx.IsFinalModule(ctx.Module()) {
 		b.HideFromMake()
 	}
-	android.SetProvider(ctx, testing.TestModuleProviderKey, testing.TestModuleProviderData{})
 }
 
 // getProfileProviderApex returns the name of the apex that provides a boot image profile, or an
@@ -590,7 +583,7 @@ func (b *BootclasspathFragmentModule) configuredJars(ctx android.ModuleContext) 
 		return global.ArtApexJars
 	}
 
-	possibleUpdatableModules := gatherPossibleApexModuleNamesAndStems(ctx, b.properties.Contents, bootclasspathFragmentContentDepTag)
+	possibleUpdatableModules := gatherPossibleApexModuleNamesAndStems(ctx, b.properties.Contents.GetOrDefault(ctx, nil), bootclasspathFragmentContentDepTag)
 	jars, unknown := global.ApexBootJars.Filter(possibleUpdatableModules)
 
 	// TODO(satayev): for apex_test we want to include all contents unconditionally to classpaths
@@ -602,7 +595,7 @@ func (b *BootclasspathFragmentModule) configuredJars(ctx android.ModuleContext) 
 	} else if android.InList("test_framework-apexd", possibleUpdatableModules) {
 		jars = jars.Append("com.android.apex.test_package", "test_framework-apexd")
 	} else if global.ApexBootJars.Len() != 0 {
-		unknown = android.RemoveListFromList(unknown, b.properties.Coverage.Contents)
+		unknown = android.RemoveListFromList(unknown, b.properties.Coverage.Contents.GetOrDefault(ctx, nil))
 		_, unknown = android.RemoveFromList("core-icu4j", unknown)
 		// This module only exists in car products.
 		// So ignore it even if it is not in PRODUCT_APEX_BOOT_JARS.
@@ -849,7 +842,7 @@ func (b *BootclasspathFragmentModule) getProfilePath() android.Path {
 
 // Collect information for opening IDE project files in java/jdeps.go.
 func (b *BootclasspathFragmentModule) IDEInfo(ctx android.BaseModuleContext, dpInfo *android.IdeInfo) {
-	dpInfo.Deps = append(dpInfo.Deps, b.properties.Contents...)
+	dpInfo.Deps = append(dpInfo.Deps, b.properties.Contents.GetOrDefault(ctx, nil)...)
 }
 
 type bootclasspathFragmentMemberType struct {
@@ -925,7 +918,7 @@ func (b *bootclasspathFragmentSdkMemberProperties) PopulateFromVariant(ctx andro
 	module := variant.(*BootclasspathFragmentModule)
 
 	b.Image_name = module.properties.Image_name
-	b.Contents = module.properties.Contents
+	b.Contents = module.properties.Contents.GetOrDefault(ctx.SdkModuleContext(), nil)
 
 	// Get the hidden API information from the module.
 	mctx := ctx.SdkModuleContext()

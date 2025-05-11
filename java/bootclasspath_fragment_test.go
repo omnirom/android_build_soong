@@ -191,7 +191,8 @@ func TestBootclasspathFragment_Coverage(t *testing.T) {
 
 	checkContents := func(t *testing.T, result *android.TestResult, expected ...string) {
 		module := result.Module("myfragment", "android_common").(*BootclasspathFragmentModule)
-		android.AssertArrayString(t, "contents property", expected, module.properties.Contents)
+		eval := module.ConfigurableEvaluator(android.PanickingConfigAndErrorContext(result.TestContext))
+		android.AssertArrayString(t, "contents property", expected, module.properties.Contents.GetOrDefault(eval, nil))
 	}
 
 	preparer := android.GroupFixturePreparers(

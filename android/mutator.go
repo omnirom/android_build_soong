@@ -26,17 +26,17 @@ import (
 //   run Pre-deps mutators
 //   run depsMutator
 //   run PostDeps mutators
-//   run FinalDeps mutators (CreateVariations disallowed in this phase)
+//   run FinalDeps mutators (TransitionMutators disallowed in this phase)
 //   continue on to GenerateAndroidBuildActions
 
 // collateGloballyRegisteredMutators constructs the list of mutators that have been registered
 // with the InitRegistrationContext and will be used at runtime.
 func collateGloballyRegisteredMutators() sortableComponents {
-	return collateRegisteredMutators(preArch, preDeps, postDeps, finalDeps)
+	return collateRegisteredMutators(preArch, preDeps, postDeps, postApex, finalDeps)
 }
 
 // collateRegisteredMutators constructs a single list of mutators from the separate lists.
-func collateRegisteredMutators(preArch, preDeps, postDeps, finalDeps []RegisterMutatorFunc) sortableComponents {
+func collateRegisteredMutators(preArch, preDeps, postDeps, postApex, finalDeps []RegisterMutatorFunc) sortableComponents {
 	mctx := &registerMutatorsContext{}
 
 	register := func(funcs []RegisterMutatorFunc) {
@@ -53,6 +53,8 @@ func collateRegisteredMutators(preArch, preDeps, postDeps, finalDeps []RegisterM
 
 	register(postDeps)
 
+	register(postApex)
+
 	mctx.finalPhase = true
 	register(finalDeps)
 
@@ -68,7 +70,7 @@ type RegisterMutatorsContext interface {
 	TopDown(name string, m TopDownMutator) MutatorHandle
 	BottomUp(name string, m BottomUpMutator) MutatorHandle
 	BottomUpBlueprint(name string, m blueprint.BottomUpMutator) MutatorHandle
-	Transition(name string, m TransitionMutator)
+	Transition(name string, m TransitionMutator) TransitionMutatorHandle
 }
 
 type RegisterMutatorFunc func(RegisterMutatorsContext)
@@ -149,6 +151,7 @@ var preArch = []RegisterMutatorFunc{
 
 func registerArchMutator(ctx RegisterMutatorsContext) {
 	ctx.Transition("os", &osTransitionMutator{})
+	ctx.BottomUp("image_begin", imageMutatorBeginMutator)
 	ctx.Transition("image", &imageTransitionMutator{})
 	ctx.Transition("arch", &archTransitionMutator{})
 }
@@ -166,6 +169,8 @@ var postDeps = []RegisterMutatorFunc{
 	RegisterOverridePostDepsMutators,
 }
 
+var postApex = []RegisterMutatorFunc{}
+
 var finalDeps = []RegisterMutatorFunc{}
 
 func PreArchMutators(f RegisterMutatorFunc) {
@@ -180,29 +185,18 @@ func PostDepsMutators(f RegisterMutatorFunc) {
 	postDeps = append(postDeps, f)
 }
 
-func FinalDepsMutators(f RegisterMutatorFunc) {
-	finalDeps = append(finalDeps, f)
+func PostApexMutators(f RegisterMutatorFunc) {
+	postApex = append(postApex, f)
 }
 
-type BaseMutatorContext interface {
-	BaseModuleContext
-
-	// MutatorName returns the name that this mutator was registered with.
-	MutatorName() string
-
-	// Rename all variants of a module.  The new name is not visible to calls to ModuleName,
-	// AddDependency or OtherModuleName until after this mutator pass is complete.
-	Rename(name string)
-
-	// CreateModule creates a new module by calling the factory method for the specified moduleType, and applies
-	// the specified property structs to it as if the properties were set in a blueprint file.
-	CreateModule(ModuleFactory, ...interface{}) Module
+func FinalDepsMutators(f RegisterMutatorFunc) {
+	finalDeps = append(finalDeps, f)
 }
 
 type TopDownMutator func(TopDownMutatorContext)
 
 type TopDownMutatorContext interface {
-	BaseMutatorContext
+	BaseModuleContext
 }
 
 type topDownMutatorContext struct {
@@ -213,64 +207,40 @@ type topDownMutatorContext struct {
 type BottomUpMutator func(BottomUpMutatorContext)
 
 type BottomUpMutatorContext interface {
-	BaseMutatorContext
+	BaseModuleContext
 
 	// AddDependency adds a dependency to the given module.  It returns a slice of modules for each
 	// dependency (some entries may be nil).
 	//
-	// If the mutator is parallel (see MutatorHandle.Parallel), this method will pause until the
-	// new dependencies have had the current mutator called on them.  If the mutator is not
-	// parallel this method does not affect the ordering of the current mutator pass, but will
-	// be ordered correctly for all future mutator passes.
+	// This method will pause until the new dependencies have had the current mutator called on them.
 	AddDependency(module blueprint.Module, tag blueprint.DependencyTag, name ...string) []blueprint.Module
 
 	// AddReverseDependency adds a dependency from the destination to the given module.
 	// Does not affect the ordering of the current mutator pass, but will be ordered
 	// correctly for all future mutator passes.  All reverse dependencies for a destination module are
 	// collected until the end of the mutator pass, sorted by name, and then appended to the destination
-	// module's dependency list.
+	// module's dependency list.  May only  be called by mutators that were marked with
+	// UsesReverseDependencies during registration.
 	AddReverseDependency(module blueprint.Module, tag blueprint.DependencyTag, name string)
-
-	// CreateVariations splits  a module into multiple variants, one for each name in the variationNames
-	// parameter.  It returns a list of new modules in the same order as the variationNames
-	// list.
-	//
-	// If any of the dependencies of the module being operated on were already split
-	// by calling CreateVariations with the same name, the dependency will automatically
-	// be updated to point the matching variant.
-	//
-	// If a module is split, and then a module depending on the first module is not split
-	// when the Mutator is later called on it, the dependency of the depending module will
-	// automatically be updated to point to the first variant.
-	CreateVariations(...string) []Module
-
-	// CreateLocationVariations splits a module into multiple variants, one for each name in the variantNames
-	// parameter.  It returns a list of new modules in the same order as the variantNames
-	// list.
-	//
-	// Local variations do not affect automatic dependency resolution - dependencies added
-	// to the split module via deps or DynamicDependerModule must exactly match a variant
-	// that contains all the non-local variations.
-	CreateLocalVariations(...string) []Module
-
-	// SetDependencyVariation sets all dangling dependencies on the current module to point to the variation
-	// with given name. This function ignores the default variation set by SetDefaultDependencyVariation.
-	SetDependencyVariation(string)
-
-	// SetDefaultDependencyVariation sets the default variation when a dangling reference is detected
-	// during the subsequent calls on Create*Variations* functions. To reset, set it to nil.
-	SetDefaultDependencyVariation(*string)
 
 	// AddVariationDependencies adds deps as dependencies of the current module, but uses the variations
 	// argument to select which variant of the dependency to use.  It returns a slice of modules for
 	// each dependency (some entries may be nil).  A variant of the dependency must exist that matches
 	// all the non-local variations of the current module, plus the variations argument.
 	//
-	// If the mutator is parallel (see MutatorHandle.Parallel), this method will pause until the
-	// new dependencies have had the current mutator called on them.  If the mutator is not
-	// parallel this method does not affect the ordering of the current mutator pass, but will
-	// be ordered correctly for all future mutator passes.
+	// This method will pause until the new dependencies have had the current mutator called on them.
 	AddVariationDependencies(variations []blueprint.Variation, tag blueprint.DependencyTag, names ...string) []blueprint.Module
+
+	// AddReverseVariationDependency adds a dependency from the named module to the current
+	// module. The given variations will be added to the current module's varations, and then the
+	// result will be used to find the correct variation of the depending module, which must exist.
+	//
+	// Does not affect the ordering of the current mutator pass, but will be ordered
+	// correctly for all future mutator passes.  All reverse dependencies for a destination module are
+	// collected until the end of the mutator pass, sorted by name, and then appended to the destination
+	// module's dependency list.  May only  be called by mutators that were marked with
+	// UsesReverseDependencies during registration.
+	AddReverseVariationDependency([]blueprint.Variation, blueprint.DependencyTag, string)
 
 	// AddFarVariationDependencies adds deps as dependencies of the current module, but uses the
 	// variations argument to select which variant of the dependency to use.  It returns a slice of
@@ -281,52 +251,31 @@ type BottomUpMutatorContext interface {
 	// Unlike AddVariationDependencies, the variations of the current module are ignored - the
 	// dependency only needs to match the supplied variations.
 	//
-	// If the mutator is parallel (see MutatorHandle.Parallel), this method will pause until the
-	// new dependencies have had the current mutator called on them.  If the mutator is not
-	// parallel this method does not affect the ordering of the current mutator pass, but will
-	// be ordered correctly for all future mutator passes.
+	// This method will pause until the new dependencies have had the current mutator called on them.
 	AddFarVariationDependencies([]blueprint.Variation, blueprint.DependencyTag, ...string) []blueprint.Module
-
-	// AddInterVariantDependency adds a dependency between two variants of the same module.  Variants are always
-	// ordered in the same orderas they were listed in CreateVariations, and AddInterVariantDependency does not change
-	// that ordering, but it associates a DependencyTag with the dependency and makes it visible to VisitDirectDeps,
-	// WalkDeps, etc.
-	AddInterVariantDependency(tag blueprint.DependencyTag, from, to blueprint.Module)
 
 	// ReplaceDependencies finds all the variants of the module with the specified name, then
 	// replaces all dependencies onto those variants with the current variant of this module.
-	// Replacements don't take effect until after the mutator pass is finished.
+	// Replacements don't take effect until after the mutator pass is finished.  May only
+	// be called by mutators that were marked with UsesReplaceDependencies during registration.
 	ReplaceDependencies(string)
 
 	// ReplaceDependenciesIf finds all the variants of the module with the specified name, then
 	// replaces all dependencies onto those variants with the current variant of this module
 	// as long as the supplied predicate returns true.
-	// Replacements don't take effect until after the mutator pass is finished.
+	// Replacements don't take effect until after the mutator pass is finished.  May only
+	// be called by mutators that were marked with UsesReplaceDependencies during registration.
 	ReplaceDependenciesIf(string, blueprint.ReplaceDependencyPredicate)
 
-	// AliasVariation takes a variationName that was passed to CreateVariations for this module,
-	// and creates an alias from the current variant (before the mutator has run) to the new
-	// variant.  The alias will be valid until the next time a mutator calls CreateVariations or
-	// CreateLocalVariations on this module without also calling AliasVariation.  The alias can
-	// be used to add dependencies on the newly created variant using the variant map from
-	// before CreateVariations was run.
-	AliasVariation(variationName string)
+	// Rename all variants of a module.  The new name is not visible to calls to ModuleName,
+	// AddDependency or OtherModuleName until after this mutator pass is complete.  May only be called
+	// by mutators that were marked with UsesRename during registration.
+	Rename(name string)
 
-	// CreateAliasVariation takes a toVariationName that was passed to CreateVariations for this
-	// module, and creates an alias from a new fromVariationName variant the toVariationName
-	// variant.  The alias will be valid until the next time a mutator calls CreateVariations or
-	// CreateLocalVariations on this module without also calling AliasVariation.  The alias can
-	// be used to add dependencies on the toVariationName variant using the fromVariationName
-	// variant.
-	CreateAliasVariation(fromVariationName, toVariationName string)
-
-	// SetVariationProvider sets the value for a provider for the given newly created variant of
-	// the current module, i.e. one of the Modules returned by CreateVariations..  It panics if
-	// not called during the appropriate mutator or GenerateBuildActions pass for the provider,
-	// if the value is not of the appropriate type, or if the module is not a newly created
-	// variant of the current module.  The value should not be modified after being passed to
-	// SetVariationProvider.
-	SetVariationProvider(module blueprint.Module, provider blueprint.AnyProviderKey, value interface{})
+	// CreateModule creates a new module by calling the factory method for the specified moduleType, and applies
+	// the specified property structs to it as if the properties were set in a blueprint file.  May only
+	// be called by mutators that were marked with UsesCreateModule during registration.
+	CreateModule(ModuleFactory, ...interface{}) Module
 }
 
 // An outgoingTransitionContextImpl and incomingTransitionContextImpl is created for every dependency of every module
@@ -391,6 +340,7 @@ func (x *registerMutatorsContext) BottomUpBlueprint(name string, m blueprint.Bot
 type IncomingTransitionContext interface {
 	ArchModuleContext
 	ModuleProviderContext
+	ModuleErrorContext
 
 	// Module returns the target of the dependency edge for which the transition
 	// is being computed
@@ -591,6 +541,14 @@ func (c *incomingTransitionContextImpl) provider(provider blueprint.AnyProviderK
 	return c.bp.Provider(provider)
 }
 
+func (c *incomingTransitionContextImpl) ModuleErrorf(fmt string, args ...interface{}) {
+	c.bp.ModuleErrorf(fmt, args)
+}
+
+func (c *incomingTransitionContextImpl) PropertyErrorf(property, fmt string, args ...interface{}) {
+	c.bp.PropertyErrorf(property, fmt, args)
+}
+
 func (a *androidTransitionMutator) IncomingTransition(bpctx blueprint.IncomingTransitionContext, incomingVariation string) string {
 	if m, ok := bpctx.Module().(Module); ok {
 		ctx := incomingTransitionContextPool.Get().(*incomingTransitionContextImpl)
@@ -621,7 +579,7 @@ func (a *androidTransitionMutator) Mutate(ctx blueprint.BottomUpMutatorContext, 
 	}
 }
 
-func (x *registerMutatorsContext) Transition(name string, m TransitionMutator) {
+func (x *registerMutatorsContext) Transition(name string, m TransitionMutator) TransitionMutatorHandle {
 	atm := &androidTransitionMutator{
 		finalPhase: x.finalPhase,
 		mutator:    m,
@@ -629,8 +587,10 @@ func (x *registerMutatorsContext) Transition(name string, m TransitionMutator) {
 	}
 	mutator := &mutator{
 		name:              name,
-		transitionMutator: atm}
+		transitionMutator: atm,
+	}
 	x.mutators = append(x.mutators, mutator)
+	return mutator
 }
 
 func (x *registerMutatorsContext) mutatorName(name string) string {
@@ -667,24 +627,114 @@ func (mutator *mutator) register(ctx *Context) {
 	} else if mutator.topDownMutator != nil {
 		handle = blueprintCtx.RegisterTopDownMutator(mutator.name, mutator.topDownMutator)
 	} else if mutator.transitionMutator != nil {
-		blueprintCtx.RegisterTransitionMutator(mutator.name, mutator.transitionMutator)
+		handle := blueprintCtx.RegisterTransitionMutator(mutator.name, mutator.transitionMutator)
+		if mutator.neverFar {
+			handle.NeverFar()
+		}
 	}
-	if mutator.parallel {
-		handle.Parallel()
+
+	// Forward booleans set on the MutatorHandle to the blueprint.MutatorHandle.
+	if mutator.usesRename {
+		handle.UsesRename()
+	}
+	if mutator.usesReverseDependencies {
+		handle.UsesReverseDependencies()
+	}
+	if mutator.usesReplaceDependencies {
+		handle.UsesReplaceDependencies()
+	}
+	if mutator.usesCreateModule {
+		handle.UsesCreateModule()
+	}
+	if mutator.mutatesDependencies {
+		handle.MutatesDependencies()
+	}
+	if mutator.mutatesGlobalState {
+		handle.MutatesGlobalState()
 	}
 }
 
 type MutatorHandle interface {
+	// Parallel sets the mutator to visit modules in parallel while maintaining ordering.  Calling any
+	// method on the mutator context is thread-safe, but the mutator must handle synchronization
+	// for any modifications to global state or any modules outside the one it was invoked on.
+	// Deprecated: all Mutators are parallel by default.
 	Parallel() MutatorHandle
+
+	// UsesRename marks the mutator as using the BottomUpMutatorContext.Rename method, which prevents
+	// coalescing adjacent mutators into a single mutator pass.
+	UsesRename() MutatorHandle
+
+	// UsesReverseDependencies marks the mutator as using the BottomUpMutatorContext.AddReverseDependency
+	// method, which prevents coalescing adjacent mutators into a single mutator pass.
+	UsesReverseDependencies() MutatorHandle
+
+	// UsesReplaceDependencies marks the mutator as using the BottomUpMutatorContext.ReplaceDependencies
+	// method, which prevents coalescing adjacent mutators into a single mutator pass.
+	UsesReplaceDependencies() MutatorHandle
+
+	// UsesCreateModule marks the mutator as using the BottomUpMutatorContext.CreateModule method,
+	// which prevents coalescing adjacent mutators into a single mutator pass.
+	UsesCreateModule() MutatorHandle
+
+	// MutatesDependencies marks the mutator as modifying properties in dependencies, which prevents
+	// coalescing adjacent mutators into a single mutator pass.
+	MutatesDependencies() MutatorHandle
+
+	// MutatesGlobalState marks the mutator as modifying global state, which prevents coalescing
+	// adjacent mutators into a single mutator pass.
+	MutatesGlobalState() MutatorHandle
+}
+
+type TransitionMutatorHandle interface {
+	// NeverFar causes the variations created by this mutator to never be ignored when adding
+	// far variation dependencies. Normally, far variation dependencies ignore all the variants
+	// of the source module, and only use the variants explicitly requested by the
+	// AddFarVariationDependencies call.
+	NeverFar() MutatorHandle
 }
 
 func (mutator *mutator) Parallel() MutatorHandle {
-	mutator.parallel = true
+	return mutator
+}
+
+func (mutator *mutator) UsesRename() MutatorHandle {
+	mutator.usesRename = true
+	return mutator
+}
+
+func (mutator *mutator) UsesReverseDependencies() MutatorHandle {
+	mutator.usesReverseDependencies = true
+	return mutator
+}
+
+func (mutator *mutator) UsesReplaceDependencies() MutatorHandle {
+	mutator.usesReplaceDependencies = true
+	return mutator
+}
+
+func (mutator *mutator) UsesCreateModule() MutatorHandle {
+	mutator.usesCreateModule = true
+	return mutator
+}
+
+func (mutator *mutator) MutatesDependencies() MutatorHandle {
+	mutator.mutatesDependencies = true
+	return mutator
+}
+
+func (mutator *mutator) MutatesGlobalState() MutatorHandle {
+	mutator.mutatesGlobalState = true
+	return mutator
+}
+
+func (mutator *mutator) NeverFar() MutatorHandle {
+	mutator.neverFar = true
 	return mutator
 }
 
 func RegisterComponentsMutator(ctx RegisterMutatorsContext) {
-	ctx.BottomUp("component-deps", componentDepsMutator).Parallel()
+	ctx.BottomUp("component-deps", componentDepsMutator)
 }
 
 // A special mutator that runs just prior to the deps mutator to allow the dependencies
@@ -702,7 +752,7 @@ func depsMutator(ctx BottomUpMutatorContext) {
 }
 
 func registerDepsMutator(ctx RegisterMutatorsContext) {
-	ctx.BottomUp("deps", depsMutator).Parallel()
+	ctx.BottomUp("deps", depsMutator).UsesReverseDependencies()
 }
 
 // android.topDownMutatorContext either has to embed blueprint.TopDownMutatorContext, in which case every method that
@@ -710,32 +760,6 @@ func registerDepsMutator(ctx RegisterMutatorsContext) {
 // ambiguous method errors, or it has to store a blueprint.TopDownMutatorContext non-embedded, in which case every
 // non-overridden method has to be forwarded.  There are fewer non-overridden methods, so use the latter.  The following
 // methods forward to the identical blueprint versions for topDownMutatorContext and bottomUpMutatorContext.
-
-func (t *topDownMutatorContext) MutatorName() string {
-	return t.bp.MutatorName()
-}
-
-func (t *topDownMutatorContext) Rename(name string) {
-	t.bp.Rename(name)
-	t.Module().base().commonProperties.DebugName = name
-}
-
-func (t *topDownMutatorContext) createModule(factory blueprint.ModuleFactory, name string, props ...interface{}) blueprint.Module {
-	return t.bp.CreateModule(factory, name, props...)
-}
-
-func (t *topDownMutatorContext) CreateModule(factory ModuleFactory, props ...interface{}) Module {
-	return createModule(t, factory, "_topDownMutatorModule", props...)
-}
-
-func (t *topDownMutatorContext) createModuleWithoutInheritance(factory ModuleFactory, props ...interface{}) Module {
-	module := t.bp.CreateModule(ModuleFactoryAdaptor(factory), "", props...).(Module)
-	return module
-}
-
-func (b *bottomUpMutatorContext) MutatorName() string {
-	return b.bp.MutatorName()
-}
 
 func (b *bottomUpMutatorContext) Rename(name string) {
 	b.bp.Rename(name)
@@ -746,8 +770,12 @@ func (b *bottomUpMutatorContext) createModule(factory blueprint.ModuleFactory, n
 	return b.bp.CreateModule(factory, name, props...)
 }
 
+func (b *bottomUpMutatorContext) createModuleInDirectory(factory blueprint.ModuleFactory, name string, _ string, props ...interface{}) blueprint.Module {
+	panic("createModuleInDirectory is not implemented for bottomUpMutatorContext")
+}
+
 func (b *bottomUpMutatorContext) CreateModule(factory ModuleFactory, props ...interface{}) Module {
-	return createModule(b, factory, "_bottomUpMutatorModule", props...)
+	return createModule(b, factory, "_bottomUpMutatorModule", doesNotSpecifyDirectory(), props...)
 }
 
 func (b *bottomUpMutatorContext) AddDependency(module blueprint.Module, tag blueprint.DependencyTag, name ...string) []blueprint.Module {
@@ -764,48 +792,11 @@ func (b *bottomUpMutatorContext) AddReverseDependency(module blueprint.Module, t
 	b.bp.AddReverseDependency(module, tag, name)
 }
 
-func (b *bottomUpMutatorContext) CreateVariations(variations ...string) []Module {
-	if b.finalPhase {
-		panic("CreateVariations not allowed in FinalDepsMutators")
+func (b *bottomUpMutatorContext) AddReverseVariationDependency(variations []blueprint.Variation, tag blueprint.DependencyTag, name string) {
+	if b.baseModuleContext.checkedMissingDeps() {
+		panic("Adding deps not allowed after checking for missing deps")
 	}
-
-	modules := b.bp.CreateVariations(variations...)
-
-	aModules := make([]Module, len(modules))
-	for i := range variations {
-		aModules[i] = modules[i].(Module)
-		base := aModules[i].base()
-		base.commonProperties.DebugMutators = append(base.commonProperties.DebugMutators, b.MutatorName())
-		base.commonProperties.DebugVariations = append(base.commonProperties.DebugVariations, variations[i])
-	}
-
-	return aModules
-}
-
-func (b *bottomUpMutatorContext) CreateLocalVariations(variations ...string) []Module {
-	if b.finalPhase {
-		panic("CreateLocalVariations not allowed in FinalDepsMutators")
-	}
-
-	modules := b.bp.CreateLocalVariations(variations...)
-
-	aModules := make([]Module, len(modules))
-	for i := range variations {
-		aModules[i] = modules[i].(Module)
-		base := aModules[i].base()
-		base.commonProperties.DebugMutators = append(base.commonProperties.DebugMutators, b.MutatorName())
-		base.commonProperties.DebugVariations = append(base.commonProperties.DebugVariations, variations[i])
-	}
-
-	return aModules
-}
-
-func (b *bottomUpMutatorContext) SetDependencyVariation(variation string) {
-	b.bp.SetDependencyVariation(variation)
-}
-
-func (b *bottomUpMutatorContext) SetDefaultDependencyVariation(variation *string) {
-	b.bp.SetDefaultDependencyVariation(variation)
+	b.bp.AddReverseVariationDependency(variations, tag, name)
 }
 
 func (b *bottomUpMutatorContext) AddVariationDependencies(variations []blueprint.Variation, tag blueprint.DependencyTag,
@@ -825,10 +816,6 @@ func (b *bottomUpMutatorContext) AddFarVariationDependencies(variations []bluepr
 	return b.bp.AddFarVariationDependencies(variations, tag, names...)
 }
 
-func (b *bottomUpMutatorContext) AddInterVariantDependency(tag blueprint.DependencyTag, from, to blueprint.Module) {
-	b.bp.AddInterVariantDependency(tag, from, to)
-}
-
 func (b *bottomUpMutatorContext) ReplaceDependencies(name string) {
 	if b.baseModuleContext.checkedMissingDeps() {
 		panic("Adding deps not allowed after checking for missing deps")
@@ -841,16 +828,4 @@ func (b *bottomUpMutatorContext) ReplaceDependenciesIf(name string, predicate bl
 		panic("Adding deps not allowed after checking for missing deps")
 	}
 	b.bp.ReplaceDependenciesIf(name, predicate)
-}
-
-func (b *bottomUpMutatorContext) AliasVariation(variationName string) {
-	b.bp.AliasVariation(variationName)
-}
-
-func (b *bottomUpMutatorContext) CreateAliasVariation(fromVariationName, toVariationName string) {
-	b.bp.CreateAliasVariation(fromVariationName, toVariationName)
-}
-
-func (b *bottomUpMutatorContext) SetVariationProvider(module blueprint.Module, provider blueprint.AnyProviderKey, value interface{}) {
-	b.bp.SetVariationProvider(module, provider, value)
 }
