@@ -197,6 +197,7 @@ var (
 		"etc":                 etc.PrebuiltEtcFactory,
 		"etc/dsp":             etc.PrebuiltDSPFactory,
 		"etc/firmware":        etc.PrebuiltFirmwareFactory,
+		"etc/firmware_8475":        etc.PrebuiltFirmwareFactory,
 		"firmware":            etc.PrebuiltFirmwareFactory,
 		"first_stage_ramdisk": etc.PrebuiltFirstStageRamdiskFactory,
 		"fonts":               etc.PrebuiltFontFactory,
