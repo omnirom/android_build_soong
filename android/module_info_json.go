@@ -34,15 +34,23 @@ type ExtraModuleInfoJSON struct {
 	SrcJars             []string `json:"srcjars,omitempty"`               // $(sort $(ALL_MODULES.$(m).SRCJARS))
 	ClassesJar          []string `json:"classes_jar,omitempty"`           // $(sort $(ALL_MODULES.$(m).CLASSES_JAR))
 	TestMainlineModules []string `json:"test_mainline_modules,omitempty"` // $(sort $(ALL_MODULES.$(m).TEST_MAINLINE_MODULES))
-	IsUnitTest          bool     `json:"is_unit_test,omitempty"`          // $(ALL_MODULES.$(m).IS_UNIT_TEST)
+	IsUnitTest          string   `json:"is_unit_test,omitempty"`          // $(ALL_MODULES.$(m).IS_UNIT_TEST)
 	TestOptionsTags     []string `json:"test_options_tags,omitempty"`     // $(sort $(ALL_MODULES.$(m).TEST_OPTIONS_TAGS))
 	RuntimeDependencies []string `json:"runtime_dependencies,omitempty"`  // $(sort $(ALL_MODULES.$(m).LOCAL_RUNTIME_LIBRARIES))
 	StaticDependencies  []string `json:"static_dependencies,omitempty"`   // $(sort $(ALL_MODULES.$(m).LOCAL_STATIC_LIBRARIES))
 	DataDependencies    []string `json:"data_dependencies,omitempty"`     // $(sort $(ALL_MODULES.$(m).TEST_DATA_BINS))
 
-	CompatibilitySuites []string `json:"compatibility_suites,omitempty"` // $(sort $(ALL_MODULES.$(m).COMPATIBILITY_SUITES))
-	AutoTestConfig      []string `json:"auto_test_config,omitempty"`     // $(ALL_MODULES.$(m).auto_test_config)
-	TestConfig          []string `json:"test_config,omitempty"`          // $(strip $(ALL_MODULES.$(m).TEST_CONFIG) $(ALL_MODULES.$(m).EXTRA_TEST_CONFIGS)
+	CompatibilitySuites  []string `json:"compatibility_suites,omitempty"` // $(sort $(ALL_MODULES.$(m).COMPATIBILITY_SUITES))
+	AutoTestConfig       []string `json:"auto_test_config,omitempty"`     // $(ALL_MODULES.$(m).auto_test_config)
+	TestConfig           []string `json:"test_config,omitempty"`          // $(strip $(ALL_MODULES.$(m).TEST_CONFIG) $(ALL_MODULES.$(m).EXTRA_TEST_CONFIGS)
+	TestModuleConfigBase string   `json:"test_module_config_base,omitempty"`
+	ExtraRequired        []string `json:"-"`
+	ExtraHostRequired    []string `json:"-"`
+
+	SupportedVariantsOverride []string `json:"-"`
+	Disabled                  bool     `json:"-"`
+	RegisterNameOverride      string   `json:"-"`
+	ModuleNameOverride        string   `json:"-"`
 }
 
 type ModuleInfoJSON struct {
@@ -127,4 +135,12 @@ func (m *ModuleInfoJSON) GobDecode(data []byte) error {
 	return gobtools.CustomGobDecode[combinedModuleInfoJSON](data, m)
 }
 
-var ModuleInfoJSONProvider = blueprint.NewProvider[*ModuleInfoJSON]()
+func (m *ModuleInfoJSON) GetInstalled() []string {
+	return m.core.Installed
+}
+
+func (m *ModuleInfoJSON) GetClass() []string {
+	return m.Class
+}
+
+var ModuleInfoJSONProvider = blueprint.NewProvider[[]*ModuleInfoJSON]()

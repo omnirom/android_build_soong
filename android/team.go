@@ -32,6 +32,12 @@ type teamProperties struct {
 	Trendy_team_id *string `json:"trendy_team_id"`
 }
 
+type TeamInfo struct {
+	Properties teamProperties
+}
+
+var TeamInfoProvider = blueprint.NewProvider[TeamInfo]()
+
 type teamModule struct {
 	ModuleBase
 	DefaultableModuleBase
@@ -48,7 +54,11 @@ var TestOnlyProviderKey = blueprint.NewProvider[TestModuleInformation]()
 
 // Real work is done for the module that depends on us.
 // If needed, the team can serialize the config to json/proto file as well.
-func (t *teamModule) GenerateAndroidBuildActions(ctx ModuleContext) {}
+func (t *teamModule) GenerateAndroidBuildActions(ctx ModuleContext) {
+	SetProvider(ctx, TeamInfoProvider, TeamInfo{
+		Properties: t.properties,
+	})
+}
 
 func (t *teamModule) TrendyTeamId(ctx ModuleContext) string {
 	return *t.properties.Trendy_team_id

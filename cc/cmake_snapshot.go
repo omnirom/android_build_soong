@@ -196,39 +196,31 @@ func parseTemplate(templateContents string) *template.Template {
 
 			return list.String()
 		},
-		"getSources": func(m *Module) android.Paths {
-			return m.compiler.(CompiledInterface).Srcs()
+		"getSources": func(ctx android.ModuleContext, info *CcInfo) android.Paths {
+			return info.CompilerInfo.Srcs
 		},
 		"getModuleType": getModuleType,
-		"getCompilerProperties": func(m *Module) BaseCompilerProperties {
-			return m.compiler.baseCompilerProps()
+		"getAidlInterface": func(info *CcInfo) AidlInterfaceInfo {
+			return info.CompilerInfo.AidlInterfaceInfo
 		},
-		"getCflagsProperty": func(ctx android.ModuleContext, m *Module) []string {
-			prop := m.compiler.baseCompilerProps().Cflags
-			return prop.GetOrDefault(ctx, nil)
+		"getCflagsProperty": func(ctx android.ModuleContext, info *CcInfo) []string {
+			return info.CompilerInfo.Cflags
 		},
-		"getLinkerProperties": func(m *Module) BaseLinkerProperties {
-			return m.linker.baseLinkerProps()
+		"getWholeStaticLibsProperty": func(ctx android.ModuleContext, info *CcInfo) []string {
+			return info.LinkerInfo.WholeStaticLibs
 		},
-		"getWholeStaticLibsProperty": func(ctx android.ModuleContext, m *Module) []string {
-			prop := m.linker.baseLinkerProps().Whole_static_libs
-			return prop.GetOrDefault(ctx, nil)
+		"getStaticLibsProperty": func(ctx android.ModuleContext, info *CcInfo) []string {
+			return info.LinkerInfo.StaticLibs
 		},
-		"getStaticLibsProperty": func(ctx android.ModuleContext, m *Module) []string {
-			prop := m.linker.baseLinkerProps().Static_libs
-			return prop.GetOrDefault(ctx, nil)
+		"getSharedLibsProperty": func(ctx android.ModuleContext, info *CcInfo) []string {
+			return info.LinkerInfo.SharedLibs
 		},
-		"getSharedLibsProperty": func(ctx android.ModuleContext, m *Module) []string {
-			prop := m.linker.baseLinkerProps().Shared_libs
-			return prop.GetOrDefault(ctx, nil)
-		},
-		"getHeaderLibsProperty": func(ctx android.ModuleContext, m *Module) []string {
-			prop := m.linker.baseLinkerProps().Header_libs
-			return prop.GetOrDefault(ctx, nil)
+		"getHeaderLibsProperty": func(ctx android.ModuleContext, info *CcInfo) []string {
+			return info.LinkerInfo.HeaderLibs
 		},
 		"getExtraLibs":   getExtraLibs,
 		"getIncludeDirs": getIncludeDirs,
-		"mapLibraries": func(ctx android.ModuleContext, m *Module, libs []string, mapping map[string]LibraryMappingProperty) []string {
+		"mapLibraries": func(ctx android.ModuleContext, m android.ModuleProxy, libs []string, mapping map[string]LibraryMappingProperty) []string {
 			var mappedLibs []string
 			for _, lib := range libs {
 				mappedLib, exists := mapping[lib]
@@ -249,8 +241,8 @@ func parseTemplate(templateContents string) *template.Template {
 			mappedLibs = slices.Compact(mappedLibs)
 			return mappedLibs
 		},
-		"getAidlSources": func(m *Module) []string {
-			aidlInterface := m.compiler.baseCompilerProps().AidlInterface
+		"getAidlSources": func(info *CcInfo) []string {
+			aidlInterface := info.CompilerInfo.AidlInterfaceInfo
 			aidlRoot := aidlInterface.AidlRoot + string(filepath.Separator)
 			if aidlInterface.AidlRoot == "" {
 				aidlRoot = ""
@@ -340,14 +332,14 @@ func (m *CmakeSnapshot) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	moduleDirs := map[string][]string{}
 	sourceFiles := map[string]android.Path{}
 	visitedModules := map[string]bool{}
-	var pregeneratedModules []*Module
-	ctx.WalkDeps(func(dep_a android.Module, parent android.Module) bool {
-		moduleName := ctx.OtherModuleName(dep_a)
+	var pregeneratedModules []android.ModuleProxy
+	ctx.WalkDepsProxy(func(dep, parent android.ModuleProxy) bool {
+		moduleName := ctx.OtherModuleName(dep)
 		if visited := visitedModules[moduleName]; visited {
 			return false // visit only once
 		}
 		visitedModules[moduleName] = true
-		dep, ok := dep_a.(*Module)
+		ccInfo, ok := android.OtherModuleProvider(ctx, dep, CcInfoProvider)
 		if !ok {
 			return false // not a cc module
 		}
@@ -363,15 +355,15 @@ func (m *CmakeSnapshot) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		if slices.Contains(ignoredSystemLibs, moduleName) {
 			return false // system libs built in-tree for Android
 		}
-		if dep.IsPrebuilt() {
+		if ccInfo.IsPrebuilt {
 			return false // prebuilts are not supported
 		}
-		if dep.compiler == nil {
+		if ccInfo.CompilerInfo == nil {
 			return false // unsupported module type
 		}
-		isAidlModule := dep.compiler.baseCompilerProps().AidlInterface.Lang != ""
+		isAidlModule := ccInfo.CompilerInfo.AidlInterfaceInfo.Lang != ""
 
-		if !proptools.Bool(dep.Properties.Cmake_snapshot_supported) {
+		if !ccInfo.CmakeSnapshotSupported {
 			ctx.OtherModulePropertyErrorf(dep, "cmake_snapshot_supported",
 				"CMake snapshots not supported, despite being a dependency for %s",
 				ctx.OtherModuleName(parent))
@@ -389,12 +381,14 @@ func (m *CmakeSnapshot) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		}
 		moduleFragment := executeTemplate(templateToUse, &templateBuffer, struct {
 			Ctx      *android.ModuleContext
-			M        *Module
+			M        android.ModuleProxy
+			CcInfo   *CcInfo
 			Snapshot *CmakeSnapshot
 			Pprop    *cmakeProcessedProperties
 		}{
 			&ctx,
 			dep,
+			ccInfo,
 			m,
 			&pprop,
 		})
@@ -415,7 +409,7 @@ func (m *CmakeSnapshot) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	// Enumerate sources for pregenerated modules
 	if m.Properties.Include_sources {
 		for _, dep := range pregeneratedModules {
-			if !proptools.Bool(dep.Properties.Cmake_snapshot_supported) {
+			if !android.OtherModuleProviderOrDefault(ctx, dep, CcInfoProvider).CmakeSnapshotSupported {
 				ctx.OtherModulePropertyErrorf(dep, "cmake_snapshot_supported",
 					"Pregenerated CMake snapshots not supported, despite being requested for %s",
 					ctx.ModuleName())
@@ -491,7 +485,7 @@ func (m *CmakeSnapshot) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	if len(m.Properties.Prebuilts) > 0 {
 		var prebuiltsList android.Paths
 
-		ctx.VisitDirectDepsWithTag(cmakeSnapshotPrebuiltTag, func(dep android.Module) {
+		ctx.VisitDirectDepsProxyWithTag(cmakeSnapshotPrebuiltTag, func(dep android.ModuleProxy) {
 			for _, file := range android.OtherModuleProviderOrDefault(
 				ctx, dep, android.InstallFilesProvider).InstallFiles {
 				prebuiltsList = append(prebuiltsList, file)
@@ -523,42 +517,37 @@ func (m *CmakeSnapshot) AndroidMkEntries() []android.AndroidMkEntries {
 	}}
 }
 
-func getModuleType(m *Module) string {
-	switch m.linker.(type) {
-	case *binaryDecorator:
+func getModuleType(info *CcInfo) string {
+	if info.LinkerInfo.BinaryDecoratorInfo != nil {
 		return "executable"
-	case *libraryDecorator:
+	} else if info.LinkerInfo.LibraryDecoratorInfo != nil {
 		return "library"
-	case *testBinary:
+	} else if info.LinkerInfo.TestBinaryInfo != nil || info.LinkerInfo.BenchmarkDecoratorInfo != nil {
 		return "test"
-	case *benchmarkDecorator:
-		return "test"
-	case *objectLinker:
+	} else if info.LinkerInfo.ObjectLinkerInfo != nil {
 		return "object"
 	}
-	panic(fmt.Sprintf("Unexpected module type: %T", m.linker))
+	panic(fmt.Sprintf("Unexpected module type for LinkerInfo"))
 }
 
-func getExtraLibs(m *Module) []string {
-	switch decorator := m.linker.(type) {
-	case *testBinary:
-		if decorator.testDecorator.gtest() {
+func getExtraLibs(info *CcInfo) []string {
+	if info.LinkerInfo.TestBinaryInfo != nil {
+		if info.LinkerInfo.TestBinaryInfo.Gtest {
 			return []string{
 				"libgtest",
 				"libgtest_main",
 			}
 		}
-	case *benchmarkDecorator:
+	} else if info.LinkerInfo.BenchmarkDecoratorInfo != nil {
 		return []string{"libgoogle-benchmark"}
 	}
 	return nil
 }
 
-func getIncludeDirs(ctx android.ModuleContext, m *Module) []string {
+func getIncludeDirs(ctx android.ModuleContext, m android.ModuleProxy, info *CcInfo) []string {
 	moduleDir := ctx.OtherModuleDir(m) + string(filepath.Separator)
-	switch decorator := m.compiler.(type) {
-	case *libraryDecorator:
-		return sliceWithPrefix(moduleDir, decorator.flagExporter.Properties.Export_include_dirs.GetOrDefault(ctx, nil))
+	if info.CompilerInfo.LibraryDecoratorInfo != nil {
+		return sliceWithPrefix(moduleDir, info.CompilerInfo.LibraryDecoratorInfo.ExportIncludeDirs)
 	}
 	return nil
 }

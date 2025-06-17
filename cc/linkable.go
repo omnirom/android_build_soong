@@ -53,6 +53,9 @@ type PlatformSanitizeable interface {
 
 	// SanitizableDepTagChecker returns a SantizableDependencyTagChecker function type.
 	SanitizableDepTagChecker() SantizableDependencyTagChecker
+
+	// ForceDisableSanitizers sets the ForceDisable sanitize property
+	ForceDisableSanitizers()
 }
 
 // SantizableDependencyTagChecker functions check whether or not a dependency
@@ -62,6 +65,30 @@ type PlatformSanitizeable interface {
 // Rust modules can depend on both Rust and CC libraries, so the Rust module
 // implementation should handle tags from both.
 type SantizableDependencyTagChecker func(tag blueprint.DependencyTag) bool
+
+type VersionedLinkableInterface interface {
+	LinkableInterface
+	android.ApexModule
+
+	// VersionedInterface returns the VersionedInterface for this module
+	// (e.g. c.library), or nil if this is module is not a VersionedInterface.
+	VersionedInterface() VersionedInterface
+
+	// HasStubsVariants true if this module is a stub or has a sibling variant
+	// that is a stub.
+	HasStubsVariants() bool
+
+	// SetStl sets the stl property for CC modules. Does not panic if for other module types.
+	SetStl(string)
+	SetSdkVersion(string)
+	SetMinSdkVersion(version string)
+	ApexSdkVersion() android.ApiLevel
+	ImplementationModuleNameForMake() string
+
+	// RustApexExclude returns ApexExclude() for Rust modules; always returns false for all non-Rust modules.
+	// TODO(b/362509506): remove this once all apex_exclude uses are switched to stubs.
+	RustApexExclude() bool
+}
 
 // LinkableInterface is an interface for a type of module that is linkable in a C++ library.
 type LinkableInterface interface {
@@ -102,9 +129,6 @@ type LinkableInterface interface {
 	IsPrebuilt() bool
 	Toc() android.OptionalPath
 
-	// IsRustFFI returns true if this is a Rust FFI library.
-	IsRustFFI() bool
-
 	// IsFuzzModule returns true if this a *_fuzz module.
 	IsFuzzModule() bool
 
@@ -135,27 +159,17 @@ type LinkableInterface interface {
 	// IsNdk returns true if the library is in the configs known NDK list.
 	IsNdk(config android.Config) bool
 
-	// HasStubsVariants true if this module is a stub or has a sibling variant
-	// that is a stub.
-	HasStubsVariants() bool
-
 	// IsStubs returns true if the this is a stubs library.
 	IsStubs() bool
 
 	// IsLlndk returns true for both LLNDK (public) and LLNDK-private libs.
 	IsLlndk() bool
 
-	// HasLlndkStubs returns true if this library has a variant that will build LLNDK stubs.
-	HasLlndkStubs() bool
-
 	// NeedsLlndkVariants returns true if this module has LLNDK stubs or provides LLNDK headers.
 	NeedsLlndkVariants() bool
 
 	// NeedsVendorPublicLibraryVariants returns true if this module has vendor public library stubs.
 	NeedsVendorPublicLibraryVariants() bool
-
-	//StubsVersion returns the stubs version for this module.
-	StubsVersion() string
 
 	// UseVndk returns true if the module is using VNDK libraries instead of the libraries in /system/lib or /system/lib64.
 	// "product" and "vendor" variant modules return true for this function.
@@ -185,6 +199,7 @@ type LinkableInterface interface {
 	MinSdkVersion() string
 	AlwaysSdk() bool
 	IsSdkVariant() bool
+	Multilib() string
 
 	SplitPerApiLevel() bool
 
@@ -253,6 +268,7 @@ type LinkableInterface interface {
 
 	// FuzzModule returns the fuzz.FuzzModule associated with the module.
 	FuzzModuleStruct() fuzz.FuzzModule
+	IsCrt() bool
 }
 
 var (

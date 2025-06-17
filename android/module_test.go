@@ -321,27 +321,27 @@ func TestInstall(t *testing.T) {
 		if host {
 			variant = result.Config.BuildOSCommonTarget.String()
 		}
-		return result.ModuleForTests(name, variant)
+		return result.ModuleForTests(t, name, variant)
 	}
 
 	outputRule := func(name string) TestingBuildParams { return module(name, false).Output(name) }
 
 	installRule := func(name string) TestingBuildParams {
-		return module(name, false).Output(filepath.Join("out/soong/target/product/test_device/system", name))
+		return module(name, false).Output(filepath.Join("out/target/product/test_device/system", name))
 	}
 
 	symlinkRule := func(name string) TestingBuildParams {
-		return module(name, false).Output(filepath.Join("out/soong/target/product/test_device/system/symlinks", name))
+		return module(name, false).Output(filepath.Join("out/target/product/test_device/system/symlinks", name))
 	}
 
 	hostOutputRule := func(name string) TestingBuildParams { return module(name, true).Output(name) }
 
 	hostInstallRule := func(name string) TestingBuildParams {
-		return module(name, true).Output(filepath.Join("out/soong/host/linux-x86", name))
+		return module(name, true).Output(filepath.Join("out/host/linux-x86", name))
 	}
 
 	hostSymlinkRule := func(name string) TestingBuildParams {
-		return module(name, true).Output(filepath.Join("out/soong/host/linux-x86/symlinks", name))
+		return module(name, true).Output(filepath.Join("out/host/linux-x86/symlinks", name))
 	}
 
 	assertInputs := func(params TestingBuildParams, inputs ...Path) {
@@ -434,11 +434,12 @@ func TestInstallKatiEnabled(t *testing.T) {
 	rules := result.InstallMakeRulesForTesting(t)
 
 	module := func(name string, host bool) TestingModule {
+		t.Helper()
 		variant := "android_common"
 		if host {
 			variant = result.Config.BuildOSCommonTarget.String()
 		}
-		return result.ModuleForTests(name, variant)
+		return result.ModuleForTests(t, name, variant)
 	}
 
 	outputRule := func(name string) TestingBuildParams { return module(name, false).Output(name) }
@@ -743,7 +744,7 @@ test {
 				FixtureWithRootAndroidBp(tc.bp),
 			).RunTest(t)
 
-			foo := result.ModuleForTests("foo", "").Module().base()
+			foo := result.ModuleForTests(t, "foo", "").Module().base()
 
 			AssertDeepEquals(t, "foo ", tc.expectedProps, foo.propertiesWithValues())
 		})
@@ -1078,7 +1079,7 @@ func TestOutputFileForModule(t *testing.T) {
 				PathContext:                PathContextForTesting(config),
 				OtherModuleProviderContext: result.TestContext.OtherModuleProviderAdaptor(),
 			}
-			got := OutputFileForModule(ctx, result.ModuleForTests("test_module", "").Module(), tt.tag)
+			got := OutputFileForModule(ctx, result.ModuleForTests(t, "test_module", "").Module(), tt.tag)
 			AssertPathRelativeToTopEquals(t, "expected output path", tt.expected, got)
 			AssertArrayString(t, "expected missing deps", tt.missingDeps, ctx.missingDeps)
 		})
@@ -1108,5 +1109,16 @@ func TestVintfFragmentModulesChecksPartition(t *testing.T) {
 	testPreparer.
 		ExtendWithErrorHandler(FixtureExpectsOneErrorPattern(
 			"Module .+ and Vintf_fragment .+ are installed to different partitions.")).
+		RunTestWithBp(t, bp)
+}
+
+func TestInvalidModuleName(t *testing.T) {
+	bp := `
+		deps {
+			name: "fo o",
+		}
+	`
+	prepareForModuleTests.
+		ExtendWithErrorHandler(FixtureExpectsOneErrorPattern(`should use a valid name`)).
 		RunTestWithBp(t, bp)
 }

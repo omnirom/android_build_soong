@@ -211,29 +211,30 @@ func (fuzz *fuzzBinary) moduleInfoJSON(ctx ModuleContext, moduleInfoJSON *androi
 	moduleInfoJSON.Class = []string{"EXECUTABLES"}
 }
 
-// IsValidSharedDependency takes a module and determines if it is a unique shared library
+// isValidSharedDependency takes a module and determines if it is a unique shared library
 // that should be installed in the fuzz target output directories. This function
 // returns true, unless:
 //   - The module is not an installable shared library, or
 //   - The module is a header or stub, or
 //   - The module is a prebuilt and its source is available, or
 //   - The module is a versioned member of an SDK snapshot.
-func IsValidSharedDependency(dependency android.Module) bool {
+func isValidSharedDependency(ctx android.ModuleContext, dependency android.ModuleProxy) bool {
 	// TODO(b/144090547): We should be parsing these modules using
 	// ModuleDependencyTag instead of the current brute-force checking.
 
-	linkable, ok := dependency.(LinkableInterface)
-	if !ok || !linkable.CcLibraryInterface() {
+	linkable, ok := android.OtherModuleProvider(ctx, dependency, LinkableInfoProvider)
+	if !ok || !linkable.CcLibraryInterface {
 		// Discard non-linkables.
 		return false
 	}
 
-	if !linkable.Shared() {
+	if !linkable.Shared {
 		// Discard static libs.
 		return false
 	}
 
-	if lib := moduleLibraryInterface(dependency); lib != nil && lib.buildStubs() && linkable.CcLibrary() {
+	ccInfo, hasCcInfo := android.OtherModuleProvider(ctx, dependency, CcInfoProvider)
+	if hasCcInfo && ccInfo.LibraryInfo != nil && ccInfo.LibraryInfo.BuildStubs && linkable.CcLibrary {
 		// Discard stubs libs (only CCLibrary variants). Prebuilt libraries should not
 		// be excluded on the basis of they're not CCLibrary()'s.
 		return false
@@ -242,13 +243,13 @@ func IsValidSharedDependency(dependency android.Module) bool {
 	// We discarded module stubs libraries above, but the LLNDK prebuilts stubs
 	// libraries must be handled differently - by looking for the stubDecorator.
 	// Discard LLNDK prebuilts stubs as well.
-	if ccLibrary, isCcLibrary := dependency.(*Module); isCcLibrary {
-		if _, isLLndkStubLibrary := ccLibrary.linker.(*stubDecorator); isLLndkStubLibrary {
+	if hasCcInfo {
+		if ccInfo.LinkerInfo != nil && ccInfo.LinkerInfo.StubDecoratorInfo != nil {
 			return false
 		}
 		// Discard installable:false libraries because they are expected to be absent
 		// in runtime.
-		if !proptools.BoolDefault(ccLibrary.Installable(), true) {
+		if !proptools.BoolDefault(linkable.Installable, true) {
 			return false
 		}
 	}
@@ -256,7 +257,7 @@ func IsValidSharedDependency(dependency android.Module) bool {
 	// If the same library is present both as source and a prebuilt we must pick
 	// only one to avoid a conflict. Always prefer the source since the prebuilt
 	// probably won't be built with sanitizers enabled.
-	if prebuilt := android.GetEmbeddedPrebuilt(dependency); prebuilt != nil && prebuilt.SourceExists() {
+	if prebuilt, ok := android.OtherModuleProvider(ctx, dependency, android.PrebuiltModuleInfoProvider); ok && prebuilt.SourceExists {
 		return false
 	}
 
@@ -288,7 +289,7 @@ func SharedLibrarySymbolsInstallLocation(libraryBase string, isVendor bool, fuzz
 }
 
 func (fuzzBin *fuzzBinary) install(ctx ModuleContext, file android.Path) {
-	fuzzBin.fuzzPackagedModule = PackageFuzzModule(ctx, fuzzBin.fuzzPackagedModule, pctx)
+	fuzzBin.fuzzPackagedModule = PackageFuzzModule(ctx, fuzzBin.fuzzPackagedModule)
 
 	installBase := "fuzz"
 
@@ -345,11 +346,14 @@ func (fuzzBin *fuzzBinary) install(ctx ModuleContext, file android.Path) {
 	fuzzBin.binaryDecorator.baseInstaller.install(ctx, file)
 }
 
-func PackageFuzzModule(ctx android.ModuleContext, fuzzPackagedModule fuzz.FuzzPackagedModule, pctx android.PackageContext) fuzz.FuzzPackagedModule {
+func PackageFuzzModule(ctx android.ModuleContext, fuzzPackagedModule fuzz.FuzzPackagedModule) fuzz.FuzzPackagedModule {
 	fuzzPackagedModule.Corpus = android.PathsForModuleSrc(ctx, fuzzPackagedModule.FuzzProperties.Corpus)
 	fuzzPackagedModule.Corpus = append(fuzzPackagedModule.Corpus, android.PathsForModuleSrc(ctx, fuzzPackagedModule.FuzzProperties.Device_common_corpus)...)
 
 	fuzzPackagedModule.Data = android.PathsForModuleSrc(ctx, fuzzPackagedModule.FuzzProperties.Data)
+	fuzzPackagedModule.Data = append(fuzzPackagedModule.Data, android.PathsForModuleSrc(ctx, fuzzPackagedModule.FuzzProperties.Device_common_data)...)
+	fuzzPackagedModule.Data = append(fuzzPackagedModule.Data, android.PathsForModuleSrc(ctx, fuzzPackagedModule.FuzzProperties.Device_first_data)...)
+	fuzzPackagedModule.Data = append(fuzzPackagedModule.Data, android.PathsForModuleSrc(ctx, fuzzPackagedModule.FuzzProperties.Host_common_data)...)
 
 	if fuzzPackagedModule.FuzzProperties.Dictionary != nil {
 		fuzzPackagedModule.Dictionary = android.PathForModuleSrc(ctx, *fuzzPackagedModule.FuzzProperties.Dictionary)
@@ -466,43 +470,37 @@ func (s *ccRustFuzzPackager) GenerateBuildActions(ctx android.SingletonContext) 
 	// multiple fuzzers that depend on the same shared library.
 	sharedLibraryInstalled := make(map[string]bool)
 
-	ctx.VisitAllModules(func(module android.Module) {
-		ccModule, ok := module.(LinkableInterface)
-		if !ok || ccModule.PreventInstall() {
+	ctx.VisitAllModuleProxies(func(module android.ModuleProxy) {
+		ccModule, ok := android.OtherModuleProvider(ctx, module, LinkableInfoProvider)
+		if !ok {
 			return
 		}
 		// Discard non-fuzz targets.
-		if ok := fuzz.IsValid(ctx, ccModule.FuzzModuleStruct()); !ok {
+		fuzzInfo, ok := android.OtherModuleProvider(ctx, module, fuzz.FuzzPackagedModuleInfoProvider)
+		if !ok {
 			return
 		}
 
 		sharedLibsInstallDirPrefix := "lib"
-		if ccModule.InVendor() {
+		if ccModule.InVendor {
 			sharedLibsInstallDirPrefix = "lib/vendor"
 		}
 
-		if !ccModule.IsFuzzModule() {
-			return
-		}
-
+		commonInfo := android.OtherModulePointerProviderOrDefault(ctx, module, android.CommonModuleInfoProvider)
+		isHost := commonInfo.Target.Os.Class == android.Host
 		hostOrTargetString := "target"
-		if ccModule.Target().HostCross {
+		if commonInfo.Target.HostCross {
 			hostOrTargetString = "host_cross"
-		} else if ccModule.Host() {
+		} else if isHost {
 			hostOrTargetString = "host"
 		}
 		if s.onlyIncludePresubmits == true {
 			hostOrTargetString = "presubmit-" + hostOrTargetString
 		}
 
-		fpm := fuzz.FuzzPackagedModule{}
-		if ok {
-			fpm = ccModule.FuzzPackagedModule()
-		}
-
 		intermediatePath := "fuzz"
 
-		archString := ccModule.Target().Arch.ArchType.String()
+		archString := commonInfo.Target.Arch.ArchType.String()
 		archDir := android.PathForIntermediates(ctx, intermediatePath, hostOrTargetString, archString)
 		archOs := fuzz.ArchOs{HostOrTarget: hostOrTargetString, Arch: archString, Dir: archDir.String()}
 
@@ -510,23 +508,24 @@ func (s *ccRustFuzzPackager) GenerateBuildActions(ctx android.SingletonContext) 
 		builder := android.NewRuleBuilder(pctx, ctx)
 
 		// Package the corpus, data, dict and config into a zipfile.
-		files = s.PackageArtifacts(ctx, module, fpm, archDir, builder)
+		files = s.PackageArtifacts(ctx, module, &fuzzInfo, archDir, builder)
 
 		// Package shared libraries
-		files = append(files, GetSharedLibsToZip(ccModule.FuzzSharedLibraries(), ccModule, &s.FuzzPackager, archString, sharedLibsInstallDirPrefix, &sharedLibraryInstalled)...)
+		files = append(files, GetSharedLibsToZip(ccModule.FuzzSharedLibraries, isHost, ccModule.InVendor, &s.FuzzPackager,
+			archString, sharedLibsInstallDirPrefix, &sharedLibraryInstalled)...)
 
 		// The executable.
-		files = append(files, fuzz.FileToZip{SourceFilePath: android.OutputFileForModule(ctx, ccModule, "unstripped")})
+		files = append(files, fuzz.FileToZip{SourceFilePath: android.OutputFileForModule(ctx, module, "unstripped")})
 
 		if s.onlyIncludePresubmits == true {
-			if fpm.FuzzProperties.Fuzz_config == nil {
+			if fuzzInfo.FuzzConfig == nil {
 				return
 			}
-			if !BoolDefault(fpm.FuzzProperties.Fuzz_config.Use_for_presubmit, false) {
+			if !fuzzInfo.FuzzConfig.UseForPresubmit {
 				return
 			}
 		}
-		archDirs[archOs], ok = s.BuildZipFile(ctx, module, fpm, files, builder, archDir, archString, hostOrTargetString, archOs, archDirs)
+		archDirs[archOs], ok = s.BuildZipFile(ctx, module, &fuzzInfo, files, builder, archDir, archString, hostOrTargetString, archOs, archDirs)
 		if !ok {
 			return
 		}
@@ -555,7 +554,8 @@ func (s *ccRustFuzzPackager) MakeVars(ctx android.MakeVarsContext) {
 
 // GetSharedLibsToZip finds and marks all the transiently-dependent shared libraries for
 // packaging.
-func GetSharedLibsToZip(sharedLibraries android.RuleBuilderInstalls, module LinkableInterface, s *fuzz.FuzzPackager, archString string, destinationPathPrefix string, sharedLibraryInstalled *map[string]bool) []fuzz.FileToZip {
+func GetSharedLibsToZip(sharedLibraries android.RuleBuilderInstalls, isHost bool, inVendor bool, s *fuzz.FuzzPackager,
+	archString string, destinationPathPrefix string, sharedLibraryInstalled *map[string]bool) []fuzz.FileToZip {
 	var files []fuzz.FileToZip
 
 	fuzzDir := "fuzz"
@@ -573,7 +573,7 @@ func GetSharedLibsToZip(sharedLibraries android.RuleBuilderInstalls, module Link
 		// install it to the output directory. Setup the install destination here,
 		// which will be used by $(copy-many-files) in the Make backend.
 		installDestination := SharedLibraryInstallLocation(
-			install, module.Host(), module.InVendor(), fuzzDir, archString)
+			install, isHost, inVendor, fuzzDir, archString)
 		if (*sharedLibraryInstalled)[installDestination] {
 			continue
 		}
@@ -590,8 +590,8 @@ func GetSharedLibsToZip(sharedLibraries android.RuleBuilderInstalls, module Link
 		// dir. Symbolized DSO's are always installed to the device when fuzzing, but
 		// we want symbolization tools (like `stack`) to be able to find the symbols
 		// in $ANDROID_PRODUCT_OUT/symbols automagically.
-		if !module.Host() {
-			symbolsInstallDestination := SharedLibrarySymbolsInstallLocation(install, module.InVendor(), fuzzDir, archString)
+		if !isHost {
+			symbolsInstallDestination := SharedLibrarySymbolsInstallLocation(install, inVendor, fuzzDir, archString)
 			symbolsInstallDestination = strings.ReplaceAll(symbolsInstallDestination, "$", "$$")
 			s.SharedLibInstallStrings = append(s.SharedLibInstallStrings,
 				library.String()+":"+symbolsInstallDestination)
@@ -605,17 +605,17 @@ func GetSharedLibsToZip(sharedLibraries android.RuleBuilderInstalls, module Link
 // VisitDirectDeps is used first to avoid incorrectly using the core libraries (sanitizer
 // runtimes, libc, libdl, etc.) from a dependency. This may cause issues when dependencies
 // have explicit sanitizer tags, as we may get a dependency on an unsanitized libc, etc.
-func CollectAllSharedDependencies(ctx android.ModuleContext) (android.RuleBuilderInstalls, []android.Module) {
+func CollectAllSharedDependencies(ctx android.ModuleContext) (android.RuleBuilderInstalls, []android.ModuleProxy) {
 	seen := make(map[string]bool)
 	recursed := make(map[string]bool)
-	deps := []android.Module{}
+	deps := []android.ModuleProxy{}
 
 	var sharedLibraries android.RuleBuilderInstalls
 
 	// Enumerate the first level of dependencies, as we discard all non-library
 	// modules in the BFS loop below.
-	ctx.VisitDirectDeps(func(dep android.Module) {
-		if !IsValidSharedDependency(dep) {
+	ctx.VisitDirectDepsProxy(func(dep android.ModuleProxy) {
+		if !isValidSharedDependency(ctx, dep) {
 			return
 		}
 		sharedLibraryInfo, hasSharedLibraryInfo := android.OtherModuleProvider(ctx, dep, SharedLibraryInfoProvider)
@@ -633,19 +633,21 @@ func CollectAllSharedDependencies(ctx android.ModuleContext) (android.RuleBuilde
 		sharedLibraries = append(sharedLibraries, ruleBuilderInstall)
 	})
 
-	ctx.WalkDeps(func(child, parent android.Module) bool {
+	ctx.WalkDepsProxy(func(child, _ android.ModuleProxy) bool {
 
 		// If this is a Rust module which is not rust_ffi_shared, we still want to bundle any transitive
-		// shared dependencies (even for rust_ffi_rlib or rust_ffi_static)
-		if rustmod, ok := child.(LinkableInterface); ok && rustmod.RustLibraryInterface() && !rustmod.Shared() {
-			if recursed[ctx.OtherModuleName(child)] {
-				return false
+		// shared dependencies (even for rust_ffi_static)
+		if info, ok := android.OtherModuleProvider(ctx, child, LinkableInfoProvider); ok {
+			if info.RustLibraryInterface && !info.Shared {
+				if recursed[ctx.OtherModuleName(child)] {
+					return false
+				}
+				recursed[ctx.OtherModuleName(child)] = true
+				return true
 			}
-			recursed[ctx.OtherModuleName(child)] = true
-			return true
 		}
 
-		if !IsValidSharedDependency(child) {
+		if !isValidSharedDependency(ctx, child) {
 			return false
 		}
 		sharedLibraryInfo, hasSharedLibraryInfo := android.OtherModuleProvider(ctx, child, SharedLibraryInfoProvider)

@@ -14,13 +14,16 @@
 
 package android
 
+import "github.com/google/blueprint"
+
 type vintfFragmentProperties struct {
 	// Vintf fragment XML file.
 	Src string `android:"path"`
 }
 
-type vintfFragmentModule struct {
+type VintfFragmentModule struct {
 	ModuleBase
+	ApexModuleBase
 
 	properties vintfFragmentProperties
 
@@ -36,11 +39,17 @@ func registerVintfFragmentComponents(ctx RegistrationContext) {
 	ctx.RegisterModuleType("vintf_fragment", vintfLibraryFactory)
 }
 
+type VintfFragmentInfo struct {
+	OutputFile Path
+}
+
+var VintfFragmentInfoProvider = blueprint.NewProvider[VintfFragmentInfo]()
+
 // vintf_fragment module processes vintf fragment file and installs under etc/vintf/manifest.
 // Vintf fragment files formerly listed in vintf_fragment property would be transformed into
 // this module type.
 func vintfLibraryFactory() Module {
-	m := &vintfFragmentModule{}
+	m := &VintfFragmentModule{}
 	m.AddProperties(
 		&m.properties,
 	)
@@ -49,7 +58,7 @@ func vintfLibraryFactory() Module {
 	return m
 }
 
-func (m *vintfFragmentModule) GenerateAndroidBuildActions(ctx ModuleContext) {
+func (m *VintfFragmentModule) GenerateAndroidBuildActions(ctx ModuleContext) {
 	builder := NewRuleBuilder(pctx, ctx)
 	srcVintfFragment := PathForModuleSrc(ctx, m.properties.Src)
 	processedVintfFragment := PathForModuleOut(ctx, srcVintfFragment.Base())
@@ -67,10 +76,18 @@ func (m *vintfFragmentModule) GenerateAndroidBuildActions(ctx ModuleContext) {
 	m.outputFilePath = processedVintfFragment
 
 	ctx.InstallFile(m.installDirPath, processedVintfFragment.Base(), processedVintfFragment)
+
+	SetProvider(ctx, VintfFragmentInfoProvider, VintfFragmentInfo{
+		OutputFile: m.OutputFile(),
+	})
+}
+
+func (m *VintfFragmentModule) OutputFile() Path {
+	return m.outputFilePath
 }
 
 // Make this module visible to AndroidMK so it can be referenced from modules defined from Android.mk files
-func (m *vintfFragmentModule) AndroidMkEntries() []AndroidMkEntries {
+func (m *VintfFragmentModule) AndroidMkEntries() []AndroidMkEntries {
 	return []AndroidMkEntries{{
 		Class:      "ETC",
 		OutputFile: OptionalPathForPath(m.outputFilePath),
@@ -81,4 +98,11 @@ func (m *vintfFragmentModule) AndroidMkEntries() []AndroidMkEntries {
 			},
 		},
 	}}
+}
+
+var _ ApexModule = (*VintfFragmentModule)(nil)
+
+// Implements android.ApexModule
+func (m *VintfFragmentModule) MinSdkVersionSupported(ctx BaseModuleContext) ApiLevel {
+	return MinApiLevel
 }

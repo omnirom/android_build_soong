@@ -123,6 +123,31 @@ func (k SdkKind) DefaultJavaLibraryName() string {
 	}
 }
 
+func JavaLibraryNameToSdkKind(name string) (SdkKind, bool) {
+	if name == SdkPublic.DefaultJavaLibraryName() {
+		return SdkPublic, true
+	}
+	if name == SdkSystem.DefaultJavaLibraryName() {
+		return SdkSystem, true
+	}
+	if name == SdkTest.DefaultJavaLibraryName() {
+		return SdkTest, true
+	}
+	if name == SdkTestFrameworksCore.DefaultJavaLibraryName() {
+		return SdkTestFrameworksCore, true
+	}
+	if name == SdkCore.DefaultJavaLibraryName() {
+		return SdkCore, true
+	}
+	if name == SdkModule.DefaultJavaLibraryName() {
+		return SdkModule, true
+	}
+	if name == SdkSystemServer.DefaultJavaLibraryName() {
+		return SdkSystemServer, true
+	}
+	return SdkInvalid, false
+}
+
 func (k SdkKind) DefaultExportableJavaLibraryName() string {
 	switch k {
 	case SdkPublic, SdkSystem, SdkTest, SdkModule, SdkSystemServer:

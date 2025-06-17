@@ -50,7 +50,7 @@ func TestAfdoEnabled(t *testing.T) {
 		rustMockedFiles.AddToFixture(),
 	).RunTestWithBp(t, bp)
 
-	foo := result.ModuleForTests("foo", "android_arm64_armv8-a").Rule("rustc")
+	foo := result.ModuleForTests(t, "foo", "android_arm64_armv8-a").Rule("rustc")
 
 	expectedCFlag := fmt.Sprintf(afdoFlagFormat, "afdo_profiles_package/foo.afdo")
 
@@ -96,8 +96,8 @@ func TestAfdoEnabledWithMultiArchs(t *testing.T) {
 		rustMockedFiles.AddToFixture(),
 	).RunTestWithBp(t, bp)
 
-	fooArm := result.ModuleForTests("foo", "android_arm_armv7-a-neon").Rule("rustc")
-	fooArm64 := result.ModuleForTests("foo", "android_arm64_armv8-a").Rule("rustc")
+	fooArm := result.ModuleForTests(t, "foo", "android_arm_armv7-a-neon").Rule("rustc")
+	fooArm64 := result.ModuleForTests(t, "foo", "android_arm64_armv8-a").Rule("rustc")
 
 	expectedCFlagArm := fmt.Sprintf(afdoFlagFormat, "afdo_profiles_package/foo_arm.afdo")
 	expectedCFlagArm64 := fmt.Sprintf(afdoFlagFormat, "afdo_profiles_package/foo_arm64.afdo")

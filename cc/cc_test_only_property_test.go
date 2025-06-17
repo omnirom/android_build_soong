@@ -173,7 +173,7 @@ func TestInvalidTestOnlyTargets(t *testing.T) {
 
 func getTeamProtoOutput(t *testing.T, ctx *android.TestResult) *team_proto.AllTeams {
 	teams := new(team_proto.AllTeams)
-	config := ctx.SingletonForTests("all_teams")
+	config := ctx.SingletonForTests(t, "all_teams")
 	allOutputs := config.AllOutputs()
 
 	protoPath := allOutputs[0]

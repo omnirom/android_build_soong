@@ -39,7 +39,7 @@ func TestInstallSymlinkBasic(t *testing.T) {
 		t.Fatalf("expected 1 variant, got %#v", foo_variants)
 	}
 
-	foo := result.ModuleForTests("foo", "android_common").Module()
+	foo := result.ModuleForTests(t, "foo", "android_common").Module()
 	androidMkEntries := android.AndroidMkEntriesForTest(t, result.TestContext, foo)
 	if len(androidMkEntries) != 1 {
 		t.Fatalf("expected 1 androidmkentry, got %d", len(androidMkEntries))
@@ -70,7 +70,7 @@ func TestInstallSymlinkToRecovery(t *testing.T) {
 		t.Fatalf("expected 1 variant, got %#v", foo_variants)
 	}
 
-	foo := result.ModuleForTests("foo", "android_common").Module()
+	foo := result.ModuleForTests(t, "foo", "android_common").Module()
 	androidMkEntries := android.AndroidMkEntriesForTest(t, result.TestContext, foo)
 	if len(androidMkEntries) != 1 {
 		t.Fatalf("expected 1 androidmkentry, got %d", len(androidMkEntries))
@@ -149,7 +149,7 @@ func TestInstallSymlinkHostBasic(t *testing.T) {
 	`)
 
 	buildOS := result.Config.BuildOS.String()
-	foo := result.ModuleForTests("foo", buildOS+"_common").Module()
+	foo := result.ModuleForTests(t, "foo", buildOS+"_common").Module()
 
 	androidMkEntries := android.AndroidMkEntriesForTest(t, result.TestContext, foo)
 	if len(androidMkEntries) != 1 {

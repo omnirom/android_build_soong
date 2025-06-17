@@ -21,6 +21,7 @@ import (
 )
 
 func TestAarImportProducesJniPackages(t *testing.T) {
+	t.Parallel()
 	ctx := android.GroupFixturePreparers(
 		PrepareForTestWithJavaDefaultModules,
 	).RunTestWithBp(t, `
@@ -50,8 +51,9 @@ func TestAarImportProducesJniPackages(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			appMod := ctx.Module(tc.name, "android_common")
-			appTestMod := ctx.ModuleForTests(tc.name, "android_common")
+			appTestMod := ctx.ModuleForTests(t, tc.name, "android_common")
 
 			info, ok := android.OtherModuleProvider(ctx, appMod, JniPackageProvider)
 			if !ok {
@@ -84,6 +86,7 @@ func TestAarImportProducesJniPackages(t *testing.T) {
 }
 
 func TestLibraryFlagsPackages(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		prepareForJavaTest,
 	).RunTestWithBp(t, `
@@ -114,7 +117,7 @@ func TestLibraryFlagsPackages(t *testing.T) {
 		}
 	`)
 
-	foo := result.ModuleForTests("foo", "android_common")
+	foo := result.ModuleForTests(t, "foo", "android_common")
 
 	// android_library module depends on aconfig_declarations listed in flags_packages
 	android.AssertBoolEquals(t, "foo expected to depend on bar", true,
@@ -133,6 +136,7 @@ func TestLibraryFlagsPackages(t *testing.T) {
 }
 
 func TestAndroidLibraryOutputFilesRel(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		PrepareForTestWithJavaDefaultModules,
 	).RunTestWithBp(t, `
@@ -155,9 +159,9 @@ func TestAndroidLibraryOutputFilesRel(t *testing.T) {
 		}
 	`)
 
-	foo := result.ModuleForTests("foo", "android_common")
-	bar := result.ModuleForTests("bar", "android_common")
-	baz := result.ModuleForTests("baz", "android_common")
+	foo := result.ModuleForTests(t, "foo", "android_common")
+	bar := result.ModuleForTests(t, "bar", "android_common")
+	baz := result.ModuleForTests(t, "baz", "android_common")
 
 	fooOutputPaths := foo.OutputFiles(result.TestContext, t, "")
 	barOutputPaths := bar.OutputFiles(result.TestContext, t, "")

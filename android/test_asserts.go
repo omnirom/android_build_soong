@@ -33,6 +33,23 @@ func AssertSame(t *testing.T, message string, expected interface{}, actual inter
 	}
 }
 
+// AssertSame checks if the expected and actual values are equal and if they are not then
+// it reports an error prefixed with the supplied message and including a reason for why it failed.
+func AssertSameArray[T comparable](t *testing.T, message string, expected []T, actual []T) {
+	t.Helper()
+	if len(actual) != len(expected) {
+		t.Errorf("%s: expected %d (%v), actual (%d) %v", message, len(expected), expected, len(actual), actual)
+		return
+	}
+	for i := range actual {
+		if actual[i] != expected[i] {
+			t.Errorf("%s: expected %d-th, %v (%v), actual %v (%v)",
+				message, i, expected[i], expected, actual[i], actual)
+			return
+		}
+	}
+}
+
 // AssertBoolEquals checks if the expected and actual values are equal and if they are not then it
 // reports an error prefixed with the supplied message and including a reason for why it failed.
 func AssertBoolEquals(t *testing.T, message string, expected bool, actual bool) {

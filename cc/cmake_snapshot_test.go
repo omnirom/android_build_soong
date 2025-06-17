@@ -49,7 +49,7 @@ func TestEmptyCmakeSnapshot(t *testing.T) {
 		t.Skip("CMake snapshots are only supported on Linux")
 	}
 
-	snapshotModule := result.ModuleForTests("foo", "linux_glibc_x86_64")
+	snapshotModule := result.ModuleForTests(t, "foo", "linux_glibc_x86_64")
 
 	wasGenerated(t, &snapshotModule, "CMakeLists.txt", "rawFileCopy")
 	wasGenerated(t, &snapshotModule, "foo.zip", "")
@@ -77,7 +77,7 @@ func TestCmakeSnapshotWithBinary(t *testing.T) {
 		t.Skip("CMake snapshots are only supported on Linux")
 	}
 
-	snapshotModule := result.ModuleForTests("foo", "linux_glibc_x86_64")
+	snapshotModule := result.ModuleForTests(t, "foo", "linux_glibc_x86_64")
 
 	wasGenerated(t, &snapshotModule, "some/module/CMakeLists.txt", "rawFileCopy")
 }
@@ -110,7 +110,7 @@ func TestCmakeSnapshotAsTestData(t *testing.T) {
 		t.Skip("CMake snapshots are only supported on Linux")
 	}
 
-	snapshotModule := result.ModuleForTests("foo", "linux_glibc_x86_64")
+	snapshotModule := result.ModuleForTests(t, "foo", "linux_glibc_x86_64")
 
 	wasGenerated(t, &snapshotModule, "CMakeLists.txt", "rawFileCopy")
 	wasGenerated(t, &snapshotModule, "foo.zip", "")

@@ -29,7 +29,7 @@ var (
 		"-fno-omit-frame-pointer",
 
 		"-U_FORTIFY_SOURCE",
-		"-D_FORTIFY_SOURCE=2",
+		"-D_FORTIFY_SOURCE=3",
 		"-fstack-protector",
 
 		"--gcc-toolchain=${LinuxGccRoot}",
@@ -41,7 +41,6 @@ var (
 	}
 
 	linuxMuslCflags = []string{
-		"-D_LIBCPP_HAS_MUSL_LIBC",
 		"-DANDROID_HOST_MUSL",
 		"-nostdlibinc",
 		"--sysroot /dev/null",

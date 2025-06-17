@@ -65,21 +65,21 @@ func TestModuleConfigAndroidTest(t *testing.T) {
 		android.FixtureRegisterWithContext(RegisterTestModuleConfigBuildComponents),
 	).RunTestWithBp(t, bp)
 
-	derived := ctx.ModuleForTests("derived_test", variant)
+	derived := ctx.ModuleForTests(t, "derived_test", variant)
 	// Assert there are rules to create these files.
 	derived.Output("test_module_config.manifest")
 	derived.Output("test_config_fixer/derived_test.config")
 
 	// Ensure some basic rules exist.
-	ctx.ModuleForTests("base", "android_common").Output("package-res.apk")
+	ctx.ModuleForTests(t, "base", "android_common").Output("package-res.apk")
 	entries := android.AndroidMkEntriesForTest(t, ctx.TestContext, derived.Module())[0]
 
 	// Ensure some entries from base are there, specifically support files for data and helper apps.
 	// Do not use LOCAL_COMPATIBILITY_SUPPORT_FILES, but instead use LOCAL_SOONG_INSTALLED_COMPATIBILITY_SUPPORT_FILES
 	android.AssertStringPathsRelativeToTopEquals(t, "support-files", ctx.Config,
-		[]string{"out/soong/target/product/test_device/testcases/derived_test/arm64/base.apk",
-			"out/soong/target/product/test_device/testcases/derived_test/HelperApp.apk",
-			"out/soong/target/product/test_device/testcases/derived_test/data/testfile"},
+		[]string{"out/target/product/test_device/testcases/derived_test/arm64/base.apk",
+			"out/target/product/test_device/testcases/derived_test/HelperApp.apk",
+			"out/target/product/test_device/testcases/derived_test/data/testfile"},
 		entries.EntryMap["LOCAL_SOONG_INSTALLED_COMPATIBILITY_SUPPORT_FILES"])
 	android.AssertArrayString(t, "", entries.EntryMap["LOCAL_COMPATIBILITY_SUPPORT_FILES"], []string{})
 
@@ -97,15 +97,15 @@ func TestModuleConfigAndroidTest(t *testing.T) {
 	convertedActual := make([]string, 5)
 	for i, e := range entries.FooterLinesForTests() {
 		// AssertStringPathsRelativeToTop doesn't replace both instances
-		convertedActual[i] = strings.Replace(e, ctx.Config.SoongOutDir(), "", 2)
+		convertedActual[i] = strings.Replace(e, ctx.Config.OutDir(), "", 2)
 	}
-	android.AssertArrayString(t, fmt.Sprintf("%s", ctx.Config.SoongOutDir()), convertedActual, []string{
+	android.AssertArrayString(t, fmt.Sprintf("%s", ctx.Config.OutDir()), []string{
 		"include $(BUILD_SYSTEM)/soong_app_prebuilt.mk",
 		"/target/product/test_device/testcases/derived_test/arm64/base.apk: /target/product/test_device/testcases/base/arm64/base.apk",
 		"/target/product/test_device/testcases/derived_test/HelperApp.apk: /target/product/test_device/testcases/base/HelperApp.apk",
 		"/target/product/test_device/testcases/derived_test/data/testfile: /target/product/test_device/testcases/base/data/testfile",
 		"",
-	})
+	}, convertedActual)
 }
 
 func TestModuleConfigShTest(t *testing.T) {
@@ -136,7 +136,7 @@ func TestModuleConfigShTest(t *testing.T) {
                         options: [{name: "SomeName", value: "OptionValue"}],
                 }
          `)
-	derived := ctx.ModuleForTests("conch", variant) //
+	derived := ctx.ModuleForTests(t, "conch", variant) //
 	conch := derived.Module().(*testModuleConfigModule)
 	android.AssertArrayString(t, "TestcaseRelDataFiles", []string{"arm64/testdata/data1", "arm64/testdata/sub/data2"}, conch.provider.TestcaseRelDataFiles)
 	android.AssertStringEquals(t, "Rel OutputFile", "test.sh", conch.provider.OutputFile.Rel())
@@ -151,8 +151,8 @@ func TestModuleConfigShTest(t *testing.T) {
 	// Ensure some entries from base are there, specifically support files for data and helper apps.
 	// Do not use LOCAL_COMPATIBILITY_SUPPORT_FILES, but instead use LOCAL_SOONG_INSTALLED_COMPATIBILITY_SUPPORT_FILES
 	android.AssertStringPathsRelativeToTopEquals(t, "support-files", ctx.Config,
-		[]string{"out/soong/target/product/test_device/testcases/conch/arm64/testdata/data1",
-			"out/soong/target/product/test_device/testcases/conch/arm64/testdata/sub/data2"},
+		[]string{"out/target/product/test_device/testcases/conch/arm64/testdata/data1",
+			"out/target/product/test_device/testcases/conch/arm64/testdata/sub/data2"},
 		entries.EntryMap["LOCAL_SOONG_INSTALLED_COMPATIBILITY_SUPPORT_FILES"])
 	android.AssertArrayString(t, "", entries.EntryMap["LOCAL_COMPATIBILITY_SUPPORT_FILES"], []string{})
 
@@ -171,14 +171,14 @@ func TestModuleConfigShTest(t *testing.T) {
 	convertedActual := make([]string, 4)
 	for i, e := range entries.FooterLinesForTests() {
 		// AssertStringPathsRelativeToTop doesn't replace both instances
-		convertedActual[i] = strings.Replace(e, ctx.Config.SoongOutDir(), "", 2)
+		convertedActual[i] = strings.Replace(e, ctx.Config.OutDir(), "", 2)
 	}
-	android.AssertArrayString(t, fmt.Sprintf("%s", ctx.Config.SoongOutDir()), convertedActual, []string{
+	android.AssertArrayString(t, fmt.Sprintf("%s", ctx.Config.OutDir()), []string{
 		"include $(BUILD_SYSTEM)/soong_cc_rust_prebuilt.mk",
 		"/target/product/test_device/testcases/conch/arm64/testdata/data1: /target/product/test_device/testcases/shell_test/arm64/testdata/data1",
 		"/target/product/test_device/testcases/conch/arm64/testdata/sub/data2: /target/product/test_device/testcases/shell_test/arm64/testdata/sub/data2",
 		"",
-	})
+	}, convertedActual)
 
 }
 
@@ -191,7 +191,7 @@ func TestModuleConfigOptions(t *testing.T) {
 	).RunTestWithBp(t, bp)
 
 	// Check that we generate a rule to make a new AndroidTest.xml/Module.config file.
-	derived := ctx.ModuleForTests("derived_test", variant)
+	derived := ctx.ModuleForTests(t, "derived_test", variant)
 	rule_cmd := derived.Rule("fix_test_config").RuleParams.Command
 	android.AssertStringDoesContain(t, "Bad FixConfig rule inputs", rule_cmd,
 		`--test-runner-options='[{"Name":"exclude-filter","Key":"","Value":"android.test.example.devcodelab.DevCodelabTest#testHelloFail"},{"Name":"include-annotation","Key":"","Value":"android.platform.test.annotations.LargeTest"}]'`)
@@ -288,7 +288,7 @@ func TestModuleConfigNoFiltersOrAnnotationsShouldFail(t *testing.T) {
 	).ExtendWithErrorHandler(
 		android.FixtureExpectsAtLeastOneErrorMatchingPattern("Test options must be given")).
 		RunTestWithBp(t, badBp)
-	ctx.ModuleForTests("derived_test", variant)
+	ctx.ModuleForTests(t, "derived_test", variant)
 }
 
 func TestModuleConfigMultipleDerivedTestsWriteDistinctMakeEntries(t *testing.T) {
@@ -326,13 +326,13 @@ func TestModuleConfigMultipleDerivedTestsWriteDistinctMakeEntries(t *testing.T) 
 	).RunTestWithBp(t, multiBp)
 
 	{
-		derived := ctx.ModuleForTests("derived_test", variant)
+		derived := ctx.ModuleForTests(t, "derived_test", variant)
 		entries := android.AndroidMkEntriesForTest(t, ctx.TestContext, derived.Module())[0]
 		// All these should be the same in both derived tests
 		android.AssertStringPathsRelativeToTopEquals(t, "support-files", ctx.Config,
-			[]string{"out/soong/target/product/test_device/testcases/derived_test/arm64/base.apk",
-				"out/soong/target/product/test_device/testcases/derived_test/HelperApp.apk",
-				"out/soong/target/product/test_device/testcases/derived_test/data/testfile"},
+			[]string{"out/target/product/test_device/testcases/derived_test/arm64/base.apk",
+				"out/target/product/test_device/testcases/derived_test/HelperApp.apk",
+				"out/target/product/test_device/testcases/derived_test/data/testfile"},
 			entries.EntryMap["LOCAL_SOONG_INSTALLED_COMPATIBILITY_SUPPORT_FILES"])
 
 		// Except this one, which points to the updated tradefed xml file.
@@ -342,13 +342,13 @@ func TestModuleConfigMultipleDerivedTestsWriteDistinctMakeEntries(t *testing.T) 
 	}
 
 	{
-		derived := ctx.ModuleForTests("another_derived_test", variant)
+		derived := ctx.ModuleForTests(t, "another_derived_test", variant)
 		entries := android.AndroidMkEntriesForTest(t, ctx.TestContext, derived.Module())[0]
 		// All these should be the same in both derived tests
 		android.AssertStringPathsRelativeToTopEquals(t, "support-files", ctx.Config,
-			[]string{"out/soong/target/product/test_device/testcases/another_derived_test/arm64/base.apk",
-				"out/soong/target/product/test_device/testcases/another_derived_test/HelperApp.apk",
-				"out/soong/target/product/test_device/testcases/another_derived_test/data/testfile"},
+			[]string{"out/target/product/test_device/testcases/another_derived_test/arm64/base.apk",
+				"out/target/product/test_device/testcases/another_derived_test/HelperApp.apk",
+				"out/target/product/test_device/testcases/another_derived_test/data/testfile"},
 			entries.EntryMap["LOCAL_SOONG_INSTALLED_COMPATIBILITY_SUPPORT_FILES"])
 		// Except this one, which points to the updated tradefed xml file.
 		android.AssertStringMatches(t, "", entries.EntryMap["LOCAL_FULL_TEST_CONFIG"][0],
@@ -381,7 +381,7 @@ func TestModuleConfigHostBasics(t *testing.T) {
 	).RunTestWithBp(t, bp)
 
 	variant := ctx.Config.BuildOS.String() + "_common"
-	derived := ctx.ModuleForTests("derived_test", variant)
+	derived := ctx.ModuleForTests(t, "derived_test", variant)
 	mod := derived.Module().(*testModuleConfigHostModule)
 	allEntries := android.AndroidMkEntriesForTest(t, ctx.TestContext, mod)
 	entries := allEntries[0]

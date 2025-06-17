@@ -51,6 +51,7 @@ bootstrap_go_package {
         "gen.go",
         "generated_java_library.go",
         "genrule.go",
+        "genrule_combiner.go",
         "hiddenapi.go",
         "hiddenapi_modular.go",
         "hiddenapi_monolithic.go",
@@ -77,6 +78,7 @@ bootstrap_go_package {
         "system_modules.go",
         "systemserver_classpath_fragment.go",
         "testing.go",
+        "tracereferences.go",
         "tradefed.go",
     ],
     testSrcs: [
@@ -95,6 +97,7 @@ bootstrap_go_package {
         "droiddoc_test.go",
         "droidstubs_test.go",
         "fuzz_test.go",
+        "genrule_combiner_test.go",
         "genrule_test.go",
         "generated_java_library_test.go",
         "hiddenapi_singleton_test.go",

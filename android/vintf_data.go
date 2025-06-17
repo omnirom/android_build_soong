@@ -140,6 +140,7 @@ func (m *vintfDataRule) GenerateAndroidBuildActions(ctx ModuleContext) {
 
 	// Process vintf fragment source file with assemble_vintf tool
 	builder.Command().
+		Implicits(inputPaths).
 		Flags(assembleVintfEnvs).
 		BuiltTool("assemble_vintf").
 		FlagWithArg("-i ", strings.Join(inputPaths.Strings(), ":")).

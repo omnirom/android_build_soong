@@ -41,11 +41,11 @@ func TestLibraryHeaders(t *testing.T) {
 			ctx := testCc(t, fmt.Sprintf(bp, headerModule))
 
 			// test if header search paths are correctly added
-			cc := ctx.ModuleForTests("lib", "android_arm64_armv8-a_static").Rule("cc")
+			cc := ctx.ModuleForTests(t, "lib", "android_arm64_armv8-a_static").Rule("cc")
 			android.AssertStringDoesContain(t, "cFlags for lib module", cc.Args["cFlags"], " -Imy_include ")
 
 			// Test that there's a valid AndroidMk entry.
-			headers := ctx.ModuleForTests("headers", "android_arm64_armv8-a").Module()
+			headers := ctx.ModuleForTests(t, "headers", "android_arm64_armv8-a").Module()
 			e := android.AndroidMkInfoForTest(t, ctx, headers).PrimaryInfo
 
 			// This duplicates the tests done in AndroidMkEntries.write. It would be
@@ -80,9 +80,9 @@ func TestPrebuiltLibraryHeadersPreferred(t *testing.T) {
 	for _, prebuiltPreferred := range []bool{false, true} {
 		t.Run(fmt.Sprintf("prebuilt prefer %t", prebuiltPreferred), func(t *testing.T) {
 			ctx := testCc(t, fmt.Sprintf(bp, prebuiltPreferred))
-			lib := ctx.ModuleForTests("lib", "android_arm64_armv8-a_static")
-			sourceDep := ctx.ModuleForTests("headers", "android_arm64_armv8-a")
-			prebuiltDep := ctx.ModuleForTests("prebuilt_headers", "android_arm64_armv8-a")
+			lib := ctx.ModuleForTests(t, "lib", "android_arm64_armv8-a_static")
+			sourceDep := ctx.ModuleForTests(t, "headers", "android_arm64_armv8-a")
+			prebuiltDep := ctx.ModuleForTests(t, "prebuilt_headers", "android_arm64_armv8-a")
 			hasSourceDep := false
 			hasPrebuiltDep := false
 			ctx.VisitDirectDeps(lib.Module(), func(dep blueprint.Module) {

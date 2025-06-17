@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/google/blueprint"
 	"github.com/google/blueprint/proptools"
 )
 
@@ -35,34 +36,31 @@ func RegisterGenNoticeBuildComponents(ctx RegistrationContext) {
 type genNoticeBuildRules struct{}
 
 func (s *genNoticeBuildRules) GenerateBuildActions(ctx SingletonContext) {
-	ctx.VisitAllModules(func(m Module) {
-		gm, ok := m.(*genNoticeModule)
+	ctx.VisitAllModuleProxies(func(m ModuleProxy) {
+		gm, ok := OtherModuleProvider(ctx, m, GenNoticeInfoProvider)
 		if !ok {
 			return
 		}
-		if len(gm.missing) > 0 {
-			missingReferencesRule(ctx, gm)
+		if len(gm.Missing) > 0 {
+			missingReferencesRule(ctx, m, &gm)
 			return
 		}
 		out := BuildNoticeTextOutputFromLicenseMetadata
-		if proptools.Bool(gm.properties.Xml) {
+		if gm.Xml {
 			out = BuildNoticeXmlOutputFromLicenseMetadata
-		} else if proptools.Bool(gm.properties.Html) {
+		} else if gm.Html {
 			out = BuildNoticeHtmlOutputFromLicenseMetadata
 		}
 		defaultName := ""
-		if len(gm.properties.For) > 0 {
-			defaultName = gm.properties.For[0]
+		if len(gm.For) > 0 {
+			defaultName = gm.For[0]
 		}
 
-		modules := make([]Module, 0)
-		for _, name := range gm.properties.For {
-			mods := ctx.ModuleVariantsFromName(gm, name)
+		modules := make([]ModuleProxy, 0)
+		for _, name := range gm.For {
+			mods := ctx.ModuleVariantsFromName(m, name)
 			for _, mod := range mods {
-				if mod == nil {
-					continue
-				}
-				if !mod.Enabled(ctx) { // don't depend on variants without build rules
+				if !OtherModulePointerProviderOrDefault(ctx, mod, CommonModuleInfoProvider).Enabled { // don't depend on variants without build rules
 					continue
 				}
 				modules = append(modules, mod)
@@ -71,8 +69,8 @@ func (s *genNoticeBuildRules) GenerateBuildActions(ctx SingletonContext) {
 		if ctx.Failed() {
 			return
 		}
-		out(ctx, gm.output, ctx.ModuleName(gm),
-			proptools.StringDefault(gm.properties.ArtifactName, defaultName),
+		out(ctx, gm.Output, ctx.ModuleName(m),
+			proptools.StringDefault(gm.ArtifactName, defaultName),
 			[]string{
 				filepath.Join(ctx.Config().OutDir(), "target", "product", ctx.Config().DeviceName()) + "/",
 				ctx.Config().OutDir() + "/",
@@ -114,6 +112,22 @@ type genNoticeModule struct {
 	output  OutputPath
 	missing []string
 }
+
+type GenNoticeInfo struct {
+	// For specifies the modules for which to generate a notice file.
+	For []string
+	// ArtifactName specifies the internal name to use for the notice file.
+	// It appears in the "used by:" list for targets whose entire name is stripped by --strip_prefix.
+	ArtifactName *string
+	// Html indicates an html-format file is needed. The default is text. Can be Html or Xml but not both.
+	Html bool
+	// Xml indicates an xml-format file is needed. The default is text. Can be Html or Xml but not both.
+	Xml     bool
+	Output  OutputPath
+	Missing []string
+}
+
+var GenNoticeInfoProvider = blueprint.NewProvider[GenNoticeInfo]()
 
 func (m *genNoticeModule) DepsMutator(ctx BottomUpMutatorContext) {
 	if ctx.ContainsProperty("licenses") {
@@ -176,6 +190,15 @@ func (m *genNoticeModule) GenerateAndroidBuildActions(ctx ModuleContext) {
 	}
 	out := m.getStem() + m.getSuffix()
 	m.output = PathForModuleOut(ctx, out).OutputPath
+
+	SetProvider(ctx, GenNoticeInfoProvider, GenNoticeInfo{
+		For:          m.properties.For,
+		ArtifactName: m.properties.ArtifactName,
+		Xml:          proptools.Bool(m.properties.Xml),
+		Html:         proptools.Bool(m.properties.Html),
+		Output:       m.output,
+		Missing:      m.missing,
+	})
 	ctx.SetOutputFiles(Paths{m.output}, "")
 }
 
@@ -205,17 +228,17 @@ func (m *genNoticeModule) AndroidMkEntries() []AndroidMkEntries {
 }
 
 // missingReferencesRule emits an ErrorRule for missing module references.
-func missingReferencesRule(ctx BuilderContext, m *genNoticeModule) {
-	if len(m.missing) < 1 {
+func missingReferencesRule(ctx BuilderContext, m ModuleProxy, genInfo *GenNoticeInfo) {
+	if len(genInfo.Missing) < 1 {
 		panic(fmt.Errorf("missing references rule requested with no missing references"))
 	}
 
 	ctx.Build(pctx, BuildParams{
 		Rule:        ErrorRule,
-		Output:      m.output,
-		Description: "notice for " + proptools.StringDefault(m.properties.ArtifactName, "container"),
+		Output:      genInfo.Output,
+		Description: "notice for " + proptools.StringDefault(genInfo.ArtifactName, "container"),
 		Args: map[string]string{
-			"error": m.Name() + " references missing module(s): " + strings.Join(m.missing, ", "),
+			"error": m.Name() + " references missing module(s): " + strings.Join(genInfo.Missing, ", "),
 		},
 	})
 }

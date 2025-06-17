@@ -22,6 +22,7 @@ import (
 	"github.com/google/blueprint"
 	"github.com/google/blueprint/gobtools"
 	"github.com/google/blueprint/proptools"
+	"github.com/google/blueprint/uniquelist"
 )
 
 // PackagingSpec abstracts a request to place a built artifact at a certain path in a package. A
@@ -42,7 +43,7 @@ type PackagingSpec struct {
 	// Whether relPathInPackage should be marked as executable or not
 	executable bool
 
-	effectiveLicenseFiles *Paths
+	effectiveLicenseFiles uniquelist.UniqueList[Path]
 
 	partition string
 
@@ -52,16 +53,28 @@ type PackagingSpec struct {
 	skipInstall bool
 
 	// Paths of aconfig files for the built artifact
-	aconfigPaths *Paths
+	aconfigPaths uniquelist.UniqueList[Path]
 
 	// ArchType of the module which produced this packaging spec
 	archType ArchType
 
 	// List of module names that this packaging spec overrides
-	overrides *[]string
+	overrides uniquelist.UniqueList[string]
 
 	// Name of the module where this packaging spec is output of
 	owner string
+
+	// If the ninja rule creating the FullInstallPath has already been emitted or not. Do not use,
+	// for the soong-only migration.
+	requiresFullInstall bool
+
+	// The path to the installed file in out/target/product. This is for legacy purposes, with
+	// tools that want to interact with these files outside of the build. You should not use it
+	// inside of the build. Will be nil if this module doesn't require a "full install".
+	fullInstallPath InstallPath
+
+	// String representation of the variation of the module where this packaging spec is output of
+	variation string
 }
 
 type packagingSpecGob struct {
@@ -69,13 +82,24 @@ type packagingSpecGob struct {
 	SrcPath               Path
 	SymlinkTarget         string
 	Executable            bool
-	EffectiveLicenseFiles *Paths
+	EffectiveLicenseFiles Paths
 	Partition             string
 	SkipInstall           bool
-	AconfigPaths          *Paths
+	AconfigPaths          Paths
 	ArchType              ArchType
-	Overrides             *[]string
+	Overrides             []string
 	Owner                 string
+	RequiresFullInstall   bool
+	FullInstallPath       InstallPath
+	Variation             string
+}
+
+func (p *PackagingSpec) Owner() string {
+	return p.owner
+}
+
+func (p *PackagingSpec) Variation() string {
+	return p.variation
 }
 
 func (p *PackagingSpec) ToGob() *packagingSpecGob {
@@ -84,13 +108,16 @@ func (p *PackagingSpec) ToGob() *packagingSpecGob {
 		SrcPath:               p.srcPath,
 		SymlinkTarget:         p.symlinkTarget,
 		Executable:            p.executable,
-		EffectiveLicenseFiles: p.effectiveLicenseFiles,
+		EffectiveLicenseFiles: p.effectiveLicenseFiles.ToSlice(),
 		Partition:             p.partition,
 		SkipInstall:           p.skipInstall,
-		AconfigPaths:          p.aconfigPaths,
+		AconfigPaths:          p.aconfigPaths.ToSlice(),
 		ArchType:              p.archType,
-		Overrides:             p.overrides,
+		Overrides:             p.overrides.ToSlice(),
 		Owner:                 p.owner,
+		RequiresFullInstall:   p.requiresFullInstall,
+		FullInstallPath:       p.fullInstallPath,
+		Variation:             p.variation,
 	}
 }
 
@@ -99,13 +126,16 @@ func (p *PackagingSpec) FromGob(data *packagingSpecGob) {
 	p.srcPath = data.SrcPath
 	p.symlinkTarget = data.SymlinkTarget
 	p.executable = data.Executable
-	p.effectiveLicenseFiles = data.EffectiveLicenseFiles
+	p.effectiveLicenseFiles = uniquelist.Make(data.EffectiveLicenseFiles)
 	p.partition = data.Partition
 	p.skipInstall = data.SkipInstall
-	p.aconfigPaths = data.AconfigPaths
+	p.aconfigPaths = uniquelist.Make(data.AconfigPaths)
 	p.archType = data.ArchType
-	p.overrides = data.Overrides
+	p.overrides = uniquelist.Make(data.Overrides)
 	p.owner = data.Owner
+	p.requiresFullInstall = data.RequiresFullInstall
+	p.fullInstallPath = data.FullInstallPath
+	p.variation = data.Variation
 }
 
 func (p *PackagingSpec) GobEncode() ([]byte, error) {
@@ -154,10 +184,7 @@ func (p *PackagingSpec) SetRelPathInPackage(relPathInPackage string) {
 }
 
 func (p *PackagingSpec) EffectiveLicenseFiles() Paths {
-	if p.effectiveLicenseFiles == nil {
-		return Paths{}
-	}
-	return *p.effectiveLicenseFiles
+	return p.effectiveLicenseFiles.ToSlice()
 }
 
 func (p *PackagingSpec) Partition() string {
@@ -174,7 +201,30 @@ func (p *PackagingSpec) SkipInstall() bool {
 
 // Paths of aconfig files for the built artifact
 func (p *PackagingSpec) GetAconfigPaths() Paths {
-	return *p.aconfigPaths
+	return p.aconfigPaths.ToSlice()
+}
+
+// The path to the installed file in out/target/product. This is for legacy purposes, with
+// tools that want to interact with these files outside of the build. You should not use it
+// inside of the build. Will be nil if this module doesn't require a "full install".
+func (p *PackagingSpec) FullInstallPath() InstallPath {
+	return p.fullInstallPath
+}
+
+// If the ninja rule creating the FullInstallPath has already been emitted or not. Do not use,
+// for the soong-only migration.
+func (p *PackagingSpec) RequiresFullInstall() bool {
+	return p.requiresFullInstall
+}
+
+// The source file to be copied to the FullInstallPath. Do not use, for the soong-only migration.
+func (p *PackagingSpec) SrcPath() Path {
+	return p.srcPath
+}
+
+// The symlink target of the PackagingSpec. Do not use, for the soong-only migration.
+func (p *PackagingSpec) SymlinkTarget() string {
+	return p.symlinkTarget
 }
 
 type PackageModule interface {
@@ -456,13 +506,11 @@ func (p *PackagingBase) GatherPackagingSpecsWithFilterAndModifier(ctx ModuleCont
 	// all packaging specs gathered from the high priority deps.
 	var highPriorities []PackagingSpec
 
-	// Name of the dependency which requested the packaging spec.
-	// If this dep is overridden, the packaging spec will not be installed via this dependency chain.
-	// (the packaging spec might still be installed if there are some other deps which depend on it).
-	var depNames []string
-
 	// list of module names overridden
-	var overridden []string
+	overridden := make(map[string]bool)
+
+	// all installed modules which are not overridden.
+	modulesToInstall := make(map[string]bool)
 
 	var arches []ArchType
 	for _, target := range getSupportedTargets(ctx) {
@@ -479,6 +527,7 @@ func (p *PackagingBase) GatherPackagingSpecsWithFilterAndModifier(ctx ModuleCont
 		return false
 	}
 
+	// find all overridden modules and packaging specs
 	ctx.VisitDirectDepsProxy(func(child ModuleProxy) {
 		depTag := ctx.OtherModuleDependencyTag(child)
 		if pi, ok := depTag.(PackagingItem); !ok || !pi.IsPackagingItem() {
@@ -506,22 +555,32 @@ func (p *PackagingBase) GatherPackagingSpecsWithFilterAndModifier(ctx ModuleCont
 				regularPriorities = append(regularPriorities, ps)
 			}
 
-			depNames = append(depNames, child.Name())
-			if ps.overrides != nil {
-				overridden = append(overridden, *ps.overrides...)
+			for o := range ps.overrides.Iter() {
+				overridden[o] = true
 			}
 		}
 	})
 
-	filterOverridden := func(input []PackagingSpec) []PackagingSpec {
-		// input minus packaging specs that are overridden
-		var filtered []PackagingSpec
-		for index, ps := range input {
-			if ps.owner != "" && InList(ps.owner, overridden) {
-				continue
+	// gather modules to install, skipping overridden modules
+	ctx.WalkDeps(func(child, parent Module) bool {
+		owner := ctx.OtherModuleName(child)
+		if o, ok := child.(OverridableModule); ok {
+			if overriddenBy := o.GetOverriddenBy(); overriddenBy != "" {
+				owner = overriddenBy
 			}
-			// The dependency which requested this packaging spec has been overridden.
-			if InList(depNames[index], overridden) {
+		}
+		if overridden[owner] {
+			return false
+		}
+		modulesToInstall[owner] = true
+		return true
+	})
+
+	filterOverridden := func(input []PackagingSpec) []PackagingSpec {
+		// input minus packaging specs that are not installed
+		var filtered []PackagingSpec
+		for _, ps := range input {
+			if !modulesToInstall[ps.owner] {
 				continue
 			}
 			filtered = append(filtered, ps)
@@ -575,12 +634,12 @@ func (p *PackagingBase) GatherPackagingSpecs(ctx ModuleContext) map[string]Packa
 func (p *PackagingBase) CopySpecsToDir(ctx ModuleContext, builder *RuleBuilder, specs map[string]PackagingSpec, dir WritablePath) (entries []string) {
 	dirsToSpecs := make(map[WritablePath]map[string]PackagingSpec)
 	dirsToSpecs[dir] = specs
-	return p.CopySpecsToDirs(ctx, builder, dirsToSpecs)
+	return p.CopySpecsToDirs(ctx, builder, dirsToSpecs, false)
 }
 
 // CopySpecsToDirs is a helper that will add commands to the rule builder to copy the PackagingSpec
 // entries into corresponding directories.
-func (p *PackagingBase) CopySpecsToDirs(ctx ModuleContext, builder *RuleBuilder, dirsToSpecs map[WritablePath]map[string]PackagingSpec) (entries []string) {
+func (p *PackagingBase) CopySpecsToDirs(ctx ModuleContext, builder *RuleBuilder, dirsToSpecs map[WritablePath]map[string]PackagingSpec, preserveTimestamps bool) (entries []string) {
 	empty := true
 	for _, specs := range dirsToSpecs {
 		if len(specs) > 0 {
@@ -614,7 +673,11 @@ func (p *PackagingBase) CopySpecsToDirs(ctx ModuleContext, builder *RuleBuilder,
 				builder.Command().Textf("mkdir -p %s", destDir)
 			}
 			if ps.symlinkTarget == "" {
-				builder.Command().Text("cp").Input(ps.srcPath).Text(destPath)
+				cmd := builder.Command().Text("cp")
+				if preserveTimestamps {
+					cmd.Flag("-p")
+				}
+				cmd.Input(ps.srcPath).Text(destPath)
 			} else {
 				builder.Command().Textf("ln -sf %s %s", ps.symlinkTarget, destPath)
 			}

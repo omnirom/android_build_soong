@@ -100,12 +100,12 @@ func (l *loadHookContext) PrependProperties(props ...interface{}) {
 	l.appendPrependHelper(props, proptools.PrependMatchingProperties)
 }
 
-func (l *loadHookContext) createModule(factory blueprint.ModuleFactory, name string, props ...interface{}) blueprint.Module {
-	return l.bp.CreateModule(factory, name, props...)
+func (l *loadHookContext) createModule(factory blueprint.ModuleFactory, name string, props ...interface{}) Module {
+	return bpModuleToModule(l.bp.CreateModule(factory, name, props...))
 }
 
-func (l *loadHookContext) createModuleInDirectory(factory blueprint.ModuleFactory, name, moduleDir string, props ...interface{}) blueprint.Module {
-	return l.bp.CreateModuleInDirectory(factory, name, moduleDir, props...)
+func (l *loadHookContext) createModuleInDirectory(factory blueprint.ModuleFactory, name, moduleDir string, props ...interface{}) Module {
+	return bpModuleToModule(l.bp.CreateModuleInDirectory(factory, name, moduleDir, props...))
 }
 
 type specifyDirectory struct {
@@ -130,8 +130,8 @@ func specifiesDirectory(directory string) specifyDirectory {
 type createModuleContext interface {
 	Module() Module
 	HasMutatorFinished(mutatorName string) bool
-	createModule(blueprint.ModuleFactory, string, ...interface{}) blueprint.Module
-	createModuleInDirectory(blueprint.ModuleFactory, string, string, ...interface{}) blueprint.Module
+	createModule(blueprint.ModuleFactory, string, ...interface{}) Module
+	createModuleInDirectory(blueprint.ModuleFactory, string, string, ...interface{}) Module
 }
 
 func createModule(ctx createModuleContext, factory ModuleFactory, ext string, specifyDirectory specifyDirectory, props ...interface{}) Module {

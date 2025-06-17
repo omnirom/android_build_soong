@@ -15,9 +15,8 @@
 package android
 
 import (
-	"sync"
-
 	"github.com/google/blueprint"
+	"github.com/google/blueprint/pool"
 )
 
 // Phases:
@@ -67,10 +66,10 @@ type registerMutatorsContext struct {
 }
 
 type RegisterMutatorsContext interface {
-	TopDown(name string, m TopDownMutator) MutatorHandle
 	BottomUp(name string, m BottomUpMutator) MutatorHandle
 	BottomUpBlueprint(name string, m blueprint.BottomUpMutator) MutatorHandle
-	Transition(name string, m TransitionMutator) TransitionMutatorHandle
+	Transition(name string, m VariationTransitionMutator) TransitionMutatorHandle
+	InfoBasedTransition(name string, m androidTransitionMutator) TransitionMutatorHandle
 }
 
 type RegisterMutatorFunc func(RegisterMutatorsContext)
@@ -158,6 +157,7 @@ func registerArchMutator(ctx RegisterMutatorsContext) {
 
 var preDeps = []RegisterMutatorFunc{
 	registerArchMutator,
+	RegisterPrebuiltsPreDepsMutators,
 }
 
 var postDeps = []RegisterMutatorFunc{
@@ -193,17 +193,6 @@ func FinalDepsMutators(f RegisterMutatorFunc) {
 	finalDeps = append(finalDeps, f)
 }
 
-type TopDownMutator func(TopDownMutatorContext)
-
-type TopDownMutatorContext interface {
-	BaseModuleContext
-}
-
-type topDownMutatorContext struct {
-	bp blueprint.TopDownMutatorContext
-	baseModuleContext
-}
-
 type BottomUpMutator func(BottomUpMutatorContext)
 
 type BottomUpMutatorContext interface {
@@ -213,7 +202,7 @@ type BottomUpMutatorContext interface {
 	// dependency (some entries may be nil).
 	//
 	// This method will pause until the new dependencies have had the current mutator called on them.
-	AddDependency(module blueprint.Module, tag blueprint.DependencyTag, name ...string) []blueprint.Module
+	AddDependency(module blueprint.Module, tag blueprint.DependencyTag, name ...string) []Module
 
 	// AddReverseDependency adds a dependency from the destination to the given module.
 	// Does not affect the ordering of the current mutator pass, but will be ordered
@@ -229,7 +218,7 @@ type BottomUpMutatorContext interface {
 	// all the non-local variations of the current module, plus the variations argument.
 	//
 	// This method will pause until the new dependencies have had the current mutator called on them.
-	AddVariationDependencies(variations []blueprint.Variation, tag blueprint.DependencyTag, names ...string) []blueprint.Module
+	AddVariationDependencies(variations []blueprint.Variation, tag blueprint.DependencyTag, names ...string) []Module
 
 	// AddReverseVariationDependency adds a dependency from the named module to the current
 	// module. The given variations will be added to the current module's varations, and then the
@@ -252,7 +241,7 @@ type BottomUpMutatorContext interface {
 	// dependency only needs to match the supplied variations.
 	//
 	// This method will pause until the new dependencies have had the current mutator called on them.
-	AddFarVariationDependencies([]blueprint.Variation, blueprint.DependencyTag, ...string) []blueprint.Module
+	AddFarVariationDependencies([]blueprint.Variation, blueprint.DependencyTag, ...string) []Module
 
 	// ReplaceDependencies finds all the variants of the module with the specified name, then
 	// replaces all dependencies onto those variants with the current variant of this module.
@@ -279,22 +268,12 @@ type BottomUpMutatorContext interface {
 }
 
 // An outgoingTransitionContextImpl and incomingTransitionContextImpl is created for every dependency of every module
-// for each transition mutator.  bottomUpMutatorContext and topDownMutatorContext are created once for every module
-// for every BottomUp or TopDown mutator.  Use a global pool for each to avoid reallocating every time.
+// for each transition mutator.  bottomUpMutatorContext is created once for every module for every BottomUp mutator.
+// Use a global pool for each to avoid reallocating every time.
 var (
-	outgoingTransitionContextPool = sync.Pool{
-		New: func() any { return &outgoingTransitionContextImpl{} },
-	}
-	incomingTransitionContextPool = sync.Pool{
-		New: func() any { return &incomingTransitionContextImpl{} },
-	}
-	bottomUpMutatorContextPool = sync.Pool{
-		New: func() any { return &bottomUpMutatorContext{} },
-	}
-
-	topDownMutatorContextPool = sync.Pool{
-		New: func() any { return &topDownMutatorContext{} },
-	}
+	outgoingTransitionContextPool = pool.New[outgoingTransitionContextImpl]()
+	incomingTransitionContextPool = pool.New[incomingTransitionContextImpl]()
+	bottomUpMutatorContextPool    = pool.New[bottomUpMutatorContext]()
 )
 
 type bottomUpMutatorContext struct {
@@ -305,10 +284,10 @@ type bottomUpMutatorContext struct {
 
 // callers must immediately follow the call to this function with defer bottomUpMutatorContextPool.Put(mctx).
 func bottomUpMutatorContextFactory(ctx blueprint.BottomUpMutatorContext, a Module,
-	finalPhase bool) BottomUpMutatorContext {
+	finalPhase bool) *bottomUpMutatorContext {
 
 	moduleContext := a.base().baseModuleContextFactory(ctx)
-	mctx := bottomUpMutatorContextPool.Get().(*bottomUpMutatorContext)
+	mctx := bottomUpMutatorContextPool.Get()
 	*mctx = bottomUpMutatorContext{
 		bp:                ctx,
 		baseModuleContext: moduleContext,
@@ -337,250 +316,22 @@ func (x *registerMutatorsContext) BottomUpBlueprint(name string, m blueprint.Bot
 	return mutator
 }
 
-type IncomingTransitionContext interface {
-	ArchModuleContext
-	ModuleProviderContext
-	ModuleErrorContext
-
-	// Module returns the target of the dependency edge for which the transition
-	// is being computed
-	Module() Module
-
-	// Config returns the configuration for the build.
-	Config() Config
-
-	DeviceConfig() DeviceConfig
-
-	// IsAddingDependency returns true if the transition is being called while adding a dependency
-	// after the transition mutator has already run, or false if it is being called when the transition
-	// mutator is running.  This should be used sparingly, all uses will have to be removed in order
-	// to support creating variants on demand.
-	IsAddingDependency() bool
-}
-
-type OutgoingTransitionContext interface {
-	ArchModuleContext
-	ModuleProviderContext
-
-	// Module returns the target of the dependency edge for which the transition
-	// is being computed
-	Module() Module
-
-	// DepTag() Returns the dependency tag through which this dependency is
-	// reached
-	DepTag() blueprint.DependencyTag
-
-	// Config returns the configuration for the build.
-	Config() Config
-
-	DeviceConfig() DeviceConfig
-}
-
-// TransitionMutator implements a top-down mechanism where a module tells its
-// direct dependencies what variation they should be built in but the dependency
-// has the final say.
-//
-// When implementing a transition mutator, one needs to implement four methods:
-//   - Split() that tells what variations a module has by itself
-//   - OutgoingTransition() where a module tells what it wants from its
-//     dependency
-//   - IncomingTransition() where a module has the final say about its own
-//     variation
-//   - Mutate() that changes the state of a module depending on its variation
-//
-// That the effective variation of module B when depended on by module A is the
-// composition the outgoing transition of module A and the incoming transition
-// of module B.
-//
-// the outgoing transition should not take the properties of the dependency into
-// account, only those of the module that depends on it. For this reason, the
-// dependency is not even passed into it as an argument. Likewise, the incoming
-// transition should not take the properties of the depending module into
-// account and is thus not informed about it. This makes for a nice
-// decomposition of the decision logic.
-//
-// A given transition mutator only affects its own variation; other variations
-// stay unchanged along the dependency edges.
-//
-// Soong makes sure that all modules are created in the desired variations and
-// that dependency edges are set up correctly. This ensures that "missing
-// variation" errors do not happen and allows for more flexible changes in the
-// value of the variation among dependency edges (as oppposed to bottom-up
-// mutators where if module A in variation X depends on module B and module B
-// has that variation X, A must depend on variation X of B)
-//
-// The limited power of the context objects passed to individual mutators
-// methods also makes it more difficult to shoot oneself in the foot. Complete
-// safety is not guaranteed because no one prevents individual transition
-// mutators from mutating modules in illegal ways and for e.g. Split() or
-// Mutate() to run their own visitations of the transitive dependency of the
-// module and both of these are bad ideas, but it's better than no guardrails at
-// all.
-//
-// This model is pretty close to Bazel's configuration transitions. The mapping
-// between concepts in Soong and Bazel is as follows:
-//   - Module == configured target
-//   - Variant == configuration
-//   - Variation name == configuration flag
-//   - Variation == configuration flag value
-//   - Outgoing transition == attribute transition
-//   - Incoming transition == rule transition
-//
-// The Split() method does not have a Bazel equivalent and Bazel split
-// transitions do not have a Soong equivalent.
-//
-// Mutate() does not make sense in Bazel due to the different models of the
-// two systems: when creating new variations, Soong clones the old module and
-// thus some way is needed to change it state whereas Bazel creates each
-// configuration of a given configured target anew.
-type TransitionMutator interface {
-	// Split returns the set of variations that should be created for a module no
-	// matter who depends on it. Used when Make depends on a particular variation
-	// or when the module knows its variations just based on information given to
-	// it in the Blueprint file. This method should not mutate the module it is
-	// called on.
-	Split(ctx BaseModuleContext) []string
-
-	// OutgoingTransition is called on a module to determine which variation it wants
-	// from its direct dependencies. The dependency itself can override this decision.
-	// This method should not mutate the module itself.
-	OutgoingTransition(ctx OutgoingTransitionContext, sourceVariation string) string
-
-	// IncomingTransition is called on a module to determine which variation it should
-	// be in based on the variation modules that depend on it want. This gives the module
-	// a final say about its own variations. This method should not mutate the module
-	// itself.
-	IncomingTransition(ctx IncomingTransitionContext, incomingVariation string) string
-
-	// Mutate is called after a module was split into multiple variations on each variation.
-	// It should not split the module any further but adding new dependencies is
-	// fine. Unlike all the other methods on TransitionMutator, this method is
-	// allowed to mutate the module.
-	Mutate(ctx BottomUpMutatorContext, variation string)
-}
-
-type androidTransitionMutator struct {
-	finalPhase bool
-	mutator    TransitionMutator
-	name       string
-}
-
-func (a *androidTransitionMutator) Split(ctx blueprint.BaseModuleContext) []string {
-	if a.finalPhase {
-		panic("TransitionMutator not allowed in FinalDepsMutators")
+func (x *registerMutatorsContext) Transition(name string, m VariationTransitionMutator) TransitionMutatorHandle {
+	atm := &androidTransitionMutatorAdapter{
+		finalPhase: x.finalPhase,
+		mutator:    variationTransitionMutatorAdapter{m},
+		name:       name,
 	}
-	if m, ok := ctx.Module().(Module); ok {
-		moduleContext := m.base().baseModuleContextFactory(ctx)
-		return a.mutator.Split(&moduleContext)
-	} else {
-		return []string{""}
+	mutator := &mutator{
+		name:              name,
+		transitionMutator: atm,
 	}
+	x.mutators = append(x.mutators, mutator)
+	return mutator
 }
 
-type outgoingTransitionContextImpl struct {
-	archModuleContext
-	bp blueprint.OutgoingTransitionContext
-}
-
-func (c *outgoingTransitionContextImpl) Module() Module {
-	return c.bp.Module().(Module)
-}
-
-func (c *outgoingTransitionContextImpl) DepTag() blueprint.DependencyTag {
-	return c.bp.DepTag()
-}
-
-func (c *outgoingTransitionContextImpl) Config() Config {
-	return c.bp.Config().(Config)
-}
-
-func (c *outgoingTransitionContextImpl) DeviceConfig() DeviceConfig {
-	return DeviceConfig{c.bp.Config().(Config).deviceConfig}
-}
-
-func (c *outgoingTransitionContextImpl) provider(provider blueprint.AnyProviderKey) (any, bool) {
-	return c.bp.Provider(provider)
-}
-
-func (a *androidTransitionMutator) OutgoingTransition(bpctx blueprint.OutgoingTransitionContext, sourceVariation string) string {
-	if m, ok := bpctx.Module().(Module); ok {
-		ctx := outgoingTransitionContextPool.Get().(*outgoingTransitionContextImpl)
-		defer outgoingTransitionContextPool.Put(ctx)
-		*ctx = outgoingTransitionContextImpl{
-			archModuleContext: m.base().archModuleContextFactory(bpctx),
-			bp:                bpctx,
-		}
-		return a.mutator.OutgoingTransition(ctx, sourceVariation)
-	} else {
-		return ""
-	}
-}
-
-type incomingTransitionContextImpl struct {
-	archModuleContext
-	bp blueprint.IncomingTransitionContext
-}
-
-func (c *incomingTransitionContextImpl) Module() Module {
-	return c.bp.Module().(Module)
-}
-
-func (c *incomingTransitionContextImpl) Config() Config {
-	return c.bp.Config().(Config)
-}
-
-func (c *incomingTransitionContextImpl) DeviceConfig() DeviceConfig {
-	return DeviceConfig{c.bp.Config().(Config).deviceConfig}
-}
-
-func (c *incomingTransitionContextImpl) IsAddingDependency() bool {
-	return c.bp.IsAddingDependency()
-}
-
-func (c *incomingTransitionContextImpl) provider(provider blueprint.AnyProviderKey) (any, bool) {
-	return c.bp.Provider(provider)
-}
-
-func (c *incomingTransitionContextImpl) ModuleErrorf(fmt string, args ...interface{}) {
-	c.bp.ModuleErrorf(fmt, args)
-}
-
-func (c *incomingTransitionContextImpl) PropertyErrorf(property, fmt string, args ...interface{}) {
-	c.bp.PropertyErrorf(property, fmt, args)
-}
-
-func (a *androidTransitionMutator) IncomingTransition(bpctx blueprint.IncomingTransitionContext, incomingVariation string) string {
-	if m, ok := bpctx.Module().(Module); ok {
-		ctx := incomingTransitionContextPool.Get().(*incomingTransitionContextImpl)
-		defer incomingTransitionContextPool.Put(ctx)
-		*ctx = incomingTransitionContextImpl{
-			archModuleContext: m.base().archModuleContextFactory(bpctx),
-			bp:                bpctx,
-		}
-		return a.mutator.IncomingTransition(ctx, incomingVariation)
-	} else {
-		return ""
-	}
-}
-
-func (a *androidTransitionMutator) Mutate(ctx blueprint.BottomUpMutatorContext, variation string) {
-	if am, ok := ctx.Module().(Module); ok {
-		if variation != "" {
-			// TODO: this should really be checking whether the TransitionMutator affected this module, not
-			//  the empty variant, but TransitionMutator has no concept of skipping a module.
-			base := am.base()
-			base.commonProperties.DebugMutators = append(base.commonProperties.DebugMutators, a.name)
-			base.commonProperties.DebugVariations = append(base.commonProperties.DebugVariations, variation)
-		}
-
-		mctx := bottomUpMutatorContextFactory(ctx, am, a.finalPhase)
-		defer bottomUpMutatorContextPool.Put(mctx)
-		a.mutator.Mutate(mctx, variation)
-	}
-}
-
-func (x *registerMutatorsContext) Transition(name string, m TransitionMutator) TransitionMutatorHandle {
-	atm := &androidTransitionMutator{
+func (x *registerMutatorsContext) InfoBasedTransition(name string, m androidTransitionMutator) TransitionMutatorHandle {
+	atm := &androidTransitionMutatorAdapter{
 		finalPhase: x.finalPhase,
 		mutator:    m,
 		name:       name,
@@ -597,24 +348,6 @@ func (x *registerMutatorsContext) mutatorName(name string) string {
 	return name
 }
 
-func (x *registerMutatorsContext) TopDown(name string, m TopDownMutator) MutatorHandle {
-	f := func(ctx blueprint.TopDownMutatorContext) {
-		if a, ok := ctx.Module().(Module); ok {
-			moduleContext := a.base().baseModuleContextFactory(ctx)
-			actx := topDownMutatorContextPool.Get().(*topDownMutatorContext)
-			defer topDownMutatorContextPool.Put(actx)
-			*actx = topDownMutatorContext{
-				bp:                ctx,
-				baseModuleContext: moduleContext,
-			}
-			m(actx)
-		}
-	}
-	mutator := &mutator{name: x.mutatorName(name), topDownMutator: f}
-	x.mutators = append(x.mutators, mutator)
-	return mutator
-}
-
 func (mutator *mutator) componentName() string {
 	return mutator.name
 }
@@ -624,8 +357,6 @@ func (mutator *mutator) register(ctx *Context) {
 	var handle blueprint.MutatorHandle
 	if mutator.bottomUpMutator != nil {
 		handle = blueprintCtx.RegisterBottomUpMutator(mutator.name, mutator.bottomUpMutator)
-	} else if mutator.topDownMutator != nil {
-		handle = blueprintCtx.RegisterTopDownMutator(mutator.name, mutator.topDownMutator)
 	} else if mutator.transitionMutator != nil {
 		handle := blueprintCtx.RegisterTransitionMutator(mutator.name, mutator.transitionMutator)
 		if mutator.neverFar {
@@ -755,22 +486,22 @@ func registerDepsMutator(ctx RegisterMutatorsContext) {
 	ctx.BottomUp("deps", depsMutator).UsesReverseDependencies()
 }
 
-// android.topDownMutatorContext either has to embed blueprint.TopDownMutatorContext, in which case every method that
+// android.bottomUpMutatorContext either has to embed blueprint.BottomUpMutatorContext, in which case every method that
 // has an overridden version in android.BaseModuleContext has to be manually forwarded to BaseModuleContext to avoid
-// ambiguous method errors, or it has to store a blueprint.TopDownMutatorContext non-embedded, in which case every
+// ambiguous method errors, or it has to store a blueprint.BottomUpMutatorContext non-embedded, in which case every
 // non-overridden method has to be forwarded.  There are fewer non-overridden methods, so use the latter.  The following
-// methods forward to the identical blueprint versions for topDownMutatorContext and bottomUpMutatorContext.
+// methods forward to the identical blueprint versions for bottomUpMutatorContext.
 
 func (b *bottomUpMutatorContext) Rename(name string) {
 	b.bp.Rename(name)
 	b.Module().base().commonProperties.DebugName = name
 }
 
-func (b *bottomUpMutatorContext) createModule(factory blueprint.ModuleFactory, name string, props ...interface{}) blueprint.Module {
-	return b.bp.CreateModule(factory, name, props...)
+func (b *bottomUpMutatorContext) createModule(factory blueprint.ModuleFactory, name string, props ...interface{}) Module {
+	return bpModuleToModule(b.bp.CreateModule(factory, name, props...))
 }
 
-func (b *bottomUpMutatorContext) createModuleInDirectory(factory blueprint.ModuleFactory, name string, _ string, props ...interface{}) blueprint.Module {
+func (b *bottomUpMutatorContext) createModuleInDirectory(factory blueprint.ModuleFactory, name string, _ string, props ...interface{}) Module {
 	panic("createModuleInDirectory is not implemented for bottomUpMutatorContext")
 }
 
@@ -778,11 +509,11 @@ func (b *bottomUpMutatorContext) CreateModule(factory ModuleFactory, props ...in
 	return createModule(b, factory, "_bottomUpMutatorModule", doesNotSpecifyDirectory(), props...)
 }
 
-func (b *bottomUpMutatorContext) AddDependency(module blueprint.Module, tag blueprint.DependencyTag, name ...string) []blueprint.Module {
+func (b *bottomUpMutatorContext) AddDependency(module blueprint.Module, tag blueprint.DependencyTag, name ...string) []Module {
 	if b.baseModuleContext.checkedMissingDeps() {
 		panic("Adding deps not allowed after checking for missing deps")
 	}
-	return b.bp.AddDependency(module, tag, name...)
+	return bpModulesToModules(b.bp.AddDependency(module, tag, name...))
 }
 
 func (b *bottomUpMutatorContext) AddReverseDependency(module blueprint.Module, tag blueprint.DependencyTag, name string) {
@@ -800,20 +531,20 @@ func (b *bottomUpMutatorContext) AddReverseVariationDependency(variations []blue
 }
 
 func (b *bottomUpMutatorContext) AddVariationDependencies(variations []blueprint.Variation, tag blueprint.DependencyTag,
-	names ...string) []blueprint.Module {
+	names ...string) []Module {
 	if b.baseModuleContext.checkedMissingDeps() {
 		panic("Adding deps not allowed after checking for missing deps")
 	}
-	return b.bp.AddVariationDependencies(variations, tag, names...)
+	return bpModulesToModules(b.bp.AddVariationDependencies(variations, tag, names...))
 }
 
 func (b *bottomUpMutatorContext) AddFarVariationDependencies(variations []blueprint.Variation,
-	tag blueprint.DependencyTag, names ...string) []blueprint.Module {
+	tag blueprint.DependencyTag, names ...string) []Module {
 	if b.baseModuleContext.checkedMissingDeps() {
 		panic("Adding deps not allowed after checking for missing deps")
 	}
 
-	return b.bp.AddFarVariationDependencies(variations, tag, names...)
+	return bpModulesToModules(b.bp.AddFarVariationDependencies(variations, tag, names...))
 }
 
 func (b *bottomUpMutatorContext) ReplaceDependencies(name string) {
@@ -828,4 +559,19 @@ func (b *bottomUpMutatorContext) ReplaceDependenciesIf(name string, predicate bl
 		panic("Adding deps not allowed after checking for missing deps")
 	}
 	b.bp.ReplaceDependenciesIf(name, predicate)
+}
+
+func bpModulesToModules(bpModules []blueprint.Module) []Module {
+	modules := make([]Module, len(bpModules))
+	for i, bpModule := range bpModules {
+		modules[i] = bpModuleToModule(bpModule)
+	}
+	return modules
+}
+
+func bpModuleToModule(bpModule blueprint.Module) Module {
+	if bpModule != nil {
+		return bpModule.(Module)
+	}
+	return nil
 }

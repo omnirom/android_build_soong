@@ -14,6 +14,14 @@
 
 package android
 
+import "github.com/google/blueprint"
+
+type LicenseKindInfo struct {
+	Conditions []string
+}
+
+var LicenseKindInfoProvider = blueprint.NewProvider[LicenseKindInfo]()
+
 func init() {
 	RegisterLicenseKindBuildComponents(InitRegistrationContext)
 }
@@ -43,8 +51,10 @@ func (m *licenseKindModule) DepsMutator(ctx BottomUpMutatorContext) {
 	// Nothing to do.
 }
 
-func (m *licenseKindModule) GenerateAndroidBuildActions(ModuleContext) {
-	// Nothing to do.
+func (m *licenseKindModule) GenerateAndroidBuildActions(ctx ModuleContext) {
+	SetProvider(ctx, LicenseKindInfoProvider, LicenseKindInfo{
+		Conditions: m.properties.Conditions,
+	})
 }
 
 func LicenseKindFactory() Module {

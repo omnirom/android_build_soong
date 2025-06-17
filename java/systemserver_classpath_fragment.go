@@ -58,6 +58,10 @@ func platformSystemServerClasspathFactory() android.Module {
 	return m
 }
 
+func (m *platformSystemServerClasspathModule) UniqueApexVariations() bool {
+	return true
+}
+
 func (p *platformSystemServerClasspathModule) AndroidMkEntries() (entries []android.AndroidMkEntries) {
 	return p.classpathFragmentBase().androidMkEntries()
 }
@@ -91,8 +95,10 @@ type SystemServerClasspathModule struct {
 	properties systemServerClasspathFragmentProperties
 }
 
-func (s *SystemServerClasspathModule) ShouldSupportSdkVersion(ctx android.BaseModuleContext, sdkVersion android.ApiLevel) error {
-	return nil
+var _ android.ApexModule = (*SystemServerClasspathModule)(nil)
+
+func (m *SystemServerClasspathModule) MinSdkVersionSupported(ctx android.BaseModuleContext) android.ApiLevel {
+	return android.MinApiLevel
 }
 
 type systemServerClasspathFragmentProperties struct {
@@ -114,6 +120,10 @@ func systemServerClasspathFactory() android.Module {
 	initClasspathFragment(m, SYSTEMSERVERCLASSPATH)
 	android.InitAndroidArchModule(m, android.DeviceSupported, android.MultilibCommon)
 	return m
+}
+
+func (m *SystemServerClasspathModule) UniqueApexVariations() bool {
+	return true
 }
 
 func (s *SystemServerClasspathModule) GenerateAndroidBuildActions(ctx android.ModuleContext) {

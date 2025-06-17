@@ -41,13 +41,13 @@ func TestRustProtobuf3(t *testing.T) {
 		}
 	`)
 	// Check that libprotobuf is added as a dependency.
-	librust_proto := ctx.ModuleForTests("librust_proto", "android_arm64_armv8-a_dylib").Module().(*Module)
+	librust_proto := ctx.ModuleForTests(t, "librust_proto", "android_arm64_armv8-a_dylib").Module().(*Module)
 	if !android.InList("libprotobuf", librust_proto.Properties.AndroidMkDylibs) {
 		t.Errorf("libprotobuf dependency missing for rust_protobuf (dependency missing from AndroidMkDylibs)")
 	}
 
 	// Make sure the correct plugin is being used.
-	librust_proto_out := ctx.ModuleForTests("librust_proto", "android_arm64_armv8-a_source").Output("buf.rs")
+	librust_proto_out := ctx.ModuleForTests(t, "librust_proto", "android_arm64_armv8-a_source").Output("buf.rs")
 	cmd := librust_proto_out.RuleParams.Command
 	if w := "protoc-gen-rust"; !strings.Contains(cmd, w) {
 		t.Errorf("expected %q in %q", w, cmd)
@@ -62,7 +62,7 @@ func TestRustProtobuf3(t *testing.T) {
 	}
 
 	// Check proto.rs, the second protobuf, is listed as an output
-	librust_proto_outputs := ctx.ModuleForTests("librust_proto", "android_arm64_armv8-a_source").AllOutputs()
+	librust_proto_outputs := ctx.ModuleForTests(t, "librust_proto", "android_arm64_armv8-a_source").AllOutputs()
 	if android.InList("proto.rs", librust_proto_outputs) {
 		t.Errorf("rust_protobuf is not producing multiple outputs; expected 'proto.rs' in list, got: %#v ",
 			librust_proto_outputs)
@@ -92,7 +92,7 @@ func TestRustProtobufInclude(t *testing.T) {
 		}
 	`)
 	// Check that librust_exported_proto is added as additional crate to generate source.
-	librust_proto := ctx.ModuleForTests("librust_proto", "android_arm64_armv8-a_source").Module().(*Module).sourceProvider.(*protobufDecorator)
+	librust_proto := ctx.ModuleForTests(t, "librust_proto", "android_arm64_armv8-a_source").Module().(*Module).sourceProvider.(*protobufDecorator)
 	if !android.InList("rust_exported_proto", librust_proto.additionalCrates) {
 		t.Errorf("librust_proto should have librust_exported_proto included as an additional crate for generated source, instead got: %#v", librust_proto.additionalCrates)
 	}
@@ -111,7 +111,7 @@ func TestRustProtobufInclude(t *testing.T) {
 	}
 
 	// Check librust_proto args includes -Iproto
-	librust_proto_rule := ctx.ModuleForTests("librust_proto", "android_arm64_armv8-a_source").Output("proto.rs")
+	librust_proto_rule := ctx.ModuleForTests(t, "librust_proto", "android_arm64_armv8-a_source").Output("proto.rs")
 	cmd := librust_proto_rule.RuleParams.Command
 	if w := "-Iproto"; !strings.Contains(cmd, w) {
 		t.Errorf("expected %q in %q", w, cmd)
@@ -131,7 +131,7 @@ func TestRustGrpc(t *testing.T) {
 	`)
 
 	// Check that libprotobuf is added as a dependency.
-	librust_grpcio_module := ctx.ModuleForTests("librust_grpcio", "android_arm64_armv8-a_dylib").Module().(*Module)
+	librust_grpcio_module := ctx.ModuleForTests(t, "librust_grpcio", "android_arm64_armv8-a_dylib").Module().(*Module)
 
 	// Check that libgrpcio is added as a dependency.
 	if !android.InList("libgrpcio", librust_grpcio_module.Properties.AndroidMkDylibs) {
@@ -144,7 +144,7 @@ func TestRustGrpc(t *testing.T) {
 	}
 
 	// Make sure the correct plugin is being used.
-	librust_grpcio_out := ctx.ModuleForTests("librust_grpcio", "android_arm64_armv8-a_source").Output("foo_grpc.rs")
+	librust_grpcio_out := ctx.ModuleForTests(t, "librust_grpcio", "android_arm64_armv8-a_source").Output("foo_grpc.rs")
 	cmd := librust_grpcio_out.RuleParams.Command
 	if w := "protoc-gen-grpc"; !strings.Contains(cmd, w) {
 		t.Errorf("expected %q in %q", w, cmd)
@@ -156,7 +156,7 @@ func TestRustGrpc(t *testing.T) {
 	}
 
 	// Check proto.rs, the second protobuf, is listed as an output
-	librust_grpcio_outputs := ctx.ModuleForTests("librust_grpcio", "android_arm64_armv8-a_source").AllOutputs()
+	librust_grpcio_outputs := ctx.ModuleForTests(t, "librust_grpcio", "android_arm64_armv8-a_source").AllOutputs()
 	if android.InList("proto_grpc.rs", librust_grpcio_outputs) {
 		t.Errorf("rust_protobuf is not producing multiple outputs; expected 'proto_grpc.rs' in list, got: %#v ",
 			librust_grpcio_outputs)

@@ -76,9 +76,7 @@ func (l *linkerConfig) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	input := android.PathForModuleSrc(ctx, android.String(l.properties.Src))
 	output := android.PathForModuleOut(ctx, "linker.config.pb").OutputPath
 
-	builder := android.NewRuleBuilder(pctx, ctx)
-	BuildLinkerConfig(ctx, builder, android.Paths{input}, nil, nil, output)
-	builder.Build("conv_linker_config", "Generate linker config protobuf "+output.String())
+	BuildLinkerConfig(ctx, android.Paths{input}, nil, nil, output)
 
 	l.outputFilePath = output
 	l.installDirPath = android.PathForModuleInstall(ctx, "etc")
@@ -88,12 +86,19 @@ func (l *linkerConfig) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	ctx.InstallFile(l.installDirPath, l.outputFilePath.Base(), l.outputFilePath)
 
 	ctx.SetOutputFiles(android.Paths{l.outputFilePath}, "")
+
+	etc.SetCommonPrebuiltEtcInfo(ctx, l)
 }
 
-func BuildLinkerConfig(ctx android.ModuleContext, builder *android.RuleBuilder,
-	inputs android.Paths, provideModules []android.Module, requireModules []android.Module, output android.OutputPath) {
-
+func BuildLinkerConfig(
+	ctx android.ModuleContext,
+	inputs android.Paths,
+	provideModules []android.ModuleProxy,
+	requireModules []android.ModuleProxy,
+	output android.WritablePath,
+) {
 	// First, convert the input json to protobuf format
+	builder := android.NewRuleBuilder(pctx, ctx)
 	interimOutput := android.PathForModuleOut(ctx, "temp.pb")
 	cmd := builder.Command().
 		BuiltTool("conv_linker_config").
@@ -107,9 +112,10 @@ func BuildLinkerConfig(ctx android.ModuleContext, builder *android.RuleBuilder,
 	// Secondly, if there's provideLibs gathered from provideModules, append them
 	var provideLibs []string
 	for _, m := range provideModules {
-		if c, ok := m.(*cc.Module); ok && (cc.IsStubTarget(c) || c.HasLlndkStubs()) {
+		ccInfo, ok := android.OtherModuleProvider(ctx, m, cc.CcInfoProvider)
+		if ok && (cc.IsStubTarget(android.OtherModuleProviderOrDefault(ctx, m, cc.LinkableInfoProvider)) || ccInfo.HasLlndkStubs) {
 			for _, ps := range android.OtherModuleProviderOrDefault(
-				ctx, c, android.InstallFilesProvider).PackagingSpecs {
+				ctx, m, android.InstallFilesProvider).PackagingSpecs {
 				provideLibs = append(provideLibs, ps.FileName())
 			}
 		}
@@ -119,8 +125,15 @@ func BuildLinkerConfig(ctx android.ModuleContext, builder *android.RuleBuilder,
 
 	var requireLibs []string
 	for _, m := range requireModules {
-		if c, ok := m.(*cc.Module); ok && c.HasStubsVariants() && !c.Host() {
-			requireLibs = append(requireLibs, c.ImplementationModuleName(ctx)+".so")
+		if _, ok := android.OtherModuleProvider(ctx, m, cc.CcInfoProvider); ok {
+			if android.OtherModuleProviderOrDefault(ctx, m, cc.LinkableInfoProvider).HasStubsVariants &&
+				!android.OtherModulePointerProviderOrDefault(ctx, m, android.CommonModuleInfoProvider).Host {
+				name := ctx.OtherModuleName(m)
+				if ccInfo, ok := android.OtherModuleProvider(ctx, m, cc.CcInfoProvider); ok && ccInfo.LinkerInfo != nil && ccInfo.LinkerInfo.ImplementationModuleName != nil {
+					name = *ccInfo.LinkerInfo.ImplementationModuleName
+				}
+				requireLibs = append(requireLibs, name+".so")
+			}
 		}
 	}
 
@@ -157,6 +170,7 @@ func BuildLinkerConfig(ctx android.ModuleContext, builder *android.RuleBuilder,
 
 	builder.Temporary(interimOutput)
 	builder.DeleteTemporaryFiles()
+	builder.Build("conv_linker_config_"+output.String(), "Generate linker config protobuf "+output.String())
 }
 
 // linker_config generates protobuf file from json file. This protobuf file will be used from

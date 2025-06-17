@@ -18,9 +18,11 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"github.com/google/blueprint"
 )
 
-func modulesOutputDirs(ctx BuilderContext, modules ...Module) []string {
+func modulesOutputDirs(ctx BuilderContext, modules ...ModuleProxy) []string {
 	dirs := make([]string, 0, len(modules))
 	for _, module := range modules {
 		paths, err := outputFilesForModule(ctx, module, "")
@@ -41,12 +43,12 @@ type BuilderAndOtherModuleProviderContext interface {
 	OtherModuleProviderContext
 }
 
-func modulesLicenseMetadata(ctx OtherModuleProviderContext, modules ...Module) Paths {
+func modulesLicenseMetadata(ctx OtherModuleProviderContext, modules ...ModuleProxy) Paths {
 	result := make(Paths, 0, len(modules))
 	mctx, isMctx := ctx.(ModuleContext)
 	for _, module := range modules {
 		var mf Path
-		if isMctx && mctx.Module() == module {
+		if isMctx && EqualModules(mctx.Module(), module) {
 			mf = mctx.LicenseMetadataFile()
 		} else {
 			mf = OtherModuleProviderOrDefault(ctx, module, InstallFilesProvider).LicenseMetadataFile
@@ -61,12 +63,12 @@ func modulesLicenseMetadata(ctx OtherModuleProviderContext, modules ...Module) P
 // buildNoticeOutputFromLicenseMetadata writes out a notice file.
 func buildNoticeOutputFromLicenseMetadata(
 	ctx BuilderAndOtherModuleProviderContext, tool, ruleName string, outputFile WritablePath,
-	libraryName string, stripPrefix []string, modules ...Module) {
+	libraryName string, stripPrefix []string, modules ...ModuleProxy) {
 	depsFile := outputFile.ReplaceExtension(ctx, strings.TrimPrefix(outputFile.Ext()+".d", "."))
 	rule := NewRuleBuilder(pctx, ctx)
 	if len(modules) == 0 {
 		if mctx, ok := ctx.(ModuleContext); ok {
-			modules = []Module{mctx.Module()}
+			modules = []ModuleProxy{{blueprint.CreateModuleProxy(mctx.Module())}}
 		} else {
 			panic(fmt.Errorf("%s %q needs a module to generate the notice for", ruleName, libraryName))
 		}
@@ -97,7 +99,7 @@ func buildNoticeOutputFromLicenseMetadata(
 // current context module if none given.
 func BuildNoticeTextOutputFromLicenseMetadata(
 	ctx BuilderAndOtherModuleProviderContext, outputFile WritablePath, ruleName, libraryName string,
-	stripPrefix []string, modules ...Module) {
+	stripPrefix []string, modules ...ModuleProxy) {
 	buildNoticeOutputFromLicenseMetadata(ctx, "textnotice", "text_notice_"+ruleName,
 		outputFile, libraryName, stripPrefix, modules...)
 }
@@ -107,7 +109,7 @@ func BuildNoticeTextOutputFromLicenseMetadata(
 // current context module if none given.
 func BuildNoticeHtmlOutputFromLicenseMetadata(
 	ctx BuilderAndOtherModuleProviderContext, outputFile WritablePath, ruleName, libraryName string,
-	stripPrefix []string, modules ...Module) {
+	stripPrefix []string, modules ...ModuleProxy) {
 	buildNoticeOutputFromLicenseMetadata(ctx, "htmlnotice", "html_notice_"+ruleName,
 		outputFile, libraryName, stripPrefix, modules...)
 }
@@ -117,7 +119,7 @@ func BuildNoticeHtmlOutputFromLicenseMetadata(
 // current context module if none given.
 func BuildNoticeXmlOutputFromLicenseMetadata(
 	ctx BuilderAndOtherModuleProviderContext, outputFile WritablePath, ruleName, libraryName string,
-	stripPrefix []string, modules ...Module) {
+	stripPrefix []string, modules ...ModuleProxy) {
 	buildNoticeOutputFromLicenseMetadata(ctx, "xmlnotice", "xml_notice_"+ruleName,
 		outputFile, libraryName, stripPrefix, modules...)
 }

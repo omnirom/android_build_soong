@@ -32,7 +32,6 @@ func TestCSuiteConfig(t *testing.T) {
 	if len(variants) > 1 {
 		t.Errorf("expected 1, got %d", len(variants))
 	}
-	outputFilename := result.ModuleForTests(
-		"plain", variants[0]).Module().(*CSuiteConfig).OutputFilePath.Base()
+	outputFilename := result.ModuleForTests(t, "plain", variants[0]).Module().(*CSuiteConfig).OutputFilePath.Base()
 	AssertStringEquals(t, "output file name", "plain", outputFilename)
 }

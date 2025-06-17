@@ -197,6 +197,8 @@ func getGlobPathNameFromPrimaryBuilderFactory(config Config, pb PrimaryBuilderFa
 func (pb PrimaryBuilderFactory) primaryBuilderInvocation(config Config) bootstrap.PrimaryBuilderInvocation {
 	commonArgs := make([]string, 0, 0)
 
+	commonArgs = append(commonArgs, "--kati_suffix", config.KatiSuffix())
+
 	if !pb.config.skipSoongTests {
 		commonArgs = append(commonArgs, "-t")
 	}
@@ -501,7 +503,7 @@ func fixOutDirSymlinks(ctx Context, config Config, outDir string) error {
 	tf := filepath.Join(outDir, ".top")
 	defer func() {
 		if err := os.WriteFile(tf, []byte(cwd), 0644); err != nil {
-			fmt.Fprintf(os.Stderr, fmt.Sprintf("Unable to log CWD: %v", err))
+			fmt.Fprintf(os.Stderr, "Unable to log CWD: %v", err)
 		}
 	}()
 

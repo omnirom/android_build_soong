@@ -81,7 +81,7 @@ func testCCCodegenModeHelper(t *testing.T, bpMode string, ruleMode string) {
 			}
 		`, bpMode))
 
-	module := result.ModuleForTests("my_cc_aconfig_library", "android_arm64_armv8-a_shared")
+	module := result.ModuleForTests(t, "my_cc_aconfig_library", "android_arm64_armv8-a_shared")
 	rule := module.Rule("cc_aconfig_library")
 	android.AssertStringEquals(t, "rule must contain test mode", rule.Args["mode"], ruleMode)
 }
@@ -209,7 +209,7 @@ func TestAndroidMkCcLibrary(t *testing.T) {
 		cc.PrepareForTestWithCcDefaultModules).
 		ExtendWithErrorHandler(android.FixtureExpectsNoErrors).RunTestWithBp(t, bp)
 
-	module := result.ModuleForTests("my_cc_library", "android_vendor_arm64_armv8-a_shared").Module()
+	module := result.ModuleForTests(t, "my_cc_library", "android_vendor_arm64_armv8-a_shared").Module()
 
 	entry := android.AndroidMkInfoForTest(t, result.TestContext, module).PrimaryInfo
 
@@ -254,13 +254,13 @@ func TestForceReadOnly(t *testing.T) {
 			}
 		`))
 
-	module := result.ModuleForTests("my_cc_aconfig_library", "android_arm64_armv8-a_shared").Module()
-	dependOnBaseLib := false
+	module := result.ModuleForTests(t, "my_cc_aconfig_library", "android_arm64_armv8-a_shared").Module()
+	dependOnReadLib := false
 	result.VisitDirectDeps(module, func(dep blueprint.Module) {
-		if dep.Name() == baseLibDep {
-			dependOnBaseLib = true
+		if dep.Name() == libAconfigStorageReadApiCcDep {
+			dependOnReadLib = true
 		}
 	})
-	android.AssertBoolEquals(t, "should not have dependency on server_configuriable_flags",
-		dependOnBaseLib, false)
+	android.AssertBoolEquals(t, "should not have dependency on libaconfig_storage_read_api_cc",
+		dependOnReadLib, false)
 }

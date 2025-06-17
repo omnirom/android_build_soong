@@ -219,6 +219,52 @@ func installCleanIfNecessary(ctx Context, config Config) {
 	writeConfig()
 }
 
+// When SOONG_USE_PARTIAL_COMPILE transitions from on to off, we need to remove
+// all files which were potentially built with partial compile, so that they
+// get rebuilt with that turned off.
+func partialCompileCleanIfNecessary(ctx Context, config Config) {
+	configFile := config.DevicePreviousUsePartialCompile()
+	currentValue, _ := config.Environment().Get("SOONG_USE_PARTIAL_COMPILE")
+
+	ensureDirectoriesExist(ctx, filepath.Dir(configFile))
+
+	writeValue := func() {
+		err := ioutil.WriteFile(configFile, []byte(currentValue), 0666) // a+rw
+		if err != nil {
+			ctx.Fatalln("Failed to write use partial compile config:", err)
+		}
+	}
+
+	previousValueBytes, err := ioutil.ReadFile(configFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// Just write the new config file, no old config file to worry about.
+			writeValue()
+			return
+		} else {
+			ctx.Fatalln("Failed to read previous use partial compile config:", err)
+		}
+	}
+
+	previousValue := string(previousValueBytes)
+	switch previousValue {
+	case currentValue:
+		// Same value as before - nothing left to do here.
+		return
+	case "true":
+		// Transitioning from on to off.  Build (phony) target: partialcompileclean.
+		ctx.BeginTrace(metrics.PrimaryNinja, "partialcompileclean")
+		defer ctx.EndTrace()
+
+		ctx.Printf("SOONG_USE_PARTIAL_COMPILE turned off, forcing partialcompileclean\n")
+
+		runNinja(ctx, config, []string{"partialcompileclean"})
+	default:
+		// Transitioning from off to on.  Nothing to do in this case.
+	}
+	writeValue()
+}
+
 // cleanOldFiles takes an input file (with all paths relative to basePath), and removes files from
 // the filesystem if they were removed from the input file since the last execution.
 func cleanOldFiles(ctx Context, basePath, newFile string) {

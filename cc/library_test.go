@@ -30,8 +30,8 @@ func TestLibraryReuse(t *testing.T) {
 			srcs: ["foo.c", "baz.o"],
 		}`)
 
-		libfooShared := ctx.ModuleForTests("libfoo", "android_arm_armv7-a-neon_shared").Rule("ld")
-		libfooStatic := ctx.ModuleForTests("libfoo", "android_arm_armv7-a-neon_static").Output("libfoo.a")
+		libfooShared := ctx.ModuleForTests(t, "libfoo", "android_arm_armv7-a-neon_shared").Rule("ld")
+		libfooStatic := ctx.ModuleForTests(t, "libfoo", "android_arm_armv7-a-neon_static").Output("libfoo.a")
 
 		if len(libfooShared.Inputs) != 2 {
 			t.Fatalf("unexpected inputs to libfoo shared: %#v", libfooShared.Inputs.Strings())
@@ -59,8 +59,8 @@ func TestLibraryReuse(t *testing.T) {
 			},
 		}`)
 
-		libfooShared := ctx.ModuleForTests("libfoo", "android_arm_armv7-a-neon_shared").Rule("ld")
-		libfooStatic := ctx.ModuleForTests("libfoo", "android_arm_armv7-a-neon_static").Output("libfoo.a")
+		libfooShared := ctx.ModuleForTests(t, "libfoo", "android_arm_armv7-a-neon_shared").Rule("ld")
+		libfooStatic := ctx.ModuleForTests(t, "libfoo", "android_arm_armv7-a-neon_static").Output("libfoo.a")
 
 		if len(libfooShared.Inputs) != 1 {
 			t.Fatalf("unexpected inputs to libfoo shared: %#v", libfooShared.Inputs.Strings())
@@ -85,8 +85,8 @@ func TestLibraryReuse(t *testing.T) {
 			},
 		}`)
 
-		libfooShared := ctx.ModuleForTests("libfoo", "android_arm_armv7-a-neon_shared").Rule("ld")
-		libfooStatic := ctx.ModuleForTests("libfoo", "android_arm_armv7-a-neon_static").Output("libfoo.a")
+		libfooShared := ctx.ModuleForTests(t, "libfoo", "android_arm_armv7-a-neon_shared").Rule("ld")
+		libfooStatic := ctx.ModuleForTests(t, "libfoo", "android_arm_armv7-a-neon_static").Output("libfoo.a")
 
 		if len(libfooShared.Inputs) != 2 {
 			t.Fatalf("unexpected inputs to libfoo shared: %#v", libfooShared.Inputs.Strings())
@@ -111,8 +111,8 @@ func TestLibraryReuse(t *testing.T) {
 			},
 		}`)
 
-		libfooShared := ctx.ModuleForTests("libfoo", "android_arm_armv7-a-neon_shared").Rule("ld")
-		libfooStatic := ctx.ModuleForTests("libfoo", "android_arm_armv7-a-neon_static").Output("libfoo.a")
+		libfooShared := ctx.ModuleForTests(t, "libfoo", "android_arm_armv7-a-neon_shared").Rule("ld")
+		libfooStatic := ctx.ModuleForTests(t, "libfoo", "android_arm_armv7-a-neon_static").Output("libfoo.a")
 
 		if len(libfooShared.Inputs) != 1 {
 			t.Fatalf("unexpected inputs to libfoo shared: %#v", libfooShared.Inputs.Strings())
@@ -137,8 +137,8 @@ func TestLibraryReuse(t *testing.T) {
 			},
 		}`)
 
-		libfooShared := ctx.ModuleForTests("libfoo", "android_arm_armv7-a-neon_shared").Rule("ld")
-		libfooStatic := ctx.ModuleForTests("libfoo", "android_arm_armv7-a-neon_static").Output("libfoo.a")
+		libfooShared := ctx.ModuleForTests(t, "libfoo", "android_arm_armv7-a-neon_shared").Rule("ld")
+		libfooStatic := ctx.ModuleForTests(t, "libfoo", "android_arm_armv7-a-neon_static").Output("libfoo.a")
 
 		if len(libfooShared.Inputs) != 1 {
 			t.Fatalf("unexpected inputs to libfoo shared: %#v", libfooShared.Inputs.Strings())
@@ -168,8 +168,8 @@ func TestLibraryReuse(t *testing.T) {
 			},
 		}`)
 
-		libfooShared := ctx.ModuleForTests("libfoo", "android_arm_armv7-a-neon_shared").Rule("ld")
-		libfooStatic := ctx.ModuleForTests("libfoo", "android_arm_armv7-a-neon_static").Output("libfoo.a")
+		libfooShared := ctx.ModuleForTests(t, "libfoo", "android_arm_armv7-a-neon_shared").Rule("ld")
+		libfooStatic := ctx.ModuleForTests(t, "libfoo", "android_arm_armv7-a-neon_static").Output("libfoo.a")
 
 		if len(libfooShared.Inputs) != 3 {
 			t.Fatalf("unexpected inputs to libfoo shared: %#v", libfooShared.Inputs.Strings())
@@ -183,7 +183,7 @@ func TestLibraryReuse(t *testing.T) {
 			t.Errorf("static objects not reused for shared library")
 		}
 
-		libfoo := ctx.ModuleForTests("libfoo", "android_arm_armv7-a-neon_shared").Module().(*Module)
+		libfoo := ctx.ModuleForTests(t, "libfoo", "android_arm_armv7-a-neon_shared").Module().(*Module)
 		if !inList("-DGOOGLE_PROTOBUF_NO_RTTI", libfoo.flags.Local.CFlags) {
 			t.Errorf("missing protobuf cflags")
 		}
@@ -254,7 +254,7 @@ func TestLibraryVersionScript(t *testing.T) {
 			version_script: "foo.map.txt",
 		}`)
 
-	libfoo := result.ModuleForTests("libfoo", "android_arm64_armv8-a_shared").Rule("ld")
+	libfoo := result.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_shared").Rule("ld")
 
 	android.AssertStringListContains(t, "missing dependency on version_script",
 		libfoo.Implicits.Strings(), "foo.map.txt")
@@ -272,7 +272,7 @@ func TestLibraryDynamicList(t *testing.T) {
 			dynamic_list: "foo.dynamic.txt",
 		}`)
 
-	libfoo := result.ModuleForTests("libfoo", "android_arm64_armv8-a_shared").Rule("ld")
+	libfoo := result.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_shared").Rule("ld")
 
 	android.AssertStringListContains(t, "missing dependency on dynamic_list",
 		libfoo.Implicits.Strings(), "foo.dynamic.txt")
@@ -312,14 +312,14 @@ func TestWholeStaticLibPrebuilts(t *testing.T) {
 		}
 	`)
 
-	libdirect := result.ModuleForTests("libdirect", "android_arm64_armv8-a_static").Rule("arWithLibs")
-	libtransitive := result.ModuleForTests("libtransitive", "android_arm64_armv8-a_static").Rule("arWithLibs")
+	libdirect := result.ModuleForTests(t, "libdirect", "android_arm64_armv8-a_static").Rule("arWithLibs")
+	libtransitive := result.ModuleForTests(t, "libtransitive", "android_arm64_armv8-a_static").Rule("arWithLibs")
 
-	libdirectWithSrcs := result.ModuleForTests("libdirect_with_srcs", "android_arm64_armv8-a_static").Rule("arWithLibs")
-	libtransitiveWithSrcs := result.ModuleForTests("libtransitive_with_srcs", "android_arm64_armv8-a_static").Rule("arWithLibs")
+	libdirectWithSrcs := result.ModuleForTests(t, "libdirect_with_srcs", "android_arm64_armv8-a_static").Rule("arWithLibs")
+	libtransitiveWithSrcs := result.ModuleForTests(t, "libtransitive_with_srcs", "android_arm64_armv8-a_static").Rule("arWithLibs")
 
-	barObj := result.ModuleForTests("libdirect_with_srcs", "android_arm64_armv8-a_static").Rule("cc")
-	bazObj := result.ModuleForTests("libtransitive_with_srcs", "android_arm64_armv8-a_static").Rule("cc")
+	barObj := result.ModuleForTests(t, "libdirect_with_srcs", "android_arm64_armv8-a_static").Rule("cc")
+	bazObj := result.ModuleForTests(t, "libtransitive_with_srcs", "android_arm64_armv8-a_static").Rule("cc")
 
 	android.AssertStringListContains(t, "missing dependency on foo.a",
 		libdirect.Inputs.Strings(), "foo.a")

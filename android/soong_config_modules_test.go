@@ -321,10 +321,10 @@ func TestSoongConfigModule(t *testing.T) {
 					FixtureWithRootAndroidBp(bp),
 				).RunTest(t)
 
-				foo := result.ModuleForTests("foo", "").Module().(*soongConfigTestModule)
+				foo := result.ModuleForTests(t, "foo", "").Module().(*soongConfigTestModule)
 				AssertDeepEquals(t, "foo cflags", tc.fooExpectedFlags, foo.props.Cflags)
 
-				fooDefaults := result.ModuleForTests("foo_with_defaults", "").Module().(*soongConfigTestModule)
+				fooDefaults := result.ModuleForTests(t, "foo_with_defaults", "").Module().(*soongConfigTestModule)
 				AssertDeepEquals(t, "foo_with_defaults cflags", tc.fooDefaultsExpectedFlags, fooDefaults.props.Cflags)
 			})
 		}
@@ -499,8 +499,8 @@ func TestSoongConfigModuleSingletonModule(t *testing.T) {
 			).RunTest(t)
 
 			// Make sure that the singleton was created.
-			result.SingletonForTests("test_singleton")
-			m := result.ModuleForTests("wiley", "").module.(*soongConfigTestSingletonModule)
+			result.SingletonForTests(t, "test_singleton")
+			m := result.ModuleForTests(t, "wiley", "").module.(*soongConfigTestSingletonModule)
 			AssertStringEquals(t, "fragments", test.expectedFragments, fmt.Sprintf("%+v", m.props.Fragments))
 		})
 	}

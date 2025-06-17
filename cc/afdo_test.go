@@ -94,9 +94,9 @@ func TestAfdoDeps(t *testing.T) {
 	afdoLtoLdFlag := "-Wl,-plugin-opt,-import-instr-limit=40"
 	noAfdoLtoLdFlag := "-Wl,-plugin-opt,-import-instr-limit=5"
 
-	libTest := result.ModuleForTests("libTest", "android_arm64_armv8-a_shared")
-	libFooAfdoVariant := result.ModuleForTests("libFoo", "android_arm64_armv8-a_static_afdo-libTest")
-	libBarAfdoVariant := result.ModuleForTests("libBar", "android_arm64_armv8-a_static_afdo-libTest")
+	libTest := result.ModuleForTests(t, "libTest", "android_arm64_armv8-a_shared")
+	libFooAfdoVariant := result.ModuleForTests(t, "libFoo", "android_arm64_armv8-a_static_afdo-libTest")
+	libBarAfdoVariant := result.ModuleForTests(t, "libBar", "android_arm64_armv8-a_static_afdo-libTest")
 
 	// Check cFlags of afdo-enabled module and the afdo-variant of its static deps
 	cFlags := libTest.Rule("cc").Args["cFlags"]
@@ -138,8 +138,8 @@ func TestAfdoDeps(t *testing.T) {
 	}
 
 	// Verify non-afdo variant exists and doesn't contain afdo
-	libFoo := result.ModuleForTests("libFoo", "android_arm64_armv8-a_static")
-	libBar := result.ModuleForTests("libBar", "android_arm64_armv8-a_static")
+	libFoo := result.ModuleForTests(t, "libFoo", "android_arm64_armv8-a_static")
+	libBar := result.ModuleForTests(t, "libBar", "android_arm64_armv8-a_static")
 
 	cFlags = libFoo.Rule("cc").Args["cFlags"]
 	if strings.Contains(cFlags, profileSampleCFlag) {
@@ -166,9 +166,9 @@ func TestAfdoDeps(t *testing.T) {
 	}
 
 	// Verify that the arm variant does not have FDO since the fdo_profile module only has a profile for arm64
-	libTest32 := result.ModuleForTests("libTest", "android_arm_armv7-a-neon_shared")
-	libFooAfdoVariant32 := result.ModuleForTests("libFoo", "android_arm_armv7-a-neon_static_afdo-libTest_lto-thin")
-	libBarAfdoVariant32 := result.ModuleForTests("libBar", "android_arm_armv7-a-neon_static_afdo-libTest_lto-thin")
+	libTest32 := result.ModuleForTests(t, "libTest", "android_arm_armv7-a-neon_shared")
+	libFooAfdoVariant32 := result.ModuleForTests(t, "libFoo", "android_arm_armv7-a-neon_static_afdo-libTest_lto-thin")
+	libBarAfdoVariant32 := result.ModuleForTests(t, "libBar", "android_arm_armv7-a-neon_static_afdo-libTest_lto-thin")
 
 	cFlags = libTest32.Rule("cc").Args["cFlags"]
 	if strings.Contains(cFlags, profileSampleCFlag) {
@@ -215,9 +215,9 @@ func TestAfdoDeps(t *testing.T) {
 	}
 
 	// Verify that the host variants don't enable afdo
-	libTestHost := result.ModuleForTests("libTest", result.Config.BuildOSTarget.String()+"_shared")
-	libFooHost := result.ModuleForTests("libFoo", result.Config.BuildOSTarget.String()+"_static_lto-thin")
-	libBarHost := result.ModuleForTests("libBar", result.Config.BuildOSTarget.String()+"_static_lto-thin")
+	libTestHost := result.ModuleForTests(t, "libTest", result.Config.BuildOSTarget.String()+"_shared")
+	libFooHost := result.ModuleForTests(t, "libFoo", result.Config.BuildOSTarget.String()+"_static_lto-thin")
+	libBarHost := result.ModuleForTests(t, "libBar", result.Config.BuildOSTarget.String()+"_static_lto-thin")
 
 	cFlags = libTestHost.Rule("cc").Args["cFlags"]
 	if strings.Contains(cFlags, profileSampleCFlag) {
@@ -301,9 +301,9 @@ func TestAfdoEnabledOnStaticDepNoAfdo(t *testing.T) {
 		}.AddToFixture(),
 	).RunTestWithBp(t, bp)
 
-	libTest := result.ModuleForTests("libTest", "android_arm64_armv8-a_shared").Module()
-	libFoo := result.ModuleForTests("libFoo", "android_arm64_armv8-a_static")
-	libBar := result.ModuleForTests("libBar", "android_arm64_armv8-a_static").Module()
+	libTest := result.ModuleForTests(t, "libTest", "android_arm64_armv8-a_shared").Module()
+	libFoo := result.ModuleForTests(t, "libFoo", "android_arm64_armv8-a_static")
+	libBar := result.ModuleForTests(t, "libBar", "android_arm64_armv8-a_static").Module()
 
 	if !hasDirectDep(result, libTest, libFoo.Module()) {
 		t.Errorf("libTest missing dependency on non-afdo variant of libFoo")
@@ -412,13 +412,13 @@ func TestAfdoEnabledWithMultiArchs(t *testing.T) {
 		}.AddToFixture(),
 	).RunTestWithBp(t, bp)
 
-	fooArm := result.ModuleForTests("foo", "android_arm_armv7-a-neon_shared")
+	fooArm := result.ModuleForTests(t, "foo", "android_arm_armv7-a-neon_shared")
 	fooArmCFlags := fooArm.Rule("cc").Args["cFlags"]
 	if w := "-fprofile-sample-use=afdo_profiles_package/foo_arm.afdo"; !strings.Contains(fooArmCFlags, w) {
 		t.Errorf("Expected 'foo' to enable afdo, but did not find %q in cflags %q", w, fooArmCFlags)
 	}
 
-	fooArm64 := result.ModuleForTests("foo", "android_arm64_armv8-a_shared")
+	fooArm64 := result.ModuleForTests(t, "foo", "android_arm64_armv8-a_shared")
 	fooArm64CFlags := fooArm64.Rule("cc").Args["cFlags"]
 	if w := "-fprofile-sample-use=afdo_profiles_package/foo_arm64.afdo"; !strings.Contains(fooArm64CFlags, w) {
 		t.Errorf("Expected 'foo' to enable afdo, but did not find %q in cflags %q", w, fooArm64CFlags)
@@ -476,11 +476,11 @@ func TestMultipleAfdoRDeps(t *testing.T) {
 	expectedCFlagLibTest := "-fprofile-sample-use=afdo_profiles_package/libTest.afdo"
 	expectedCFlagLibBar := "-fprofile-sample-use=afdo_profiles_package/libBar.afdo"
 
-	libTest := result.ModuleForTests("libTest", "android_arm64_armv8-a_shared")
-	libFooAfdoVariantWithLibTest := result.ModuleForTests("libFoo", "android_arm64_armv8-a_static_afdo-libTest")
+	libTest := result.ModuleForTests(t, "libTest", "android_arm64_armv8-a_shared")
+	libFooAfdoVariantWithLibTest := result.ModuleForTests(t, "libFoo", "android_arm64_armv8-a_static_afdo-libTest")
 
-	libBar := result.ModuleForTests("libBar", "android_arm64_armv8-a_shared")
-	libFooAfdoVariantWithLibBar := result.ModuleForTests("libFoo", "android_arm64_armv8-a_static_afdo-libBar")
+	libBar := result.ModuleForTests(t, "libBar", "android_arm64_armv8-a_shared")
+	libFooAfdoVariantWithLibBar := result.ModuleForTests(t, "libFoo", "android_arm64_armv8-a_static_afdo-libBar")
 
 	// Check cFlags of afdo-enabled module and the afdo-variant of its static deps
 	cFlags := libTest.Rule("cc").Args["cFlags"]
@@ -543,9 +543,9 @@ func TestAfdoDepsWithoutProfile(t *testing.T) {
 	// -funique-internal-linkage-names.
 	expectedCFlag := "-funique-internal-linkage-names"
 
-	libTest := result.ModuleForTests("libTest", "android_arm64_armv8-a_shared")
-	libFooAfdoVariant := result.ModuleForTests("libFoo", "android_arm64_armv8-a_static_afdo-libTest")
-	libBarAfdoVariant := result.ModuleForTests("libBar", "android_arm64_armv8-a_static_afdo-libTest")
+	libTest := result.ModuleForTests(t, "libTest", "android_arm64_armv8-a_shared")
+	libFooAfdoVariant := result.ModuleForTests(t, "libFoo", "android_arm64_armv8-a_static_afdo-libTest")
+	libBarAfdoVariant := result.ModuleForTests(t, "libBar", "android_arm64_armv8-a_static_afdo-libTest")
 
 	// Check cFlags of afdo-enabled module and the afdo-variant of its static deps
 	cFlags := libTest.Rule("cc").Args["cFlags"]
@@ -572,8 +572,8 @@ func TestAfdoDepsWithoutProfile(t *testing.T) {
 	}
 
 	// Verify non-afdo variant exists and doesn't contain afdo
-	libFoo := result.ModuleForTests("libFoo", "android_arm64_armv8-a_static")
-	libBar := result.ModuleForTests("libBar", "android_arm64_armv8-a_static")
+	libFoo := result.ModuleForTests(t, "libFoo", "android_arm64_armv8-a_static")
+	libBar := result.ModuleForTests(t, "libBar", "android_arm64_armv8-a_static")
 
 	cFlags = libFoo.Rule("cc").Args["cFlags"]
 	if strings.Contains(cFlags, expectedCFlag) {

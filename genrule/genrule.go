@@ -88,9 +88,7 @@ func init() {
 }
 
 type SourceFileGenerator interface {
-	GeneratedSourceFiles() android.Paths
-	GeneratedHeaderDirs() android.Paths
-	GeneratedDeps() android.Paths
+	android.SourceFileGenerator
 }
 
 // Alias for android.HostToolProvider
@@ -114,8 +112,8 @@ func (t hostToolDependencyTag) AllowDisabledModuleDependency(target android.Modu
 
 func (t hostToolDependencyTag) AllowDisabledModuleDependencyProxy(
 	ctx android.OtherModuleProviderContext, target android.ModuleProxy) bool {
-	return android.OtherModuleProviderOrDefault(
-		ctx, target, android.CommonModuleInfoKey).ReplacedByPrebuilt
+	return android.OtherModulePointerProviderOrDefault(
+		ctx, target, android.CommonModuleInfoProvider).ReplacedByPrebuilt
 }
 
 var _ android.AllowDisabledModuleDependency = (*hostToolDependencyTag)(nil)
@@ -283,6 +281,7 @@ func isModuleInBuildNumberAllowlist(ctx android.ModuleContext) bool {
 			"hardware/google/camera/common/hal/aidl_service:aidl_camera_build_version",
 			"tools/tradefederation/core:tradefed_zip",
 			"vendor/google/services/LyricCameraHAL/src/apex:com.google.pixel.camera.hal.manifest",
+			"vendor/google_tradefederation/core:gen_google_tradefed_zip",
 			// go/keep-sorted end
 		}
 		allowlistMap := make(map[string]bool, len(allowlist))
@@ -351,10 +350,10 @@ func (g *Module) generateCommonBuildActions(ctx android.ModuleContext) {
 				// replaced the dependency.
 				module := android.PrebuiltGetPreferred(ctx, proxy)
 				tool := ctx.OtherModuleName(module)
-				if h, ok := android.OtherModuleProvider(ctx, module, android.HostToolProviderKey); ok {
+				if h, ok := android.OtherModuleProvider(ctx, module, android.HostToolProviderInfoProvider); ok {
 					// A HostToolProvider provides the path to a tool, which will be copied
 					// into the sandbox.
-					if !android.OtherModuleProviderOrDefault(ctx, module, android.CommonModuleInfoKey).Enabled {
+					if !android.OtherModulePointerProviderOrDefault(ctx, module, android.CommonModuleInfoProvider).Enabled {
 						if ctx.Config().AllowMissingDependencies() {
 							ctx.AddMissingDependencies([]string{tool})
 						} else {
@@ -455,7 +454,6 @@ func (g *Module) generateCommonBuildActions(ctx android.ModuleContext) {
 	srcFiles = append(srcFiles, addLabelsForInputs("device_first_srcs", g.properties.Device_first_srcs.GetOrDefault(ctx, nil), nil)...)
 	srcFiles = append(srcFiles, addLabelsForInputs("device_common_srcs", g.properties.Device_common_srcs.GetOrDefault(ctx, nil), nil)...)
 	srcFiles = append(srcFiles, addLabelsForInputs("common_os_srcs", g.properties.Common_os_srcs.GetOrDefault(ctx, nil), nil)...)
-	android.SetProvider(ctx, blueprint.SrcsFileProviderKey, blueprint.SrcsFileProviderData{SrcPaths: srcFiles.Strings()})
 
 	var copyFrom android.Paths
 	var outputFiles android.WritablePaths
@@ -729,11 +727,8 @@ func (g *Module) AndroidMk() android.AndroidMkData {
 var _ android.ApexModule = (*Module)(nil)
 
 // Implements android.ApexModule
-func (g *Module) ShouldSupportSdkVersion(ctx android.BaseModuleContext,
-	sdkVersion android.ApiLevel) error {
-	// Because generated outputs are checked by client modules(e.g. cc_library, ...)
-	// we can safely ignore the check here.
-	return nil
+func (m *Module) MinSdkVersionSupported(ctx android.BaseModuleContext) android.ApiLevel {
+	return android.MinApiLevel
 }
 
 func generatorFactory(taskGenerator taskFunc, props ...interface{}) *Module {
@@ -974,29 +969,8 @@ func DefaultsFactory(props ...interface{}) android.Module {
 	return module
 }
 
-var sandboxingAllowlistKey = android.NewOnceKey("genruleSandboxingAllowlistKey")
-
-type sandboxingAllowlistSets struct {
-	sandboxingDenyModuleSet map[string]bool
-}
-
-func getSandboxingAllowlistSets(ctx android.PathContext) *sandboxingAllowlistSets {
-	return ctx.Config().Once(sandboxingAllowlistKey, func() interface{} {
-		sandboxingDenyModuleSet := map[string]bool{}
-
-		android.AddToStringSet(sandboxingDenyModuleSet, SandboxingDenyModuleList)
-		return &sandboxingAllowlistSets{
-			sandboxingDenyModuleSet: sandboxingDenyModuleSet,
-		}
-	}).(*sandboxingAllowlistSets)
-}
-
 func getSandboxedRuleBuilder(ctx android.ModuleContext, r *android.RuleBuilder) *android.RuleBuilder {
 	if !ctx.DeviceConfig().GenruleSandboxing() {
-		return r.SandboxTools()
-	}
-	sandboxingAllowlistSets := getSandboxingAllowlistSets(ctx)
-	if sandboxingAllowlistSets.sandboxingDenyModuleSet[ctx.ModuleName()] {
 		return r.SandboxTools()
 	}
 	return r.SandboxInputs()

@@ -23,37 +23,15 @@ enum FieldNumbers {
 }
 
 message FileList {
-  // The name of the file.
-  // In the outermost message, this is the name of the Ninja target.
-  // When used in `changes`, this is the name of the changed file.
+  // The name of the output file (Ninja target).
   optional string name = 1;
 
   // The added files.
   repeated string additions = 2;
 
   // The changed files.
-  repeated FileList changes = 3;
+  repeated string changes = 3;
 
   // The deleted files.
   repeated string deletions = 4;
-
-  // Count of files added/changed/deleted.
-  optional uint32 total_delta = 5;
-
-  // Counts by extension.
-  repeated FileCount counts = 6;
-}
-
-message FileCount {
-  // The file extension
-  optional string extension = 1;
-
-  // Number of added files with this extension.
-  optional uint32 additions = 2;
-
-  // Number of modified files with this extension.
-  optional uint32 modifications = 3;
-
-  // Number of deleted files with this extension.
-  optional uint32 deletions = 4;
 }

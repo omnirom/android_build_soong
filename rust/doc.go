@@ -37,14 +37,14 @@ func (n *rustdocSingleton) GenerateBuildActions(ctx android.SingletonContext) {
 		FlagWithArg("-C ", docDir.String()).
 		FlagWithArg("-D ", docDir.String())
 
-	ctx.VisitAllModules(func(module android.Module) {
-		if !module.Enabled(ctx) {
+	ctx.VisitAllModuleProxies(func(module android.ModuleProxy) {
+		if !android.OtherModulePointerProviderOrDefault(ctx, module, android.CommonModuleInfoProvider).Enabled {
 			return
 		}
 
-		if m, ok := module.(*Module); ok {
-			if m.docTimestampFile.Valid() {
-				zipCmd.Implicit(m.docTimestampFile.Path())
+		if m, ok := android.OtherModuleProvider(ctx, module, RustInfoProvider); ok {
+			if m.DocTimestampFile.Valid() {
+				zipCmd.Implicit(m.DocTimestampFile.Path())
 			}
 		}
 	})

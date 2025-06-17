@@ -450,13 +450,17 @@ SOONG_DEBUG_DATA_FILENAME = pathlib.Path(OUT_DIR).joinpath("soong/soong-debug-in
 
 
 def main():
+    global SOONG_DEBUG_DATA_FILENAME
     parser = argparse.ArgumentParser()
+    parser.add_argument("-f", "--debug-file", nargs=1, help="location of the debug info file",
+                        default=[SOONG_DEBUG_DATA_FILENAME])
     subparsers = parser.add_subparsers(required=True, dest="command")
     for name in sorted(COMMANDS.keys()):
         command = COMMANDS[name]
         subparser = subparsers.add_parser(name, help=command.help)
         command.args(subparser)
     args = parser.parse_args()
+    SOONG_DEBUG_DATA_FILENAME = args.debug_file[0]
     COMMANDS[args.command].run(args)
     sys.exit(0)
 

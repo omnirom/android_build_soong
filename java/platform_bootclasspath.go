@@ -15,6 +15,11 @@
 package java
 
 import (
+	"maps"
+	"slices"
+
+	"github.com/google/blueprint"
+
 	"android/soong/android"
 	"android/soong/dexpreopt"
 )
@@ -29,12 +34,15 @@ func registerPlatformBootclasspathBuildComponents(ctx android.RegistrationContex
 
 // The tags used for the dependencies between the platform bootclasspath and any configured boot
 // jars.
-var (
-	platformBootclasspathArtBootJarDepTag  = bootclasspathDependencyTag{name: "art-boot-jar"}
-	platformBootclasspathBootJarDepTag     = bootclasspathDependencyTag{name: "platform-boot-jar"}
-	platformBootclasspathApexBootJarDepTag = bootclasspathDependencyTag{name: "apex-boot-jar"}
-	platformBootclasspathImplLibDepTag     = dependencyTag{name: "impl-lib-tag"}
-)
+type platformBootclasspathImplLibDepTagType struct {
+	blueprint.BaseDependencyTag
+}
+
+func (p platformBootclasspathImplLibDepTagType) ExcludeFromVisibilityEnforcement() {}
+
+var platformBootclasspathImplLibDepTag platformBootclasspathImplLibDepTagType
+
+var _ android.ExcludeFromVisibilityEnforcementTag = platformBootclasspathImplLibDepTag
 
 type platformBootclasspathModule struct {
 	android.ModuleBase
@@ -47,6 +55,12 @@ type platformBootclasspathModule struct {
 
 	// The apex:module pairs obtained from the fragments.
 	fragments []android.Module
+
+	// The map of apex to the fragments they contain.
+	apexNameToFragment map[string]android.Module
+
+	// The map of library modules in the bootclasspath to the fragments that contain them.
+	libraryToApex map[android.Module]string
 
 	// Path to the monolithic hiddenapi-flags.csv file.
 	hiddenAPIFlagsCSV android.OutputPath
@@ -89,26 +103,12 @@ func (b *platformBootclasspathModule) DepsMutator(ctx android.BottomUpMutatorCon
 
 	b.hiddenAPIDepsMutator(ctx)
 
-	if !dexpreopt.IsDex2oatNeeded(ctx) {
-		return
+	if dexpreopt.IsDex2oatNeeded(ctx) {
+		// Add a dependency onto the dex2oat tool which is needed for creating the boot image. The
+		// path is retrieved from the dependency by GetGlobalSoongConfig(ctx).
+		dexpreopt.RegisterToolDeps(ctx)
 	}
 
-	// Add a dependency onto the dex2oat tool which is needed for creating the boot image. The
-	// path is retrieved from the dependency by GetGlobalSoongConfig(ctx).
-	dexpreopt.RegisterToolDeps(ctx)
-}
-
-func (b *platformBootclasspathModule) hiddenAPIDepsMutator(ctx android.BottomUpMutatorContext) {
-	if ctx.Config().DisableHiddenApiChecks() {
-		return
-	}
-
-	// Add dependencies onto the stub lib modules.
-	apiLevelToStubLibModules := hiddenAPIComputeMonolithicStubLibModules(ctx.Config())
-	hiddenAPIAddStubLibDependencies(ctx, apiLevelToStubLibModules)
-}
-
-func (b *platformBootclasspathModule) BootclasspathDepsMutator(ctx android.BottomUpMutatorContext) {
 	// Add dependencies on all the ART jars.
 	global := dexpreopt.GetGlobalConfig(ctx)
 	addDependenciesOntoSelectedBootImageApexes(ctx, "com.android.art")
@@ -116,13 +116,13 @@ func (b *platformBootclasspathModule) BootclasspathDepsMutator(ctx android.Botto
 	var bootImageModuleNames []string
 
 	// TODO: b/308174306 - Remove the mechanism of depending on the java_sdk_library(_import) directly
-	addDependenciesOntoBootImageModules(ctx, global.ArtApexJars, platformBootclasspathArtBootJarDepTag)
+	addDependenciesOntoBootImageModules(ctx, global.ArtApexJars, artBootJar)
 	bootImageModuleNames = append(bootImageModuleNames, global.ArtApexJars.CopyOfJars()...)
 
 	// Add dependencies on all the non-updatable jars, which are on the platform or in non-updatable
 	// APEXes.
 	platformJars := b.platformJars(ctx)
-	addDependenciesOntoBootImageModules(ctx, platformJars, platformBootclasspathBootJarDepTag)
+	addDependenciesOntoBootImageModules(ctx, platformJars, platformBootJar)
 	bootImageModuleNames = append(bootImageModuleNames, platformJars.CopyOfJars()...)
 
 	// Add dependencies on all the updatable jars, except the ART jars.
@@ -133,7 +133,7 @@ func (b *platformBootclasspathModule) BootclasspathDepsMutator(ctx android.Botto
 	}
 	addDependenciesOntoSelectedBootImageApexes(ctx, android.FirstUniqueStrings(apexes)...)
 	// TODO: b/308174306 - Remove the mechanism of depending on the java_sdk_library(_import) directly
-	addDependenciesOntoBootImageModules(ctx, apexJars, platformBootclasspathApexBootJarDepTag)
+	addDependenciesOntoBootImageModules(ctx, apexJars, apexBootJar)
 	bootImageModuleNames = append(bootImageModuleNames, apexJars.CopyOfJars()...)
 
 	// Add dependencies on all the fragments.
@@ -147,32 +147,42 @@ func (b *platformBootclasspathModule) BootclasspathDepsMutator(ctx android.Botto
 	}
 }
 
-func addDependenciesOntoBootImageModules(ctx android.BottomUpMutatorContext, modules android.ConfiguredJarList, tag bootclasspathDependencyTag) {
+func (b *platformBootclasspathModule) hiddenAPIDepsMutator(ctx android.BottomUpMutatorContext) {
+	if ctx.Config().DisableHiddenApiChecks() {
+		return
+	}
+
+	// Add dependencies onto the stub lib modules.
+	apiLevelToStubLibModules := hiddenAPIComputeMonolithicStubLibModules(ctx.Config())
+	hiddenAPIAddStubLibDependencies(ctx, apiLevelToStubLibModules)
+}
+
+func addDependenciesOntoBootImageModules(ctx android.BottomUpMutatorContext, modules android.ConfiguredJarList, tagType bootclasspathDependencyTagType) {
 	for i := 0; i < modules.Len(); i++ {
 		apex := modules.Apex(i)
 		name := modules.Jar(i)
 
-		addDependencyOntoApexModulePair(ctx, apex, name, tag)
+		addDependencyOntoApexModulePair(ctx, apex, name, tagType)
 	}
 }
 
 func (b *platformBootclasspathModule) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	// Gather all the dependencies from the art, platform, and apex boot jars.
-	artModules := gatherApexModulePairDepsWithTag(ctx, platformBootclasspathArtBootJarDepTag)
-	platformModules := gatherApexModulePairDepsWithTag(ctx, platformBootclasspathBootJarDepTag)
-	apexModules := gatherApexModulePairDepsWithTag(ctx, platformBootclasspathApexBootJarDepTag)
+	artModules, artModulesToApex := gatherApexModulePairDepsWithTag(ctx, artBootJar)
+	platformModules, platformModulesToApex := gatherApexModulePairDepsWithTag(ctx, platformBootJar)
+	apexModules, apexModulesToApex := gatherApexModulePairDepsWithTag(ctx, apexBootJar)
 
 	// Concatenate them all, in order as they would appear on the bootclasspath.
-	var allModules []android.Module
-	allModules = append(allModules, artModules...)
-	allModules = append(allModules, platformModules...)
-	allModules = append(allModules, apexModules...)
+	allModules := slices.Concat(artModules, platformModules, apexModules)
 	b.configuredModules = allModules
+	b.libraryToApex = maps.Clone(artModulesToApex)
+	maps.Copy(b.libraryToApex, platformModulesToApex)
+	maps.Copy(b.libraryToApex, apexModulesToApex)
 
 	// Do not add implLibModule to allModules as the impl lib is only used to collect the
 	// transitive source files
 	var implLibModule []android.Module
-	ctx.VisitDirectDepsWithTag(implLibraryTag, func(m android.Module) {
+	ctx.VisitDirectDepsWithTag(platformBootclasspathImplLibDepTag, func(m android.Module) {
 		implLibModule = append(implLibModule, m)
 	})
 
@@ -188,7 +198,7 @@ func (b *platformBootclasspathModule) GenerateAndroidBuildActions(ctx android.Mo
 	TransformResourcesToJar(ctx, srcjar, jarArgs, transitiveSrcFiles)
 
 	// Gather all the fragments dependencies.
-	b.fragments = gatherApexModulePairDepsWithTag(ctx, bootclasspathFragmentDepTag)
+	b.fragments, b.apexNameToFragment = gatherFragments(ctx)
 
 	// Check the configuration of the boot modules.
 	// ART modules are checked by the art-bootclasspath-fragment.
@@ -197,7 +207,7 @@ func (b *platformBootclasspathModule) GenerateAndroidBuildActions(ctx android.Mo
 
 	b.generateClasspathProtoBuildActions(ctx)
 
-	bootDexJarByModule := b.generateHiddenAPIBuildActions(ctx, b.configuredModules, b.fragments)
+	bootDexJarByModule := b.generateHiddenAPIBuildActions(ctx, b.configuredModules, b.fragments, b.libraryToApex, b.apexNameToFragment)
 	buildRuleForBootJarsPackageCheck(ctx, bootDexJarByModule)
 
 	ctx.SetOutputFiles(android.Paths{b.hiddenAPIFlagsCSV}, "hiddenapi-flags.csv")
@@ -248,7 +258,7 @@ func (b *platformBootclasspathModule) checkPlatformModules(ctx android.ModuleCon
 		fromUpdatableApex := apexInfo.Updatable
 		if fromUpdatableApex {
 			// error: this jar is part of an updatable apex
-			ctx.ModuleErrorf("module %q from updatable apexes %q is not allowed in the platform bootclasspath", ctx.OtherModuleName(m), apexInfo.InApexVariants)
+			ctx.ModuleErrorf("module %q from updatable apex %q is not allowed in the platform bootclasspath", ctx.OtherModuleName(m), apexInfo.BaseApexName)
 		} else {
 			// ok: this jar is part of the platform or a non-updatable apex
 		}
@@ -272,7 +282,11 @@ func (b *platformBootclasspathModule) checkApexModules(ctx android.ModuleContext
 				//  modules is complete.
 				if !ctx.Config().AlwaysUsePrebuiltSdks() {
 					// error: this jar is part of the platform
-					ctx.ModuleErrorf("module %q from platform is not allowed in the apex boot jars list", name)
+					if ctx.Config().AllowMissingDependencies() {
+						ctx.AddMissingDependencies([]string{"module_" + name + "_from_platform_is_not_allowed_in_the_apex_boot_jars_list"})
+					} else {
+						ctx.ModuleErrorf("module %q from platform is not allowed in the apex boot jars list", name)
+					}
 				}
 			} else {
 				// TODO(b/177892522): Treat this as an error.
@@ -284,7 +298,8 @@ func (b *platformBootclasspathModule) checkApexModules(ctx android.ModuleContext
 }
 
 // generateHiddenAPIBuildActions generates all the hidden API related build rules.
-func (b *platformBootclasspathModule) generateHiddenAPIBuildActions(ctx android.ModuleContext, modules []android.Module, fragments []android.Module) bootDexJarByModule {
+func (b *platformBootclasspathModule) generateHiddenAPIBuildActions(ctx android.ModuleContext, modules []android.Module,
+	fragments []android.Module, libraryToApex map[android.Module]string, apexNameToFragment map[string]android.Module) bootDexJarByModule {
 	createEmptyHiddenApiFiles := func() {
 		paths := android.OutputPaths{b.hiddenAPIFlagsCSV, b.hiddenAPIIndexCSV, b.hiddenAPIMetadataCSV}
 		for _, path := range paths {
@@ -311,7 +326,7 @@ func (b *platformBootclasspathModule) generateHiddenAPIBuildActions(ctx android.
 	}
 
 	// Construct a list of ClasspathElement objects from the modules and fragments.
-	classpathElements := CreateClasspathElements(ctx, modules, fragments)
+	classpathElements := CreateClasspathElements(ctx, modules, fragments, libraryToApex, apexNameToFragment)
 
 	monolithicInfo := b.createAndProvideMonolithicHiddenAPIInfo(ctx, classpathElements)
 

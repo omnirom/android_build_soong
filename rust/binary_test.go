@@ -36,7 +36,7 @@ func TestBinaryHostLinkage(t *testing.T) {
 			host_supported: true,
 		}
 	`)
-	fizzBuzz := ctx.ModuleForTests("fizz-buzz", "linux_glibc_x86_64").Module().(*Module)
+	fizzBuzz := ctx.ModuleForTests(t, "fizz-buzz", "linux_glibc_x86_64").Module().(*Module)
 	if !android.InList("libfoo.rlib-std", fizzBuzz.Properties.AndroidMkRlibs) {
 		t.Errorf("rustlibs dependency libfoo should be an rlib dep for host binaries")
 	}
@@ -65,8 +65,8 @@ func TestBinaryLinkage(t *testing.T) {
 			host_supported: true,
 		}`)
 
-	fizzBuzzHost := ctx.ModuleForTests("fizz-buzz", "linux_glibc_x86_64").Module().(*Module)
-	fizzBuzzDevice := ctx.ModuleForTests("fizz-buzz", "android_arm64_armv8-a").Module().(*Module)
+	fizzBuzzHost := ctx.ModuleForTests(t, "fizz-buzz", "linux_glibc_x86_64").Module().(*Module)
+	fizzBuzzDevice := ctx.ModuleForTests(t, "fizz-buzz", "android_arm64_armv8-a").Module().(*Module)
 
 	if !android.InList("libfoo.rlib-std", fizzBuzzHost.Properties.AndroidMkRlibs) {
 		t.Errorf("rustlibs dependency libfoo should be an rlib dep for host modules")
@@ -76,7 +76,7 @@ func TestBinaryLinkage(t *testing.T) {
 		t.Errorf("rustlibs dependency libfoo should be an dylib dep for device modules")
 	}
 
-	rlibLinkDevice := ctx.ModuleForTests("rlib_linked", "android_arm64_armv8-a").Module().(*Module)
+	rlibLinkDevice := ctx.ModuleForTests(t, "rlib_linked", "android_arm64_armv8-a").Module().(*Module)
 
 	if !android.InList("libfoo.rlib-std", rlibLinkDevice.Properties.AndroidMkRlibs) {
 		t.Errorf("rustlibs dependency libfoo should be an rlib dep for device modules when prefer_rlib is set")
@@ -100,7 +100,7 @@ func TestBinaryPreferRlib(t *testing.T) {
 			host_supported: true,
 		}`)
 
-	mod := ctx.ModuleForTests("rlib_linked", "android_arm64_armv8-a").Module().(*Module)
+	mod := ctx.ModuleForTests(t, "rlib_linked", "android_arm64_armv8-a").Module().(*Module)
 
 	if !android.InList("libfoo.rlib-std", mod.Properties.AndroidMkRlibs) {
 		t.Errorf("rustlibs dependency libfoo should be an rlib dep when prefer_rlib is defined")
@@ -119,7 +119,7 @@ func TestHostToolPath(t *testing.T) {
 			srcs: ["foo.rs"],
 		}`)
 
-	path := ctx.ModuleForTests("fizz-buzz", "linux_glibc_x86_64").Module().(*Module).HostToolPath()
+	path := ctx.ModuleForTests(t, "fizz-buzz", "linux_glibc_x86_64").Module().(*Module).HostToolPath()
 	if g, w := path.String(), "/host/linux-x86/bin/fizz-buzz"; !strings.Contains(g, w) {
 		t.Errorf("wrong host tool path, expected %q got %q", w, g)
 	}
@@ -133,7 +133,7 @@ func TestBinaryFlags(t *testing.T) {
 			srcs: ["foo.rs"],
 		}`)
 
-	fizzBuzz := ctx.ModuleForTests("fizz-buzz", "linux_glibc_x86_64").Rule("rustc")
+	fizzBuzz := ctx.ModuleForTests(t, "fizz-buzz", "linux_glibc_x86_64").Rule("rustc")
 
 	flags := fizzBuzz.Args["rustcFlags"]
 	if strings.Contains(flags, "--test") {
@@ -150,7 +150,7 @@ func TestBootstrap(t *testing.T) {
 			bootstrap: true,
 		}`)
 
-	foo := ctx.ModuleForTests("foo", "android_arm64_armv8-a").Rule("rustc")
+	foo := ctx.ModuleForTests(t, "foo", "android_arm64_armv8-a").Rule("rustc")
 
 	flag := "-Wl,-dynamic-linker,/system/bin/bootstrap/linker64"
 	if !strings.Contains(foo.Args["linkFlags"], flag) {
@@ -166,8 +166,8 @@ func TestStaticBinaryFlags(t *testing.T) {
 			static_executable: true,
 		}`)
 
-	fizzOut := ctx.ModuleForTests("fizz", "android_arm64_armv8-a").Rule("rustc")
-	fizzMod := ctx.ModuleForTests("fizz", "android_arm64_armv8-a").Module().(*Module)
+	fizzOut := ctx.ModuleForTests(t, "fizz", "android_arm64_armv8-a").Rule("rustc")
+	fizzMod := ctx.ModuleForTests(t, "fizz", "android_arm64_armv8-a").Module().(*Module)
 
 	flags := fizzOut.Args["rustcFlags"]
 	linkFlags := fizzOut.Args["linkFlags"]
@@ -200,7 +200,7 @@ func TestLinkObjects(t *testing.T) {
 			name: "libfoo",
 		}`)
 
-	fizzBuzz := ctx.ModuleForTests("fizz-buzz", "android_arm64_armv8-a").Rule("rustc")
+	fizzBuzz := ctx.ModuleForTests(t, "fizz-buzz", "android_arm64_armv8-a").Rule("rustc")
 	linkFlags := fizzBuzz.Args["linkFlags"]
 	if !strings.Contains(linkFlags, "/libfoo.so") {
 		t.Errorf("missing shared dependency 'libfoo.so' in linkFlags: %#v", linkFlags)
@@ -223,7 +223,7 @@ func TestStrippedBinary(t *testing.T) {
 		}
 	`)
 
-	foo := ctx.ModuleForTests("foo", "android_arm64_armv8-a")
+	foo := ctx.ModuleForTests(t, "foo", "android_arm64_armv8-a")
 	foo.Output("unstripped/foo")
 	foo.Output("foo")
 
@@ -233,7 +233,7 @@ func TestStrippedBinary(t *testing.T) {
 		t.Errorf("installed binary not based on stripped version: %v", cp.Input)
 	}
 
-	fizzBar := ctx.ModuleForTests("bar", "android_arm64_armv8-a").MaybeOutput("unstripped/bar")
+	fizzBar := ctx.ModuleForTests(t, "bar", "android_arm64_armv8-a").MaybeOutput("unstripped/bar")
 	if fizzBar.Rule != nil {
 		t.Errorf("unstripped binary exists, so stripped binary has incorrectly been generated")
 	}

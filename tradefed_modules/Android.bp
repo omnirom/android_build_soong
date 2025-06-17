@@ -14,11 +14,9 @@ bootstrap_go_package {
     ],
     srcs: [
         "test_module_config.go",
-        "test_suite.go",
     ],
     testSrcs: [
         "test_module_config_test.go",
-        "test_suite_test.go",
     ],
     pluginFor: ["soong_build"],
 }

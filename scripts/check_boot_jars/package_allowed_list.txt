@@ -265,3 +265,7 @@ org\.chromium\.arc\..*
 omnirom\.platform
 org\.omnirom\.omnilib
 org\.omnirom\.omnilib\..*
+###################################################
+# Packages used for wear-sdk in Wear OS
+com\.google\.wear
+com\.google\.wear\..*

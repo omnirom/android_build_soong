@@ -36,6 +36,7 @@ bootstrap_go_package {
         "linkable.go",
         "lto.go",
         "makevars.go",
+        "misc_disted_files.go",
         "orderfile.go",
         "prebuilt.go",
         "proto.go",

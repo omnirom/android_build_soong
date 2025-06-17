@@ -42,10 +42,10 @@ func TestLibraryVariants(t *testing.T) {
 		}`)
 
 	// Test all variants are being built.
-	libfooRlib := ctx.ModuleForTests("libfoo", "linux_glibc_x86_64_rlib_rlib-std").Rule("rustc")
-	libfooDylib := ctx.ModuleForTests("libfoo", "linux_glibc_x86_64_dylib").Rule("rustc")
-	libfooFFIRlib := ctx.ModuleForTests("libfoo.ffi", "linux_glibc_x86_64_rlib_rlib-std").Rule("rustc")
-	libfooShared := ctx.ModuleForTests("libfoo.ffi", "linux_glibc_x86_64_shared").Rule("rustc")
+	libfooRlib := ctx.ModuleForTests(t, "libfoo", "linux_glibc_x86_64_rlib_rlib-std").Rule("rustc")
+	libfooDylib := ctx.ModuleForTests(t, "libfoo", "linux_glibc_x86_64_dylib").Rule("rustc")
+	libfooFFIRlib := ctx.ModuleForTests(t, "libfoo.ffi", "linux_glibc_x86_64_rlib_rlib-std").Rule("rustc")
+	libfooShared := ctx.ModuleForTests(t, "libfoo.ffi", "linux_glibc_x86_64_shared").Rule("rustc")
 
 	rlibCrateType := "rlib"
 	dylibCrateType := "dylib"
@@ -82,26 +82,10 @@ func TestDylibPreferDynamic(t *testing.T) {
 			crate_name: "foo",
 		}`)
 
-	libfooDylib := ctx.ModuleForTests("libfoo", "linux_glibc_x86_64_dylib").Rule("rustc")
+	libfooDylib := ctx.ModuleForTests(t, "libfoo", "linux_glibc_x86_64_dylib").Rule("rustc")
 
 	if !strings.Contains(libfooDylib.Args["rustcFlags"], "prefer-dynamic") {
 		t.Errorf("missing prefer-dynamic flag for libfoo dylib, rustcFlags: %#v", libfooDylib.Args["rustcFlags"])
-	}
-}
-
-// Check that we are passing the android_dylib config flag
-func TestAndroidDylib(t *testing.T) {
-	ctx := testRust(t, `
-		rust_library_host_dylib {
-			name: "libfoo",
-			srcs: ["foo.rs"],
-			crate_name: "foo",
-		}`)
-
-	libfooDylib := ctx.ModuleForTests("libfoo", "linux_glibc_x86_64_dylib").Rule("rustc")
-
-	if !strings.Contains(libfooDylib.Args["rustcFlags"], "--cfg 'android_dylib'") {
-		t.Errorf("missing android_dylib cfg flag for libfoo dylib, rustcFlags: %#v", libfooDylib.Args["rustcFlags"])
 	}
 }
 
@@ -150,7 +134,7 @@ func TestSharedLibrary(t *testing.T) {
 			crate_name: "foo",
 		}`)
 
-	libfoo := ctx.ModuleForTests("libfoo", "android_arm64_armv8-a_shared")
+	libfoo := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_shared")
 
 	libfooOutput := libfoo.Rule("rustc")
 	if !strings.Contains(libfooOutput.Args["linkFlags"], "-Wl,-soname=libfoo.so") {
@@ -176,7 +160,7 @@ func TestSharedLibraryToc(t *testing.T) {
 			shared_libs: ["libfoo"],
 		}`)
 
-	fizzbuzz := ctx.ModuleForTests("fizzbuzz", "android_arm64_armv8-a").Rule("ld")
+	fizzbuzz := ctx.ModuleForTests(t, "fizzbuzz", "android_arm64_armv8-a").Rule("ld")
 
 	if !android.SuffixInList(fizzbuzz.Implicits.Strings(), "libfoo.so.toc") {
 		t.Errorf("missing expected libfoo.so.toc implicit dependency, instead found: %#v",
@@ -192,7 +176,7 @@ func TestStaticLibraryLinkage(t *testing.T) {
 			crate_name: "foo",
 		}`)
 
-	libfoo := ctx.ModuleForTests("libfoo", "android_arm64_armv8-a_rlib_rlib-std")
+	libfoo := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_rlib_rlib-std")
 
 	if !android.InList("libstd", libfoo.Module().(*Module).Properties.AndroidMkRlibs) {
 		t.Errorf("Static libstd rlib expected to be a dependency of Rust rlib libraries. Rlib deps are: %#v",
@@ -202,9 +186,9 @@ func TestStaticLibraryLinkage(t *testing.T) {
 
 func TestNativeDependencyOfRlib(t *testing.T) {
 	ctx := testRust(t, `
-		rust_ffi_rlib {
-			name: "libffi_rlib",
-			crate_name: "ffi_rlib",
+		rust_ffi_static {
+			name: "libffi_static",
+			crate_name: "ffi_static",
 			rlibs: ["librust_rlib"],
 			srcs: ["foo.rs"],
 		}
@@ -225,9 +209,9 @@ func TestNativeDependencyOfRlib(t *testing.T) {
 		}
 		`)
 
-	rustRlibRlibStd := ctx.ModuleForTests("librust_rlib", "android_arm64_armv8-a_rlib_rlib-std")
-	rustRlibDylibStd := ctx.ModuleForTests("librust_rlib", "android_arm64_armv8-a_rlib_dylib-std")
-	ffiRlib := ctx.ModuleForTests("libffi_rlib", "android_arm64_armv8-a_rlib_rlib-std")
+	rustRlibRlibStd := ctx.ModuleForTests(t, "librust_rlib", "android_arm64_armv8-a_rlib_rlib-std")
+	rustRlibDylibStd := ctx.ModuleForTests(t, "librust_rlib", "android_arm64_armv8-a_rlib_dylib-std")
+	ffiRlib := ctx.ModuleForTests(t, "libffi_static", "android_arm64_armv8-a_rlib_rlib-std")
 
 	modules := []android.TestingModule{
 		rustRlibRlibStd,
@@ -301,10 +285,10 @@ func TestAutoDeps(t *testing.T) {
 			],
 		}`)
 
-	libfooRlib := ctx.ModuleForTests("libfoo", "linux_glibc_x86_64_rlib_rlib-std")
-	libfooDylib := ctx.ModuleForTests("libfoo", "linux_glibc_x86_64_dylib")
-	libfooFFIRlib := ctx.ModuleForTests("libfoo.ffi", "linux_glibc_x86_64_rlib_rlib-std")
-	libfooShared := ctx.ModuleForTests("libfoo.ffi", "linux_glibc_x86_64_shared")
+	libfooRlib := ctx.ModuleForTests(t, "libfoo", "linux_glibc_x86_64_rlib_rlib-std")
+	libfooDylib := ctx.ModuleForTests(t, "libfoo", "linux_glibc_x86_64_dylib")
+	libfooFFIRlib := ctx.ModuleForTests(t, "libfoo.ffi", "linux_glibc_x86_64_rlib_rlib-std")
+	libfooShared := ctx.ModuleForTests(t, "libfoo.ffi", "linux_glibc_x86_64_shared")
 
 	for _, static := range []android.TestingModule{libfooRlib, libfooFFIRlib} {
 		if !android.InList("libbar.rlib-std", static.Module().(*Module).Properties.AndroidMkRlibs) {
@@ -346,7 +330,7 @@ func TestStrippedLibrary(t *testing.T) {
 		}
 	`)
 
-	foo := ctx.ModuleForTests("libfoo", "android_arm64_armv8-a_dylib")
+	foo := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_dylib")
 	foo.Output("libfoo.dylib.so")
 	foo.Output("unstripped/libfoo.dylib.so")
 	// Check that the `cp` rule is using the stripped version as input.
@@ -355,7 +339,7 @@ func TestStrippedLibrary(t *testing.T) {
 		t.Errorf("installed library not based on stripped version: %v", cp.Input)
 	}
 
-	fizzBar := ctx.ModuleForTests("libbar", "android_arm64_armv8-a_dylib").MaybeOutput("unstripped/libbar.dylib.so")
+	fizzBar := ctx.ModuleForTests(t, "libbar", "android_arm64_armv8-a_dylib").MaybeOutput("unstripped/libbar.dylib.so")
 	if fizzBar.Rule != nil {
 		t.Errorf("unstripped library exists, so stripped library has incorrectly been generated")
 	}
@@ -388,15 +372,15 @@ func TestLibstdLinkage(t *testing.T) {
 			prefer_rlib: true,
 		}`)
 
-	libfooDylib := ctx.ModuleForTests("libfoo", "android_arm64_armv8-a_dylib").Module().(*Module)
-	libfooRlibStatic := ctx.ModuleForTests("libfoo", "android_arm64_armv8-a_rlib_rlib-std").Module().(*Module)
-	libfooRlibDynamic := ctx.ModuleForTests("libfoo", "android_arm64_armv8-a_rlib_dylib-std").Module().(*Module)
+	libfooDylib := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_dylib").Module().(*Module)
+	libfooRlibStatic := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_rlib_rlib-std").Module().(*Module)
+	libfooRlibDynamic := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_rlib_dylib-std").Module().(*Module)
 
-	libbarShared := ctx.ModuleForTests("libbar", "android_arm64_armv8-a_shared").Module().(*Module)
-	libbarFFIRlib := ctx.ModuleForTests("libbar", "android_arm64_armv8-a_rlib_rlib-std").Module().(*Module)
+	libbarShared := ctx.ModuleForTests(t, "libbar", "android_arm64_armv8-a_shared").Module().(*Module)
+	libbarFFIRlib := ctx.ModuleForTests(t, "libbar", "android_arm64_armv8-a_rlib_rlib-std").Module().(*Module)
 
 	// prefer_rlib works the same for both rust_library and rust_ffi, so a single check is sufficient here.
-	libbarRlibStd := ctx.ModuleForTests("libbar.prefer_rlib", "android_arm64_armv8-a_shared").Module().(*Module)
+	libbarRlibStd := ctx.ModuleForTests(t, "libbar.prefer_rlib", "android_arm64_armv8-a_shared").Module().(*Module)
 
 	if !android.InList("libstd", libfooRlibStatic.Properties.AndroidMkRlibs) {
 		t.Errorf("rlib-std variant for device rust_library_rlib does not link libstd as an rlib")
@@ -412,10 +396,10 @@ func TestLibstdLinkage(t *testing.T) {
 		t.Errorf("Device rust_ffi_shared does not link libstd as an dylib")
 	}
 	if !android.InList("libstd", libbarFFIRlib.Properties.AndroidMkRlibs) {
-		t.Errorf("Device rust_ffi_rlib does not link libstd as an rlib")
+		t.Errorf("Device rust_ffi_static does not link libstd as an rlib")
 	}
 	if !android.InList("libfoo.rlib-std", libbarFFIRlib.Properties.AndroidMkRlibs) {
-		t.Errorf("Device rust_ffi_rlib does not link dependent rustlib rlib-std variant")
+		t.Errorf("Device rust_ffi_static does not link dependent rustlib rlib-std variant")
 	}
 	if !android.InList("libstd", libbarRlibStd.Properties.AndroidMkRlibs) {
 		t.Errorf("rust_ffi with prefer_rlib does not link libstd as an rlib")
@@ -438,6 +422,388 @@ func TestRustFFIExportedIncludes(t *testing.T) {
 			shared_libs: ["libbar"],
 			host_supported: true,
 		}`)
-	libfooStatic := ctx.ModuleForTests("libfoo", "linux_glibc_x86_64_static").Rule("cc")
+	libfooStatic := ctx.ModuleForTests(t, "libfoo", "linux_glibc_x86_64_static").Rule("cc")
 	android.AssertStringDoesContain(t, "cFlags for lib module", libfooStatic.Args["cFlags"], " -Irust_includes ")
 }
+
+// Make sure cc_rustlibs_for_make has the expected behavior, and that
+// cc_library_static does as well.
+// This is here instead of cc/library_test.go because the test needs to
+// define a rust_ffi module which can't be done in soong-cc to avoid the
+// circular dependency.
+func TestCCRustlibsForMake(t *testing.T) {
+	t.Parallel()
+	result := testRust(t, `
+		rust_ffi_static {
+			name: "libbar",
+			srcs: ["foo.rs"],
+			crate_name: "bar",
+			export_include_dirs: ["rust_includes"],
+			host_supported: true,
+		}
+
+		cc_rustlibs_for_make {
+			name: "libmakerustlibs",
+			whole_static_libs: ["libbar"],
+		}
+
+		cc_library_static {
+			name: "libccstatic",
+			whole_static_libs: ["libbar"],
+		}
+	`)
+
+	libmakerustlibs := result.ModuleForTests(t, "libmakerustlibs", "android_arm64_armv8-a_static").MaybeRule("rustc")
+	libccstatic := result.ModuleForTests(t, "libccstatic", "android_arm64_armv8-a_static").MaybeRule("rustc")
+
+	if libmakerustlibs.Output == nil {
+		t.Errorf("cc_rustlibs_for_make is not generating a  Rust staticlib when it should")
+	}
+
+	if libccstatic.Output != nil {
+		t.Errorf("cc_library_static is generating a Rust staticlib when it should not")
+	}
+}
+
+func TestRustVersionScript(t *testing.T) {
+	ctx := testRust(t, `
+	rust_library {
+		name: "librs",
+		srcs: ["bar.rs"],
+		crate_name: "rs",
+		extra_exported_symbols: "librs.map.txt",
+	}
+	rust_ffi {
+		name: "libffi",
+		srcs: ["foo.rs"],
+		crate_name: "ffi",
+		version_script: "libffi.map.txt",
+	}
+	`)
+
+	//linkFlags
+	librs := ctx.ModuleForTests(t, "librs", "android_arm64_armv8-a_dylib").Rule("rustc")
+	libffi := ctx.ModuleForTests(t, "libffi", "android_arm64_armv8-a_shared").Rule("rustc")
+
+	if !strings.Contains(librs.Args["linkFlags"], "-Wl,--version-script=librs.map.txt") {
+		t.Errorf("missing expected -Wl,--version-script= linker flag for libextended shared lib, linkFlags: %#v",
+			librs.Args["linkFlags"])
+	}
+	if strings.Contains(librs.Args["linkFlags"], "-Wl,--android-version-script=librs.map.txt") {
+		t.Errorf("unexpected -Wl,--android-version-script= linker flag for libextended shared lib, linkFlags: %#v",
+			librs.Args["linkFlags"])
+	}
+
+	if !strings.Contains(libffi.Args["linkFlags"], "-Wl,--android-version-script=libffi.map.txt") {
+		t.Errorf("missing -Wl,--android-version-script= linker flag for libreplaced shared lib, linkFlags: %#v",
+			libffi.Args["linkFlags"])
+	}
+	if strings.Contains(libffi.Args["linkFlags"], "-Wl,--version-script=libffi.map.txt") {
+		t.Errorf("unexpected -Wl,--version-script= linker flag for libextended shared lib, linkFlags: %#v",
+			libffi.Args["linkFlags"])
+	}
+}
+
+func TestRustVersionScriptPropertyErrors(t *testing.T) {
+	testRustError(t, "version_script: can only be set for rust_ffi modules", `
+		rust_library {
+			name: "librs",
+			srcs: ["bar.rs"],
+			crate_name: "rs",
+			version_script: "libbar.map.txt",
+		}`)
+	testRustError(t, "version_script and extra_exported_symbols", `
+		rust_ffi {
+			name: "librs",
+			srcs: ["bar.rs"],
+			crate_name: "rs",
+			version_script: "libbar.map.txt",
+			extra_exported_symbols: "libbar.map.txt",
+		}`)
+}
+
+func TestStubsVersions(t *testing.T) {
+	t.Parallel()
+	bp := `
+		rust_ffi {
+			name: "libfoo",
+			crate_name: "foo",
+			srcs: ["foo.rs"],
+			stubs: {
+				versions: ["29", "R", "current"],
+			},
+		}
+	`
+	ctx := android.GroupFixturePreparers(
+		prepareForRustTest,
+		android.PrepareForTestWithVisibility,
+		rustMockedFiles.AddToFixture(),
+		android.FixtureModifyConfigAndContext(func(config android.Config, ctx *android.TestContext) {
+			config.TestProductVariables.Platform_version_active_codenames = []string{"R"}
+		})).RunTestWithBp(t, bp)
+
+	variants := ctx.ModuleVariantsForTests("libfoo")
+	for _, expectedVer := range []string{"29", "R", "current"} {
+		expectedVariant := "android_arm_armv7-a-neon_shared_" + expectedVer
+		if !android.InList(expectedVariant, variants) {
+			t.Errorf("missing expected variant: %q", expectedVariant)
+		}
+	}
+}
+
+func TestStubsVersions_NotSorted(t *testing.T) {
+	t.Parallel()
+	bp := `
+	rust_ffi_shared {
+		name: "libfoo",
+		crate_name: "foo",
+		srcs: ["foo.rs"],
+		stubs: {
+				versions: ["29", "current", "R"],
+			},
+		}
+	`
+	fixture := android.GroupFixturePreparers(
+		prepareForRustTest,
+		android.PrepareForTestWithVisibility,
+		rustMockedFiles.AddToFixture(),
+
+		android.FixtureModifyConfigAndContext(func(config android.Config, ctx *android.TestContext) {
+			config.TestProductVariables.Platform_version_active_codenames = []string{"R"}
+		}))
+
+	fixture.ExtendWithErrorHandler(android.FixtureExpectsOneErrorPattern(`"libfoo" .*: versions: not sorted`)).RunTestWithBp(t, bp)
+}
+
+func TestStubsVersions_ParseError(t *testing.T) {
+	t.Parallel()
+	bp := `
+	rust_ffi_shared {
+		name: "libfoo",
+		crate_name: "foo",
+		srcs: ["foo.rs"],
+			stubs: {
+				versions: ["29", "current", "X"],
+			},
+		}
+	`
+	fixture := android.GroupFixturePreparers(
+		prepareForRustTest,
+		android.PrepareForTestWithVisibility,
+		rustMockedFiles.AddToFixture(),
+
+		android.FixtureModifyConfigAndContext(func(config android.Config, ctx *android.TestContext) {
+			config.TestProductVariables.Platform_version_active_codenames = []string{"R"}
+		}))
+
+	fixture.ExtendWithErrorHandler(android.FixtureExpectsOneErrorPattern(`"libfoo" .*: versions: "X" could not be parsed as an integer and is not a recognized codename`)).RunTestWithBp(t, bp)
+}
+
+func TestVersionedStubs(t *testing.T) {
+	t.Parallel()
+	bp := `
+	rust_ffi_shared {
+		name: "libFoo",
+		crate_name: "Foo",
+		srcs: ["foo.rs"],
+			stubs: {
+				symbol_file: "foo.map.txt",
+				versions: ["1", "2", "3"],
+			},
+		}
+
+	cc_library_shared {
+		name: "libBar",
+		srcs: ["bar.c"],
+		shared_libs: ["libFoo#1"],
+	}
+
+	rust_library {
+		name: "libbar_rs",
+		crate_name: "bar_rs",
+		srcs: ["bar.rs"],
+		shared_libs: ["libFoo#1"],
+	}
+	rust_ffi {
+		name: "libbar_ffi_rs",
+		crate_name: "bar_ffi_rs",
+		srcs: ["bar.rs"],
+		shared_libs: ["libFoo#1"],
+	}
+	`
+
+	ctx := android.GroupFixturePreparers(
+		prepareForRustTest,
+		android.PrepareForTestWithVisibility,
+		rustMockedFiles.AddToFixture()).RunTestWithBp(t, bp)
+
+	variants := ctx.ModuleVariantsForTests("libFoo")
+	expectedVariants := []string{
+		"android_arm64_armv8-a_shared",
+		"android_arm64_armv8-a_shared_1",
+		"android_arm64_armv8-a_shared_2",
+		"android_arm64_armv8-a_shared_3",
+		"android_arm64_armv8-a_shared_current",
+		"android_arm_armv7-a-neon_shared",
+		"android_arm_armv7-a-neon_shared_1",
+		"android_arm_armv7-a-neon_shared_2",
+		"android_arm_armv7-a-neon_shared_3",
+		"android_arm_armv7-a-neon_shared_current",
+	}
+	variantsMismatch := false
+	if len(variants) != len(expectedVariants) {
+		variantsMismatch = true
+	} else {
+		for _, v := range expectedVariants {
+			if !android.InList(v, variants) {
+				variantsMismatch = false
+			}
+		}
+	}
+	if variantsMismatch {
+		t.Errorf("variants of libFoo expected:\n")
+		for _, v := range expectedVariants {
+			t.Errorf("%q\n", v)
+		}
+		t.Errorf(", but got:\n")
+		for _, v := range variants {
+			t.Errorf("%q\n", v)
+		}
+	}
+
+	libBarLinkRule := ctx.ModuleForTests(t, "libBar", "android_arm64_armv8-a_shared").Rule("ld")
+	libBarFlags := libBarLinkRule.Args["libFlags"]
+
+	libBarRsRustcRule := ctx.ModuleForTests(t, "libbar_rs", "android_arm64_armv8-a_dylib").Rule("rustc")
+	libBarRsFlags := libBarRsRustcRule.Args["linkFlags"]
+
+	libBarFfiRsRustcRule := ctx.ModuleForTests(t, "libbar_ffi_rs", "android_arm64_armv8-a_shared").Rule("rustc")
+	libBarFfiRsFlags := libBarFfiRsRustcRule.Args["linkFlags"]
+
+	libFoo1StubPath := "libFoo/android_arm64_armv8-a_shared_1/unstripped/libFoo.so"
+	if !strings.Contains(libBarFlags, libFoo1StubPath) {
+		t.Errorf("%q is not found in %q", libFoo1StubPath, libBarFlags)
+	}
+	if !strings.Contains(libBarRsFlags, libFoo1StubPath) {
+		t.Errorf("%q is not found in %q", libFoo1StubPath, libBarRsFlags)
+	}
+	if !strings.Contains(libBarFfiRsFlags, libFoo1StubPath) {
+		t.Errorf("%q is not found in %q", libFoo1StubPath, libBarFfiRsFlags)
+	}
+}
+
+func TestCheckConflictingExplicitVersions(t *testing.T) {
+	t.Parallel()
+	bp := `
+	cc_library_shared {
+		name: "libbar",
+		srcs: ["bar.c"],
+		shared_libs: ["libfoo", "libfoo#impl"],
+	}
+
+	rust_ffi_shared {
+		name: "libfoo",
+		crate_name: "foo",
+		srcs: ["foo.rs"],
+		stubs: {
+			versions: ["29", "current"],
+		},
+	}
+	`
+	fixture := android.GroupFixturePreparers(
+		prepareForRustTest,
+		android.PrepareForTestWithVisibility,
+		rustMockedFiles.AddToFixture())
+
+	fixture.ExtendWithErrorHandler(android.FixtureExpectsOneErrorPattern(`duplicate shared libraries with different explicit versions`)).RunTestWithBp(t, bp)
+}
+
+func TestAddnoOverride64GlobalCflags(t *testing.T) {
+	t.Parallel()
+	bp := `
+		cc_library_shared {
+			name: "libclient",
+			srcs: ["foo.c"],
+			shared_libs: ["libfoo#1"],
+		}
+
+		rust_ffi_shared {
+			name: "libfoo",
+			crate_name: "foo",
+			srcs: ["foo.c"],
+			shared_libs: ["libbar"],
+			stubs: {
+				symbol_file: "foo.map.txt",
+				versions: ["1", "2", "3"],
+			},
+		}
+
+		cc_library_shared {
+			name: "libbar",
+			export_include_dirs: ["include/libbar"],
+			srcs: ["foo.c"],
+		}`
+	ctx := android.GroupFixturePreparers(
+		prepareForRustTest,
+		android.PrepareForTestWithVisibility,
+		rustMockedFiles.AddToFixture()).RunTestWithBp(t, bp)
+
+	cFlags := ctx.ModuleForTests(t, "libclient", "android_arm64_armv8-a_shared").Rule("cc").Args["cFlags"]
+
+	if !strings.Contains(cFlags, "${config.NoOverride64GlobalCflags}") {
+		t.Errorf("expected %q in cflags, got %q", "${config.NoOverride64GlobalCflags}", cFlags)
+	}
+}
+
+// Make sure the stubs properties can only be used in modules producing shared libs
+func TestRustStubsFFIOnly(t *testing.T) {
+	testRustError(t, "stubs properties", `
+		rust_library {
+			name: "libfoo",
+			crate_name: "foo",
+			srcs: ["foo.c"],
+			shared_libs: ["libbar"],
+			stubs: {
+				symbol_file: "foo.map.txt",
+			},
+		}
+	`)
+
+	testRustError(t, "stubs properties", `
+		rust_library {
+			name: "libfoo",
+			crate_name: "foo",
+			srcs: ["foo.c"],
+			shared_libs: ["libbar"],
+			stubs: {
+				versions: ["1"],
+			},
+		}
+	`)
+
+	testRustError(t, "stubs properties", `
+		rust_ffi_static {
+			name: "libfoo",
+			crate_name: "foo",
+			srcs: ["foo.c"],
+			shared_libs: ["libbar"],
+			stubs: {
+				symbol_file: "foo.map.txt",
+			},
+		}
+	`)
+	testRustError(t, "stubs properties", `
+		rust_ffi_static {
+			name: "libfoo",
+			crate_name: "foo",
+			srcs: ["foo.c"],
+			shared_libs: ["libbar"],
+			stubs: {
+				versions: ["1"],
+			},
+		}
+	`)
+}
+
+// TODO: When rust_ffi libraries support export_*_lib_headers,
+// add a test similar to cc.TestStubsLibReexportsHeaders

@@ -62,13 +62,13 @@ func TestClippy(t *testing.T) {
 				android.FixtureAddTextFile(tc.modulePath+"Android.bp", bp),
 			).RunTest(t)
 
-			r := result.ModuleForTests("libfoo", "android_arm64_armv8-a_dylib").MaybeRule("clippy")
+			r := result.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_dylib").MaybeRule("clippy")
 			android.AssertStringEquals(t, "libfoo flags", tc.fooFlags, r.Args["clippyFlags"])
 
-			r = result.ModuleForTests("libbar", "android_arm64_armv8-a_dylib").MaybeRule("clippy")
+			r = result.ModuleForTests(t, "libbar", "android_arm64_armv8-a_dylib").MaybeRule("clippy")
 			android.AssertStringEquals(t, "libbar flags", "${config.ClippyDefaultLints}", r.Args["clippyFlags"])
 
-			r = result.ModuleForTests("libfoobar", "android_arm64_armv8-a_dylib").MaybeRule("clippy")
+			r = result.ModuleForTests(t, "libfoobar", "android_arm64_armv8-a_dylib").MaybeRule("clippy")
 			if r.Rule != nil {
 				t.Errorf("libfoobar is setup to use clippy when explicitly disabled: clippyFlags=%q", r.Args["clippyFlags"])
 			}

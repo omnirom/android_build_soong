@@ -80,13 +80,19 @@ func GatherRequiredDepsForTest() string {
 			no_libcrt: true,
 			nocrt: true,
 			system_shared_libs: [],
-			apex_available: ["//apex_available:platform", "//apex_available:anyapex"],
 			min_sdk_version: "29",
 			vendor_available: true,
 			host_supported: true,
 			recovery_available: true,
 			llndk: {
 				symbol_file: "liblog.map.txt",
+			},
+			stubs: {
+				symbol_file: "liblog.map.txt",
+				versions: [
+					"29",
+					"30",
+				],
 			},
 		}
 		cc_library {
@@ -188,12 +194,10 @@ func registerRequiredBuildComponentsForTest(ctx android.RegistrationContext) {
 	ctx.RegisterModuleType("rust_fuzz_host", RustFuzzHostFactory)
 	ctx.RegisterModuleType("rust_ffi", RustFFIFactory)
 	ctx.RegisterModuleType("rust_ffi_shared", RustFFISharedFactory)
-	ctx.RegisterModuleType("rust_ffi_rlib", RustFFIRlibFactory)
-	ctx.RegisterModuleType("rust_ffi_static", RustFFIRlibFactory)
+	ctx.RegisterModuleType("rust_ffi_static", RustLibraryRlibFactory)
 	ctx.RegisterModuleType("rust_ffi_host", RustFFIHostFactory)
 	ctx.RegisterModuleType("rust_ffi_host_shared", RustFFISharedHostFactory)
-	ctx.RegisterModuleType("rust_ffi_host_rlib", RustFFIRlibHostFactory)
-	ctx.RegisterModuleType("rust_ffi_host_static", RustFFIRlibHostFactory)
+	ctx.RegisterModuleType("rust_ffi_host_static", RustLibraryRlibHostFactory)
 	ctx.RegisterModuleType("rust_proc_macro", ProcMacroFactory)
 	ctx.RegisterModuleType("rust_protobuf", RustProtobufFactory)
 	ctx.RegisterModuleType("rust_protobuf_host", RustProtobufHostFactory)

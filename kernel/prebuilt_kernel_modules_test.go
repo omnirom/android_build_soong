@@ -50,7 +50,7 @@ func TestKernelModulesFilelist(t *testing.T) {
 
 	var actual []string
 	for _, ps := range android.OtherModuleProviderOrDefault(
-		ctx, ctx.ModuleForTests("foo", "android_arm64_armv8-a").Module(), android.InstallFilesProvider).PackagingSpecs {
+		ctx, ctx.ModuleForTests(t, "foo", "android_arm64_armv8-a").Module(), android.InstallFilesProvider).PackagingSpecs {
 		actual = append(actual, ps.RelPathInPackage())
 	}
 	actual = android.SortedUniqueStrings(actual)

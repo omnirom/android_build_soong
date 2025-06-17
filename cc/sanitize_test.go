@@ -222,31 +222,31 @@ func TestAsan(t *testing.T) {
 		staticAsanVariant := staticVariant + "_asan"
 
 		// The binaries, one with asan and one without
-		binWithAsan := result.ModuleForTests("bin_with_asan", asanVariant)
-		binNoAsan := result.ModuleForTests("bin_no_asan", variant)
+		binWithAsan := result.ModuleForTests(t, "bin_with_asan", asanVariant)
+		binNoAsan := result.ModuleForTests(t, "bin_no_asan", variant)
 
 		// Shared libraries that don't request asan
-		libShared := result.ModuleForTests("libshared", sharedVariant)
-		libTransitive := result.ModuleForTests("libtransitive", sharedVariant)
+		libShared := result.ModuleForTests(t, "libshared", sharedVariant)
+		libTransitive := result.ModuleForTests(t, "libtransitive", sharedVariant)
 
 		// Shared library that requests asan
-		libAsan := result.ModuleForTests("libasan", sharedAsanVariant)
+		libAsan := result.ModuleForTests(t, "libasan", sharedAsanVariant)
 
 		// Static library that uses an asan variant for bin_with_asan and a non-asan variant
 		// for bin_no_asan.
-		libStaticAsanVariant := result.ModuleForTests("libstatic", staticAsanVariant)
-		libStaticNoAsanVariant := result.ModuleForTests("libstatic", staticVariant)
+		libStaticAsanVariant := result.ModuleForTests(t, "libstatic", staticAsanVariant)
+		libStaticNoAsanVariant := result.ModuleForTests(t, "libstatic", staticVariant)
 
 		// Static library that never uses asan.
-		libNoAsan := result.ModuleForTests("libnoasan", staticVariant)
+		libNoAsan := result.ModuleForTests(t, "libnoasan", staticVariant)
 
 		// Static library that specifies asan
-		libStaticAsan := result.ModuleForTests("libstatic_asan", staticAsanVariant)
-		libStaticAsanNoAsanVariant := result.ModuleForTests("libstatic_asan", staticVariant)
+		libStaticAsan := result.ModuleForTests(t, "libstatic_asan", staticAsanVariant)
+		libStaticAsanNoAsanVariant := result.ModuleForTests(t, "libstatic_asan", staticVariant)
 
-		libAsanSharedRuntime := result.ModuleForTests("libclang_rt.asan", sharedVariant)
-		libAsanStaticRuntime := result.ModuleForTests("libclang_rt.asan.static", staticVariant)
-		libAsanStaticCxxRuntime := result.ModuleForTests("libclang_rt.asan_cxx.static", staticVariant)
+		libAsanSharedRuntime := result.ModuleForTests(t, "libclang_rt.asan", sharedVariant)
+		libAsanStaticRuntime := result.ModuleForTests(t, "libclang_rt.asan.static", staticVariant)
+		libAsanStaticCxxRuntime := result.ModuleForTests(t, "libclang_rt.asan_cxx.static", staticVariant)
 
 		expectSharedLinkDep(t, ctx, binWithAsan, libShared)
 		expectSharedLinkDep(t, ctx, binWithAsan, libAsan)
@@ -386,15 +386,15 @@ func TestTsan(t *testing.T) {
 		sharedTsanVariant := sharedVariant + "_tsan"
 
 		// The binaries, one with tsan and one without
-		binWithTsan := result.ModuleForTests("bin_with_tsan", tsanVariant)
-		binNoTsan := result.ModuleForTests("bin_no_tsan", variant)
+		binWithTsan := result.ModuleForTests(t, "bin_with_tsan", tsanVariant)
+		binNoTsan := result.ModuleForTests(t, "bin_no_tsan", variant)
 
 		// Shared libraries that don't request tsan
-		libShared := result.ModuleForTests("libshared", sharedVariant)
-		libTransitive := result.ModuleForTests("libtransitive", sharedVariant)
+		libShared := result.ModuleForTests(t, "libshared", sharedVariant)
+		libTransitive := result.ModuleForTests(t, "libtransitive", sharedVariant)
 
 		// Shared library that requests tsan
-		libTsan := result.ModuleForTests("libtsan", sharedTsanVariant)
+		libTsan := result.ModuleForTests(t, "libtsan", sharedTsanVariant)
 
 		expectSharedLinkDep(t, ctx, binWithTsan, libShared)
 		expectSharedLinkDep(t, ctx, binWithTsan, libTsan)
@@ -479,16 +479,16 @@ func TestMiscUndefined(t *testing.T) {
 		staticVariant := variant + "_static"
 
 		// The binaries, one with ubsan and one without
-		binWithUbsan := result.ModuleForTests("bin_with_ubsan", variant)
-		binNoUbsan := result.ModuleForTests("bin_no_ubsan", variant)
+		binWithUbsan := result.ModuleForTests(t, "bin_with_ubsan", variant)
+		binNoUbsan := result.ModuleForTests(t, "bin_no_ubsan", variant)
 
 		// Static libraries that don't request ubsan
-		libStatic := result.ModuleForTests("libstatic", staticVariant)
-		libTransitive := result.ModuleForTests("libtransitive", staticVariant)
+		libStatic := result.ModuleForTests(t, "libstatic", staticVariant)
+		libTransitive := result.ModuleForTests(t, "libtransitive", staticVariant)
 
-		libUbsan := result.ModuleForTests("libubsan", staticVariant)
+		libUbsan := result.ModuleForTests(t, "libubsan", staticVariant)
 
-		libUbsanMinimal := result.ModuleForTests("libclang_rt.ubsan_minimal", staticVariant)
+		libUbsanMinimal := result.ModuleForTests(t, "libclang_rt.ubsan_minimal", staticVariant)
 
 		expectStaticLinkDep(t, ctx, binWithUbsan, libStatic)
 		expectStaticLinkDep(t, ctx, binWithUbsan, libUbsan)
@@ -610,31 +610,31 @@ func TestFuzz(t *testing.T) {
 		staticFuzzerVariant := staticVariant + "_fuzzer"
 
 		// The binaries, one with fuzzer and one without
-		binWithFuzzer := result.ModuleForTests("bin_with_fuzzer", fuzzerVariant)
-		binNoFuzzer := result.ModuleForTests("bin_no_fuzzer", variant)
+		binWithFuzzer := result.ModuleForTests(t, "bin_with_fuzzer", fuzzerVariant)
+		binNoFuzzer := result.ModuleForTests(t, "bin_no_fuzzer", variant)
 
 		// Shared libraries that don't request fuzzer
-		libShared := result.ModuleForTests("libshared", sharedVariant)
-		libTransitive := result.ModuleForTests("libtransitive", sharedVariant)
+		libShared := result.ModuleForTests(t, "libshared", sharedVariant)
+		libTransitive := result.ModuleForTests(t, "libtransitive", sharedVariant)
 
 		// Shared libraries that don't request fuzzer
-		libSharedFuzzer := result.ModuleForTests("libshared", sharedFuzzerVariant)
-		libTransitiveFuzzer := result.ModuleForTests("libtransitive", sharedFuzzerVariant)
+		libSharedFuzzer := result.ModuleForTests(t, "libshared", sharedFuzzerVariant)
+		libTransitiveFuzzer := result.ModuleForTests(t, "libtransitive", sharedFuzzerVariant)
 
 		// Shared library that requests fuzzer
-		libFuzzer := result.ModuleForTests("libfuzzer", sharedFuzzerVariant)
+		libFuzzer := result.ModuleForTests(t, "libfuzzer", sharedFuzzerVariant)
 
 		// Static library that uses an fuzzer variant for bin_with_fuzzer and a non-fuzzer variant
 		// for bin_no_fuzzer.
-		libStaticFuzzerVariant := result.ModuleForTests("libstatic", staticFuzzerVariant)
-		libStaticNoFuzzerVariant := result.ModuleForTests("libstatic", staticVariant)
+		libStaticFuzzerVariant := result.ModuleForTests(t, "libstatic", staticFuzzerVariant)
+		libStaticNoFuzzerVariant := result.ModuleForTests(t, "libstatic", staticVariant)
 
 		// Static library that never uses fuzzer.
-		libNoFuzzer := result.ModuleForTests("libnofuzzer", staticVariant)
+		libNoFuzzer := result.ModuleForTests(t, "libnofuzzer", staticVariant)
 
 		// Static library that specifies fuzzer
-		libStaticFuzzer := result.ModuleForTests("libstatic_fuzzer", staticFuzzerVariant)
-		libStaticFuzzerNoFuzzerVariant := result.ModuleForTests("libstatic_fuzzer", staticVariant)
+		libStaticFuzzer := result.ModuleForTests(t, "libstatic_fuzzer", staticFuzzerVariant)
+		libStaticFuzzerNoFuzzerVariant := result.ModuleForTests(t, "libstatic_fuzzer", staticVariant)
 
 		expectSharedLinkDep(t, ctx, binWithFuzzer, libSharedFuzzer)
 		expectSharedLinkDep(t, ctx, binWithFuzzer, libFuzzer)
@@ -781,16 +781,16 @@ func TestUbsan(t *testing.T) {
 		staticVariant := variant + "_static"
 		sharedVariant := variant + "_shared"
 
-		minimalRuntime := result.ModuleForTests("libclang_rt.ubsan_minimal", staticVariant)
-		standaloneRuntime := result.ModuleForTests("libclang_rt.ubsan_standalone.static", staticVariant)
+		minimalRuntime := result.ModuleForTests(t, "libclang_rt.ubsan_minimal", staticVariant)
+		standaloneRuntime := result.ModuleForTests(t, "libclang_rt.ubsan_standalone.static", staticVariant)
 
 		// The binaries, one with ubsan and one without
-		binWithUbsan := result.ModuleForTests("bin_with_ubsan", variant)
-		binDependsUbsan := result.ModuleForTests("bin_depends_ubsan_static", variant)
-		libSharedUbsan := result.ModuleForTests("libsharedubsan", sharedVariant)
-		binDependsUbsanShared := result.ModuleForTests("bin_depends_ubsan_shared", variant)
-		binNoUbsan := result.ModuleForTests("bin_no_ubsan", variant)
-		staticBin := result.ModuleForTests("static_bin_with_ubsan_dep", variant)
+		binWithUbsan := result.ModuleForTests(t, "bin_with_ubsan", variant)
+		binDependsUbsan := result.ModuleForTests(t, "bin_depends_ubsan_static", variant)
+		libSharedUbsan := result.ModuleForTests(t, "libsharedubsan", sharedVariant)
+		binDependsUbsanShared := result.ModuleForTests(t, "bin_depends_ubsan_shared", variant)
+		binNoUbsan := result.ModuleForTests(t, "bin_no_ubsan", variant)
+		staticBin := result.ModuleForTests(t, "static_bin_with_ubsan_dep", variant)
 
 		android.AssertStringListContains(t, "missing libclang_rt.ubsan_minimal in bin_with_ubsan static libs",
 			strings.Split(binWithUbsan.Rule("ld").Args["libFlags"], " "),
@@ -979,67 +979,67 @@ func TestSanitizeMemtagHeap(t *testing.T) {
 	).RunTest(t)
 	ctx := result.TestContext
 
-	checkHasMemtagNote(t, ctx.ModuleForTests("no_memtag_binary_no_override", variant), None)
-	checkHasMemtagNote(t, ctx.ModuleForTests("no_memtag_binary_override_default_async", variant), None)
-	checkHasMemtagNote(t, ctx.ModuleForTests("no_memtag_binary_override_default_disable", variant), None)
-	checkHasMemtagNote(t, ctx.ModuleForTests("no_memtag_binary_override_default_sync", variant), None)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "no_memtag_binary_no_override", variant), None)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "no_memtag_binary_override_default_async", variant), None)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "no_memtag_binary_override_default_disable", variant), None)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "no_memtag_binary_override_default_sync", variant), None)
 
-	checkHasMemtagNote(t, ctx.ModuleForTests("no_memtag_test_no_override", variant), None)
-	checkHasMemtagNote(t, ctx.ModuleForTests("no_memtag_test_override_default_async", variant), None)
-	checkHasMemtagNote(t, ctx.ModuleForTests("no_memtag_test_override_default_disable", variant), None)
-	checkHasMemtagNote(t, ctx.ModuleForTests("no_memtag_test_override_default_sync", variant), None)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "no_memtag_test_no_override", variant), None)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "no_memtag_test_override_default_async", variant), None)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "no_memtag_test_override_default_disable", variant), None)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "no_memtag_test_override_default_sync", variant), None)
 
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_binary_no_override", variant), Async)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_binary_override_default_async", variant), Async)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_binary_override_default_disable", variant), Async)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_binary_override_default_sync", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_binary_no_override", variant), Async)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_binary_override_default_async", variant), Async)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_binary_override_default_disable", variant), Async)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_binary_override_default_sync", variant), Sync)
 
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_test_no_override", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_test_override_default_async", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_test_override_default_disable", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_test_override_default_sync", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_test_no_override", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_test_override_default_async", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_test_override_default_disable", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_test_override_default_sync", variant), Sync)
 
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_async_binary_no_override", variant), Async)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_async_binary_override_default_async", variant), Async)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_async_binary_override_default_disable", variant), Async)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_async_binary_override_default_sync", variant), Async)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_async_binary_no_override", variant), Async)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_async_binary_override_default_async", variant), Async)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_async_binary_override_default_disable", variant), Async)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_async_binary_override_default_sync", variant), Async)
 
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_async_test_no_override", variant), Async)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_async_test_override_default_async", variant), Async)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_async_test_override_default_disable", variant), Async)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_async_test_override_default_sync", variant), Async)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_async_test_no_override", variant), Async)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_async_test_override_default_async", variant), Async)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_async_test_override_default_disable", variant), Async)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_async_test_override_default_sync", variant), Async)
 
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_sync_binary_no_override", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_sync_binary_override_default_async", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_sync_binary_override_default_disable", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_sync_binary_override_default_sync", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_sync_binary_no_override", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_sync_binary_override_default_async", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_sync_binary_override_default_disable", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_sync_binary_override_default_sync", variant), Sync)
 
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_sync_test_no_override", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_sync_test_override_default_async", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_sync_test_override_default_disable", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_sync_test_override_default_sync", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_sync_test_no_override", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_sync_test_override_default_async", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_sync_test_override_default_disable", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_sync_test_override_default_sync", variant), Sync)
 
 	// should sanitize: { diag: { memtag: true } } result in Sync instead of None here?
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_memtag_set_sync_binary_no_override", variant), None)
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_memtag_set_sync_binary_override_default_async", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_memtag_set_sync_binary_no_override", variant), None)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_memtag_set_sync_binary_override_default_async", variant), Sync)
 	// should sanitize: { diag: { memtag: true } } result in Sync instead of None here?
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_memtag_set_sync_binary_override_default_disable", variant), None)
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_memtag_set_sync_binary_override_default_sync", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_memtag_set_sync_binary_override_default_disable", variant), None)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_memtag_set_sync_binary_override_default_sync", variant), Sync)
 
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_memtag_set_sync_test_no_override", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_memtag_set_sync_test_override_default_async", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_memtag_set_sync_test_override_default_disable", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_memtag_set_sync_test_override_default_sync", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_memtag_set_sync_test_no_override", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_memtag_set_sync_test_override_default_async", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_memtag_set_sync_test_override_default_disable", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_memtag_set_sync_test_override_default_sync", variant), Sync)
 
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_binary_no_override", variant), None)
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_binary_override_default_async", variant), Async)
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_binary_override_default_disable", variant), None)
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_binary_override_default_sync", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_binary_no_override", variant), None)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_binary_override_default_async", variant), Async)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_binary_override_default_disable", variant), None)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_binary_override_default_sync", variant), Sync)
 
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_test_no_override", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_test_override_default_async", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_test_override_default_disable", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_test_override_default_sync", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_test_no_override", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_test_override_default_async", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_test_override_default_disable", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_test_override_default_sync", variant), Sync)
 }
 
 func TestSanitizeMemtagHeapWithSanitizeDevice(t *testing.T) {
@@ -1055,66 +1055,66 @@ func TestSanitizeMemtagHeapWithSanitizeDevice(t *testing.T) {
 	).RunTest(t)
 	ctx := result.TestContext
 
-	checkHasMemtagNote(t, ctx.ModuleForTests("no_memtag_binary_no_override", variant), None)
-	checkHasMemtagNote(t, ctx.ModuleForTests("no_memtag_binary_override_default_async", variant), None)
-	checkHasMemtagNote(t, ctx.ModuleForTests("no_memtag_binary_override_default_disable", variant), None)
-	checkHasMemtagNote(t, ctx.ModuleForTests("no_memtag_binary_override_default_sync", variant), None)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "no_memtag_binary_no_override", variant), None)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "no_memtag_binary_override_default_async", variant), None)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "no_memtag_binary_override_default_disable", variant), None)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "no_memtag_binary_override_default_sync", variant), None)
 
-	checkHasMemtagNote(t, ctx.ModuleForTests("no_memtag_test_no_override", variant), None)
-	checkHasMemtagNote(t, ctx.ModuleForTests("no_memtag_test_override_default_async", variant), None)
-	checkHasMemtagNote(t, ctx.ModuleForTests("no_memtag_test_override_default_disable", variant), None)
-	checkHasMemtagNote(t, ctx.ModuleForTests("no_memtag_test_override_default_sync", variant), None)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "no_memtag_test_no_override", variant), None)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "no_memtag_test_override_default_async", variant), None)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "no_memtag_test_override_default_disable", variant), None)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "no_memtag_test_override_default_sync", variant), None)
 
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_binary_no_override", variant), Async)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_binary_override_default_async", variant), Async)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_binary_override_default_disable", variant), Async)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_binary_override_default_sync", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_binary_no_override", variant), Async)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_binary_override_default_async", variant), Async)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_binary_override_default_disable", variant), Async)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_binary_override_default_sync", variant), Sync)
 
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_test_no_override", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_test_override_default_async", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_test_override_default_disable", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_test_override_default_sync", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_test_no_override", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_test_override_default_async", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_test_override_default_disable", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_test_override_default_sync", variant), Sync)
 
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_async_binary_no_override", variant), Async)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_async_binary_override_default_async", variant), Async)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_async_binary_override_default_disable", variant), Async)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_async_binary_override_default_sync", variant), Async)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_async_binary_no_override", variant), Async)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_async_binary_override_default_async", variant), Async)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_async_binary_override_default_disable", variant), Async)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_async_binary_override_default_sync", variant), Async)
 
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_async_test_no_override", variant), Async)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_async_test_override_default_async", variant), Async)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_async_test_override_default_disable", variant), Async)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_async_test_override_default_sync", variant), Async)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_async_test_no_override", variant), Async)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_async_test_override_default_async", variant), Async)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_async_test_override_default_disable", variant), Async)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_async_test_override_default_sync", variant), Async)
 
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_sync_binary_no_override", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_sync_binary_override_default_async", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_sync_binary_override_default_disable", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_sync_binary_override_default_sync", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_sync_binary_no_override", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_sync_binary_override_default_async", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_sync_binary_override_default_disable", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_sync_binary_override_default_sync", variant), Sync)
 
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_sync_test_no_override", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_sync_test_override_default_async", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_sync_test_override_default_disable", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_sync_test_override_default_sync", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_sync_test_no_override", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_sync_test_override_default_async", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_sync_test_override_default_disable", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_sync_test_override_default_sync", variant), Sync)
 
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_memtag_set_sync_binary_no_override", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_memtag_set_sync_binary_override_default_async", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_memtag_set_sync_binary_no_override", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_memtag_set_sync_binary_override_default_async", variant), Sync)
 	// should sanitize: { diag: { memtag: true } } result in Sync instead of None here?
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_memtag_set_sync_binary_override_default_disable", variant), None)
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_memtag_set_sync_binary_override_default_sync", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_memtag_set_sync_binary_override_default_disable", variant), None)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_memtag_set_sync_binary_override_default_sync", variant), Sync)
 
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_memtag_set_sync_test_no_override", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_memtag_set_sync_test_override_default_async", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_memtag_set_sync_test_override_default_disable", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_memtag_set_sync_test_override_default_sync", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_memtag_set_sync_test_no_override", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_memtag_set_sync_test_override_default_async", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_memtag_set_sync_test_override_default_disable", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_memtag_set_sync_test_override_default_sync", variant), Sync)
 
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_binary_no_override", variant), Async)
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_binary_override_default_async", variant), Async)
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_binary_override_default_disable", variant), None)
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_binary_override_default_sync", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_binary_no_override", variant), Async)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_binary_override_default_async", variant), Async)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_binary_override_default_disable", variant), None)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_binary_override_default_sync", variant), Sync)
 
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_test_no_override", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_test_override_default_async", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_test_override_default_disable", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_test_override_default_sync", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_test_no_override", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_test_override_default_async", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_test_override_default_disable", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_test_override_default_sync", variant), Sync)
 }
 
 func TestSanitizeMemtagHeapWithSanitizeDeviceDiag(t *testing.T) {
@@ -1131,66 +1131,66 @@ func TestSanitizeMemtagHeapWithSanitizeDeviceDiag(t *testing.T) {
 	).RunTest(t)
 	ctx := result.TestContext
 
-	checkHasMemtagNote(t, ctx.ModuleForTests("no_memtag_binary_no_override", variant), None)
-	checkHasMemtagNote(t, ctx.ModuleForTests("no_memtag_binary_override_default_async", variant), None)
-	checkHasMemtagNote(t, ctx.ModuleForTests("no_memtag_binary_override_default_disable", variant), None)
-	checkHasMemtagNote(t, ctx.ModuleForTests("no_memtag_binary_override_default_sync", variant), None)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "no_memtag_binary_no_override", variant), None)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "no_memtag_binary_override_default_async", variant), None)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "no_memtag_binary_override_default_disable", variant), None)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "no_memtag_binary_override_default_sync", variant), None)
 
-	checkHasMemtagNote(t, ctx.ModuleForTests("no_memtag_test_no_override", variant), None)
-	checkHasMemtagNote(t, ctx.ModuleForTests("no_memtag_test_override_default_async", variant), None)
-	checkHasMemtagNote(t, ctx.ModuleForTests("no_memtag_test_override_default_disable", variant), None)
-	checkHasMemtagNote(t, ctx.ModuleForTests("no_memtag_test_override_default_sync", variant), None)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "no_memtag_test_no_override", variant), None)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "no_memtag_test_override_default_async", variant), None)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "no_memtag_test_override_default_disable", variant), None)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "no_memtag_test_override_default_sync", variant), None)
 
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_binary_no_override", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_binary_override_default_async", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_binary_override_default_disable", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_binary_override_default_sync", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_binary_no_override", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_binary_override_default_async", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_binary_override_default_disable", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_binary_override_default_sync", variant), Sync)
 
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_test_no_override", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_test_override_default_async", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_test_override_default_disable", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_test_override_default_sync", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_test_no_override", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_test_override_default_async", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_test_override_default_disable", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_test_override_default_sync", variant), Sync)
 
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_async_binary_no_override", variant), Async)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_async_binary_override_default_async", variant), Async)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_async_binary_override_default_disable", variant), Async)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_async_binary_override_default_sync", variant), Async)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_async_binary_no_override", variant), Async)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_async_binary_override_default_async", variant), Async)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_async_binary_override_default_disable", variant), Async)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_async_binary_override_default_sync", variant), Async)
 
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_async_test_no_override", variant), Async)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_async_test_override_default_async", variant), Async)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_async_test_override_default_disable", variant), Async)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_async_test_override_default_sync", variant), Async)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_async_test_no_override", variant), Async)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_async_test_override_default_async", variant), Async)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_async_test_override_default_disable", variant), Async)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_async_test_override_default_sync", variant), Async)
 
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_sync_binary_no_override", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_sync_binary_override_default_async", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_sync_binary_override_default_disable", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_sync_binary_override_default_sync", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_sync_binary_no_override", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_sync_binary_override_default_async", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_sync_binary_override_default_disable", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_sync_binary_override_default_sync", variant), Sync)
 
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_sync_test_no_override", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_sync_test_override_default_async", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_sync_test_override_default_disable", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("set_memtag_set_sync_test_override_default_sync", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_sync_test_no_override", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_sync_test_override_default_async", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_sync_test_override_default_disable", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "set_memtag_set_sync_test_override_default_sync", variant), Sync)
 
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_memtag_set_sync_binary_no_override", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_memtag_set_sync_binary_override_default_async", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_memtag_set_sync_binary_no_override", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_memtag_set_sync_binary_override_default_async", variant), Sync)
 	// should sanitize: { diag: { memtag: true } } result in Sync instead of None here?
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_memtag_set_sync_binary_override_default_disable", variant), None)
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_memtag_set_sync_binary_override_default_sync", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_memtag_set_sync_binary_override_default_disable", variant), None)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_memtag_set_sync_binary_override_default_sync", variant), Sync)
 
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_memtag_set_sync_test_no_override", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_memtag_set_sync_test_override_default_async", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_memtag_set_sync_test_override_default_disable", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_memtag_set_sync_test_override_default_sync", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_memtag_set_sync_test_no_override", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_memtag_set_sync_test_override_default_async", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_memtag_set_sync_test_override_default_disable", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_memtag_set_sync_test_override_default_sync", variant), Sync)
 
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_binary_no_override", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_binary_override_default_async", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_binary_override_default_disable", variant), None)
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_binary_override_default_sync", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_binary_no_override", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_binary_override_default_async", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_binary_override_default_disable", variant), None)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_binary_override_default_sync", variant), Sync)
 
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_test_no_override", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_test_override_default_async", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_test_override_default_disable", variant), Sync)
-	checkHasMemtagNote(t, ctx.ModuleForTests("unset_test_override_default_sync", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_test_no_override", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_test_override_default_async", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_test_override_default_disable", variant), Sync)
+	checkHasMemtagNote(t, ctx.ModuleForTests(t, "unset_test_override_default_sync", variant), Sync)
 }
 
 func TestCfi(t *testing.T) {
@@ -1250,14 +1250,14 @@ func TestCfi(t *testing.T) {
 	cfi_suffix := "_cfi"
 	static_suffix := "_static"
 
-	sharedWithCfiLib := result.ModuleForTests("shared_with_cfi", buildOs+shared_suffix+cfi_suffix)
-	sharedNoCfiLib := result.ModuleForTests("shared_no_cfi", buildOs+shared_suffix)
-	staticWithCfiLib := result.ModuleForTests("static_dep_with_cfi", buildOs+static_suffix)
-	staticWithCfiLibCfiVariant := result.ModuleForTests("static_dep_with_cfi", buildOs+static_suffix+cfi_suffix)
-	staticNoCfiLib := result.ModuleForTests("static_dep_no_cfi", buildOs+static_suffix)
-	staticNoCfiLibCfiVariant := result.ModuleForTests("static_dep_no_cfi", buildOs+static_suffix+cfi_suffix)
-	sharedRdepNoCfi := result.ModuleForTests("shared_rdep_no_cfi", buildOs+shared_suffix)
-	staticDepWithCfi2Lib := result.ModuleForTests("static_dep_with_cfi_2", buildOs+static_suffix)
+	sharedWithCfiLib := result.ModuleForTests(t, "shared_with_cfi", buildOs+shared_suffix+cfi_suffix)
+	sharedNoCfiLib := result.ModuleForTests(t, "shared_no_cfi", buildOs+shared_suffix)
+	staticWithCfiLib := result.ModuleForTests(t, "static_dep_with_cfi", buildOs+static_suffix)
+	staticWithCfiLibCfiVariant := result.ModuleForTests(t, "static_dep_with_cfi", buildOs+static_suffix+cfi_suffix)
+	staticNoCfiLib := result.ModuleForTests(t, "static_dep_no_cfi", buildOs+static_suffix)
+	staticNoCfiLibCfiVariant := result.ModuleForTests(t, "static_dep_no_cfi", buildOs+static_suffix+cfi_suffix)
+	sharedRdepNoCfi := result.ModuleForTests(t, "shared_rdep_no_cfi", buildOs+shared_suffix)
+	staticDepWithCfi2Lib := result.ModuleForTests(t, "static_dep_with_cfi_2", buildOs+static_suffix)
 
 	// Confirm assumptions about propagation of CFI enablement
 	expectStaticLinkDep(t, ctx, sharedWithCfiLib, staticWithCfiLibCfiVariant)

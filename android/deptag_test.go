@@ -90,10 +90,10 @@ func TestInstallDependencyTag(t *testing.T) {
 
 	config := result.Config
 
-	hostFoo := result.ModuleForTests("foo", config.BuildOSCommonTarget.String()).Description("install")
-	hostInstallDep := result.ModuleForTests("install_dep", config.BuildOSCommonTarget.String()).Description("install")
-	hostTransitive := result.ModuleForTests("transitive", config.BuildOSCommonTarget.String()).Description("install")
-	hostDep := result.ModuleForTests("dep", config.BuildOSCommonTarget.String()).Description("install")
+	hostFoo := result.ModuleForTests(t, "foo", config.BuildOSCommonTarget.String()).Description("install")
+	hostInstallDep := result.ModuleForTests(t, "install_dep", config.BuildOSCommonTarget.String()).Description("install")
+	hostTransitive := result.ModuleForTests(t, "transitive", config.BuildOSCommonTarget.String()).Description("install")
+	hostDep := result.ModuleForTests(t, "dep", config.BuildOSCommonTarget.String()).Description("install")
 
 	if g, w := hostFoo.Implicits.Strings(), hostInstallDep.Output.String(); !InList(w, g) {
 		t.Errorf("expected host dependency %q, got %q", w, g)
@@ -111,10 +111,10 @@ func TestInstallDependencyTag(t *testing.T) {
 		t.Errorf("expected no host dependency %q, got %q", w, g)
 	}
 
-	deviceFoo := result.ModuleForTests("foo", "android_common").Description("install")
-	deviceInstallDep := result.ModuleForTests("install_dep", "android_common").Description("install")
-	deviceTransitive := result.ModuleForTests("transitive", "android_common").Description("install")
-	deviceDep := result.ModuleForTests("dep", "android_common").Description("install")
+	deviceFoo := result.ModuleForTests(t, "foo", "android_common").Description("install")
+	deviceInstallDep := result.ModuleForTests(t, "install_dep", "android_common").Description("install")
+	deviceTransitive := result.ModuleForTests(t, "transitive", "android_common").Description("install")
+	deviceDep := result.ModuleForTests(t, "dep", "android_common").Description("install")
 
 	if g, w := deviceFoo.OrderOnly.Strings(), deviceInstallDep.Output.String(); !InList(w, g) {
 		t.Errorf("expected device dependency %q, got %q", w, g)

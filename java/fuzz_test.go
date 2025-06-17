@@ -30,6 +30,7 @@ var prepForJavaFuzzTest = android.GroupFixturePreparers(
 )
 
 func TestJavaFuzz(t *testing.T) {
+	t.Parallel()
 	result := prepForJavaFuzzTest.RunTestWithBp(t, `
 		java_fuzz {
 			name: "foo",
@@ -63,16 +64,16 @@ func TestJavaFuzz(t *testing.T) {
 
 	osCommonTarget := result.Config.BuildOSCommonTarget.String()
 
-	javac := result.ModuleForTests("foo", osCommonTarget).Rule("javac")
-	combineJar := result.ModuleForTests("foo", osCommonTarget).Description("for javac")
+	javac := result.ModuleForTests(t, "foo", osCommonTarget).Rule("javac")
+	combineJar := result.ModuleForTests(t, "foo", osCommonTarget).Description("for javac")
 
 	if len(javac.Inputs) != 1 || javac.Inputs[0].String() != "a.java" {
 		t.Errorf(`foo inputs %v != ["a.java"]`, javac.Inputs)
 	}
 
-	baz := result.ModuleForTests("baz", osCommonTarget).Rule("javac").Output.String()
-	barOut := filepath.Join("out", "soong", ".intermediates", "bar", osCommonTarget, "javac-header", "bar.jar")
-	bazOut := filepath.Join("out", "soong", ".intermediates", "baz", osCommonTarget, "javac-header", "baz.jar")
+	baz := result.ModuleForTests(t, "baz", osCommonTarget).Rule("javac").Output.String()
+	barOut := filepath.Join("out", "soong", ".intermediates", "bar", osCommonTarget, "local-javac-header", "bar.jar")
+	bazOut := filepath.Join("out", "soong", ".intermediates", "baz", osCommonTarget, "local-javac-header", "baz.jar")
 
 	android.AssertStringDoesContain(t, "foo classpath", javac.Args["classpath"], barOut)
 	android.AssertStringDoesContain(t, "foo classpath", javac.Args["classpath"], bazOut)
@@ -82,7 +83,7 @@ func TestJavaFuzz(t *testing.T) {
 	}
 
 	ctx := result.TestContext
-	foo := ctx.ModuleForTests("foo", osCommonTarget).Module().(*JavaFuzzTest)
+	foo := ctx.ModuleForTests(t, "foo", osCommonTarget).Module().(*JavaFuzzTest)
 
 	expected := "lib64/libjni.so"
 	if runtime.GOOS == "darwin" {

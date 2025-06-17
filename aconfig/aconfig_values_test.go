@@ -30,7 +30,7 @@ func TestAconfigValues(t *testing.T) {
 			`
 	result := runTest(t, android.FixtureExpectsNoErrors, bp)
 
-	module := result.ModuleForTests("module_name", "").Module().(*ValuesModule)
+	module := result.ModuleForTests(t, "module_name", "").Module().(*ValuesModule)
 
 	// Check that the provider has the right contents
 	depData, _ := android.OtherModuleProvider(result, module, valuesProviderKey)

@@ -231,7 +231,7 @@ func (library *libraryDecorator) prepareAndroidMKProviderInfo(config android.Con
 	} else if library.shared() {
 		entries.Class = "SHARED_LIBRARIES"
 		entries.SetString("LOCAL_SOONG_TOC", library.toc().String())
-		if !library.buildStubs() && library.unstrippedOutputFile != nil {
+		if !library.BuildStubs() && library.unstrippedOutputFile != nil {
 			entries.SetString("LOCAL_SOONG_UNSTRIPPED_BINARY", library.unstrippedOutputFile.String())
 		}
 		if len(library.Properties.Overrides) > 0 {
@@ -242,10 +242,6 @@ func (library *libraryDecorator) prepareAndroidMKProviderInfo(config android.Con
 		}
 	} else if library.header() {
 		entries.Class = "HEADER_LIBRARIES"
-	}
-
-	if library.distFile != nil {
-		entries.DistFiles = android.MakeDefaultDistFiles(library.distFile)
 	}
 
 	library.androidMkWriteExportedFlags(entries)
@@ -260,16 +256,16 @@ func (library *libraryDecorator) prepareAndroidMKProviderInfo(config android.Con
 		entries.SetString("LOCAL_PREBUILT_COVERAGE_ARCHIVE", library.coverageOutputFile.String())
 	}
 
-	if library.shared() && !library.buildStubs() {
+	if library.shared() && !library.BuildStubs() {
 		ctx.subAndroidMk(config, entries, library.baseInstaller)
 	} else {
-		if library.buildStubs() && library.stubsVersion() != "" {
-			entries.SubName = "." + library.stubsVersion()
+		if library.BuildStubs() && library.StubsVersion() != "" {
+			entries.SubName = "." + library.StubsVersion()
 		}
 		// library.makeUninstallable() depends on this to bypass HideFromMake() for
 		// static libraries.
 		entries.SetBool("LOCAL_UNINSTALLABLE_MODULE", true)
-		if library.buildStubs() {
+		if library.BuildStubs() {
 			entries.SetBool("LOCAL_NO_NOTICE_FILE", true)
 		}
 	}
@@ -281,10 +277,10 @@ func (library *libraryDecorator) prepareAndroidMKProviderInfo(config android.Con
 	// very early stage in the boot process).
 	if len(library.Properties.Stubs.Versions) > 0 && !ctx.Host() && ctx.NotInPlatform() &&
 		!ctx.InRamdisk() && !ctx.InVendorRamdisk() && !ctx.InRecovery() && !ctx.InVendorOrProduct() && !ctx.static() {
-		if library.buildStubs() && library.isLatestStubVersion() {
+		if library.BuildStubs() && library.isLatestStubVersion() {
 			entries.SubName = ""
 		}
-		if !library.buildStubs() {
+		if !library.BuildStubs() {
 			entries.SubName = ".bootstrap"
 		}
 	}
@@ -336,7 +332,6 @@ func (binary *binaryDecorator) prepareAndroidMKProviderInfo(config android.Confi
 	ctx.subAndroidMk(config, entries, binary.baseInstaller)
 
 	entries.Class = "EXECUTABLES"
-	entries.DistFiles = binary.distFiles
 	entries.SetString("LOCAL_SOONG_UNSTRIPPED_BINARY", binary.unstrippedOutputFile.String())
 	if len(binary.symlinks) > 0 {
 		entries.AddStrings("LOCAL_MODULE_SYMLINKS", binary.symlinks...)
@@ -423,7 +418,7 @@ func (c *stubDecorator) prepareAndroidMKProviderInfo(config android.Config, ctx 
 	entries.SubName = ndkLibrarySuffix + "." + c.apiLevel.String()
 	entries.Class = "SHARED_LIBRARIES"
 
-	if !c.buildStubs() {
+	if !c.BuildStubs() {
 		entries.Disabled = true
 		return
 	}

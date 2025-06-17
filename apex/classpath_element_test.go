@@ -198,14 +198,12 @@ func TestCreateClasspathElements(t *testing.T) {
 
 	result := preparer.RunTest(t)
 
-	artFragment := result.Module("art-bootclasspath-fragment", "android_common_apex10000")
+	artFragment := result.Module("art-bootclasspath-fragment", "android_common_com.android.art")
 	artBaz := result.Module("baz", "android_common_apex10000")
 	artQuuz := result.Module("quuz", "android_common_apex10000")
 
-	myFragment := result.Module("mybootclasspath-fragment", "android_common_apex10000")
+	myFragment := result.Module("mybootclasspath-fragment", "android_common_myapex")
 	myBar := result.Module("bar", "android_common_apex10000")
-
-	other := result.Module("othersdklibrary", "android_common_apex10000")
 
 	otherApexLibrary := result.Module("otherapexlibrary", "android_common_apex10000")
 
@@ -240,7 +238,11 @@ func TestCreateClasspathElements(t *testing.T) {
 	t.Run("art:baz, art:quuz, my:bar, foo", func(t *testing.T) {
 		t.Parallel()
 		ctx := newCtx()
-		elements := java.CreateClasspathElements(ctx, []android.Module{artBaz, artQuuz, myBar, platformFoo}, []android.Module{artFragment, myFragment})
+		elements := java.CreateClasspathElements(ctx,
+			[]android.Module{artBaz, artQuuz, myBar, platformFoo},
+			[]android.Module{artFragment, myFragment},
+			map[android.Module]string{artBaz: "com.android.art", artQuuz: "com.android.art", myBar: "myapex"},
+			map[string]android.Module{"com.android.art": artFragment, "myapex": myFragment})
 		expectedElements := java.ClasspathElements{
 			expectFragmentElement(artFragment, artBaz, artQuuz),
 			expectFragmentElement(myFragment, myBar),
@@ -249,32 +251,16 @@ func TestCreateClasspathElements(t *testing.T) {
 		assertElementsEquals(t, "elements", expectedElements, elements)
 	})
 
-	// Verify that CreateClasspathElements detects when an apex has multiple fragments.
-	t.Run("multiple fragments for same apex", func(t *testing.T) {
-		t.Parallel()
-		ctx := newCtx()
-		elements := java.CreateClasspathElements(ctx, []android.Module{}, []android.Module{artFragment, artFragment})
-		android.FailIfNoMatchingErrors(t, "apex com.android.art has multiple fragments, art-bootclasspath-fragment{.*} and art-bootclasspath-fragment{.*}", ctx.errs)
-		expectedElements := java.ClasspathElements{}
-		assertElementsEquals(t, "elements", expectedElements, elements)
-	})
-
-	// Verify that CreateClasspathElements detects when a library is in multiple fragments.
-	t.Run("library from multiple fragments", func(t *testing.T) {
-		t.Parallel()
-		ctx := newCtx()
-		elements := java.CreateClasspathElements(ctx, []android.Module{other}, []android.Module{artFragment, myFragment})
-		android.FailIfNoMatchingErrors(t, "library othersdklibrary{.*} is in two separate fragments, art-bootclasspath-fragment{.*} and mybootclasspath-fragment{.*}", ctx.errs)
-		expectedElements := java.ClasspathElements{}
-		assertElementsEquals(t, "elements", expectedElements, elements)
-	})
-
 	// Verify that CreateClasspathElements detects when a fragment's contents are not contiguous and
 	// are separated by a library from another fragment.
 	t.Run("discontiguous separated by fragment", func(t *testing.T) {
 		t.Parallel()
 		ctx := newCtx()
-		elements := java.CreateClasspathElements(ctx, []android.Module{artBaz, myBar, artQuuz, platformFoo}, []android.Module{artFragment, myFragment})
+		elements := java.CreateClasspathElements(ctx,
+			[]android.Module{artBaz, myBar, artQuuz, platformFoo},
+			[]android.Module{artFragment, myFragment},
+			map[android.Module]string{artBaz: "com.android.art", artQuuz: "com.android.art", myBar: "myapex"},
+			map[string]android.Module{"com.android.art": artFragment, "myapex": myFragment})
 		expectedElements := java.ClasspathElements{
 			expectFragmentElement(artFragment, artBaz, artQuuz),
 			expectFragmentElement(myFragment, myBar),
@@ -289,7 +275,11 @@ func TestCreateClasspathElements(t *testing.T) {
 	t.Run("discontiguous separated by library", func(t *testing.T) {
 		t.Parallel()
 		ctx := newCtx()
-		elements := java.CreateClasspathElements(ctx, []android.Module{artBaz, platformFoo, artQuuz, myBar}, []android.Module{artFragment, myFragment})
+		elements := java.CreateClasspathElements(ctx,
+			[]android.Module{artBaz, platformFoo, artQuuz, myBar},
+			[]android.Module{artFragment, myFragment},
+			map[android.Module]string{artBaz: "com.android.art", artQuuz: "com.android.art", myBar: "myapex"},
+			map[string]android.Module{"com.android.art": artFragment, "myapex": myFragment})
 		expectedElements := java.ClasspathElements{
 			expectFragmentElement(artFragment, artBaz, artQuuz),
 			expectLibraryElement(platformFoo),
@@ -305,7 +295,11 @@ func TestCreateClasspathElements(t *testing.T) {
 	t.Run("no fragment for apex", func(t *testing.T) {
 		t.Parallel()
 		ctx := newCtx()
-		elements := java.CreateClasspathElements(ctx, []android.Module{artBaz, otherApexLibrary}, []android.Module{artFragment})
+		elements := java.CreateClasspathElements(ctx,
+			[]android.Module{artBaz, otherApexLibrary},
+			[]android.Module{artFragment},
+			map[android.Module]string{artBaz: "com.android.art", otherApexLibrary: "otherapex"},
+			map[string]android.Module{"com.android.art": artFragment})
 		expectedElements := java.ClasspathElements{
 			expectFragmentElement(artFragment, artBaz),
 		}

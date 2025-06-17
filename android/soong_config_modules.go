@@ -506,6 +506,10 @@ func configModuleFactory(factory blueprint.ModuleFactory, moduleType *soongconfi
 		conditionalProps := proptools.CloneEmptyProperties(conditionalFactoryProps)
 		props = append(props, conditionalProps.Interface())
 
+		if m, ok := module.(Module); ok {
+			m.base().baseProperties.Soong_config_base_module_type = &moduleType.BaseModuleType
+		}
+
 		// Regular Soong operation wraps the existing module factory with a
 		// conditional on Soong config variables by reading the product
 		// config variables from Make.

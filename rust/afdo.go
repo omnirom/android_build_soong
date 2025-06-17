@@ -66,7 +66,7 @@ func (afdo *afdo) flags(ctx android.ModuleContext, flags Flags, deps PathDeps) (
 		return flags, deps
 	}
 
-	ctx.VisitDirectDepsWithTag(cc.FdoProfileTag, func(m android.Module) {
+	ctx.VisitDirectDepsProxyWithTag(cc.FdoProfileTag, func(m android.ModuleProxy) {
 		if info, ok := android.OtherModuleProvider(ctx, m, cc.FdoProfileProvider); ok {
 			path := info.Path
 			profileUseFlag := fmt.Sprintf(afdoFlagFormat, path.String())

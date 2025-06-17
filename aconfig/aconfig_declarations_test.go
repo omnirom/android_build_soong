@@ -37,7 +37,7 @@ func TestAconfigDeclarations(t *testing.T) {
 	`
 	result := runTest(t, android.FixtureExpectsNoErrors, bp)
 
-	module := result.ModuleForTests("module_name", "").Module().(*DeclarationsModule)
+	module := result.ModuleForTests(t, "module_name", "").Module().(*DeclarationsModule)
 
 	// Check that the provider has the right contents
 	depData, _ := android.OtherModuleProvider(result, module, android.AconfigDeclarationsProviderKey)
@@ -66,7 +66,7 @@ func TestAconfigDeclarationsWithExportableUnset(t *testing.T) {
 	`
 	result := runTest(t, android.FixtureExpectsNoErrors, bp)
 
-	module := result.ModuleForTests("module_name", "").Module().(*DeclarationsModule)
+	module := result.ModuleForTests(t, "module_name", "").Module().(*DeclarationsModule)
 	depData, _ := android.OtherModuleProvider(result, module, android.AconfigDeclarationsProviderKey)
 	android.AssertBoolEquals(t, "exportable", depData.Exportable, false)
 }
@@ -84,7 +84,7 @@ func TestAconfigDeclarationsWithContainer(t *testing.T) {
 	`
 	result := runTest(t, android.FixtureExpectsNoErrors, bp)
 
-	module := result.ModuleForTests("module_name", "")
+	module := result.ModuleForTests(t, "module_name", "")
 	rule := module.Rule("aconfig")
 	android.AssertStringEquals(t, "rule must contain container", rule.Args["container"], "--container com.android.foo")
 }
@@ -204,7 +204,7 @@ func TestGenerateAndroidBuildActions(t *testing.T) {
 			fixture = fixture.ExtendWithErrorHandler(test.errorHandler)
 		}
 		result := fixture.RunTestWithBp(t, test.bp)
-		module := result.ModuleForTests("module_name", "").Module().(*DeclarationsModule)
+		module := result.ModuleForTests(t, "module_name", "").Module().(*DeclarationsModule)
 		depData, _ := android.OtherModuleProvider(result, module, android.AconfigReleaseDeclarationsProviderKey)
 		expectedKeys := []string{""}
 		for _, rc := range strings.Split(test.buildFlags["RELEASE_ACONFIG_EXTRA_RELEASE_CONFIGS"], " ") {

@@ -67,6 +67,7 @@ func (procMacro *procMacroDecorator) compilerProps() []interface{} {
 func (procMacro *procMacroDecorator) compilerFlags(ctx ModuleContext, flags Flags) Flags {
 	flags = procMacro.baseCompiler.compilerFlags(ctx, flags)
 	flags.RustFlags = append(flags.RustFlags, "--extern proc_macro")
+	flags.RustFlags = append(flags.RustFlags, "-C metadata="+ctx.ModuleName())
 	return flags
 }
 
@@ -98,4 +99,10 @@ func (procMacro *procMacroDecorator) ProcMacro() bool {
 func (procMacro *procMacroDecorator) everInstallable() bool {
 	// Proc_macros are never installed
 	return false
+}
+
+func (library *procMacroDecorator) moduleInfoJSON(ctx ModuleContext, moduleInfoJSON *android.ModuleInfoJSON) {
+	library.baseCompiler.moduleInfoJSON(ctx, moduleInfoJSON)
+
+	moduleInfoJSON.Class = []string{"PROC_MACRO_LIBRARIES"}
 }

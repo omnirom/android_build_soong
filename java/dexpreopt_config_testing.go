@@ -1217,6 +1217,7 @@ func checkBootImageConfig(t *testing.T, result *android.TestResult, imageConfig 
 	}
 
 	t.Run(imageConfig.name, func(t *testing.T) {
+		t.Parallel()
 		nestedCheckBootImageConfig(t, result, imageConfig, mutated, expected)
 	})
 }
@@ -1236,7 +1237,7 @@ func nestedCheckBootImageConfig(t *testing.T, result *android.TestResult, imageC
 	android.AssertPathRelativeToTopEquals(t, "zip", expected.zip, imageConfig.zip)
 
 	if !mutated {
-		dexBootJarModule := result.ModuleForTests("dex_bootjars", "android_common")
+		dexBootJarModule := result.ModuleForTests(t, "dex_bootjars", "android_common")
 		profileInstallInfo, _ := android.OtherModuleProvider(result, dexBootJarModule.Module(), profileInstallInfoProvider)
 		assertInstallsEqual(t, "profileInstalls", expected.profileInstalls, profileInstallInfo.profileInstalls)
 		android.AssertStringEquals(t, "profileLicenseMetadataFile", expected.profileLicenseMetadataFile, profileInstallInfo.profileLicenseMetadataFile.RelativeToTop().String())
@@ -1246,6 +1247,7 @@ func nestedCheckBootImageConfig(t *testing.T, result *android.TestResult, imageC
 	for i, variant := range imageConfig.variants {
 		expectedVariant := expected.variants[i]
 		t.Run(variant.target.Arch.ArchType.String(), func(t *testing.T) {
+			t.Parallel()
 			android.AssertDeepEquals(t, "archType", expectedVariant.archType, variant.target.Arch.ArchType)
 			android.AssertDeepEquals(t, "dexLocations", expectedVariant.dexLocations, variant.dexLocations)
 			android.AssertDeepEquals(t, "dexLocationsDeps", expectedVariant.dexLocationsDeps, variant.dexLocationsDeps)
@@ -1279,7 +1281,7 @@ func CheckMutatedFrameworkBootImageConfig(t *testing.T, result *android.TestResu
 // checkDexpreoptMakeVars checks the DEXPREOPT_ prefixed make vars produced by dexpreoptBootJars
 // singleton.
 func checkDexpreoptMakeVars(t *testing.T, result *android.TestResult, expectedLicenseMetadataFile string) {
-	vars := result.MakeVarsForTesting(func(variable android.MakeVarVariable) bool {
+	vars := result.MakeVarsForTesting(t, func(variable android.MakeVarVariable) bool {
 		return strings.HasPrefix(variable.Name(), "DEXPREOPT_")
 	})
 

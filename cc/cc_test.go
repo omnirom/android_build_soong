@@ -160,7 +160,7 @@ func TestVendorSrc(t *testing.T) {
 		}
 	`)
 
-	ld := ctx.ModuleForTests("libTest", vendorVariant).Rule("ld")
+	ld := ctx.ModuleForTests(t, "libTest", vendorVariant).Rule("ld")
 	var objs []string
 	for _, o := range ld.Inputs {
 		objs = append(objs, o.Base())
@@ -171,7 +171,7 @@ func TestVendorSrc(t *testing.T) {
 }
 
 func checkInstallPartition(t *testing.T, ctx *android.TestContext, name, variant, expected string) {
-	mod := ctx.ModuleForTests(name, variant).Module().(*Module)
+	mod := ctx.ModuleForTests(t, name, variant).Module().(*Module)
 	partitionDefined := false
 	checkPartition := func(specific bool, partition string) {
 		if specific {
@@ -311,7 +311,7 @@ func TestDataLibs(t *testing.T) {
 	config := TestConfig(t.TempDir(), android.Android, nil, bp, nil)
 
 	ctx := testCcWithConfig(t, config)
-	testingModule := ctx.ModuleForTests("main_test", "android_arm_armv7-a-neon")
+	testingModule := ctx.ModuleForTests(t, "main_test", "android_arm_armv7-a-neon")
 	testBinary := testingModule.Module().(*Module).linker.(*testBinary)
 	outputFiles := testingModule.OutputFiles(ctx, t, "")
 	if len(outputFiles) != 1 {
@@ -363,7 +363,7 @@ func TestDataLibsRelativeInstallPath(t *testing.T) {
 	config := TestConfig(t.TempDir(), android.Android, nil, bp, nil)
 
 	ctx := testCcWithConfig(t, config)
-	testingModule := ctx.ModuleForTests("main_test", "android_arm_armv7-a-neon")
+	testingModule := ctx.ModuleForTests(t, "main_test", "android_arm_armv7-a-neon")
 	module := testingModule.Module()
 	testBinary := module.(*Module).linker.(*testBinary)
 	outputFiles := testingModule.OutputFiles(ctx, t, "")
@@ -405,7 +405,7 @@ func TestTestBinaryTestSuites(t *testing.T) {
 	`
 
 	ctx := prepareForCcTest.RunTestWithBp(t, bp).TestContext
-	module := ctx.ModuleForTests("main_test", "android_arm_armv7-a-neon").Module()
+	module := ctx.ModuleForTests(t, "main_test", "android_arm_armv7-a-neon").Module()
 
 	entries := android.AndroidMkInfoForTest(t, ctx, module).PrimaryInfo
 	compatEntries := entries.EntryMap["LOCAL_COMPATIBILITY_SUITE"]
@@ -437,7 +437,7 @@ func TestTestLibraryTestSuites(t *testing.T) {
 	`
 
 	ctx := prepareForCcTest.RunTestWithBp(t, bp).TestContext
-	module := ctx.ModuleForTests("main_test_lib", "android_arm_armv7-a-neon_shared").Module()
+	module := ctx.ModuleForTests(t, "main_test_lib", "android_arm_armv7-a-neon_shared").Module()
 
 	entries := android.AndroidMkInfoForTest(t, ctx, module).PrimaryInfo
 	compatEntries := entries.EntryMap["LOCAL_COMPATIBILITY_SUITE"]
@@ -668,7 +668,7 @@ func TestMakeLinkType(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			module := ctx.ModuleForTests(test.name, test.variant).Module().(*Module)
+			module := ctx.ModuleForTests(t, test.name, test.variant).Module().(*Module)
 			assertString(t, module.makeLinkType, test.expected)
 		})
 	}
@@ -861,10 +861,10 @@ func TestStaticLibDepReordering(t *testing.T) {
 	`)
 
 	variant := "android_arm64_armv8-a_static"
-	moduleA := ctx.ModuleForTests("a", variant).Module().(*Module)
+	moduleA := ctx.ModuleForTests(t, "a", variant).Module().(*Module)
 	staticLibInfo, _ := android.OtherModuleProvider(ctx, moduleA, StaticLibraryInfoProvider)
 	actual := android.Paths(staticLibInfo.TransitiveStaticLibrariesForOrdering.ToList()).RelativeToTop()
-	expected := GetOutputPaths(ctx, variant, []string{"a", "c", "b", "d"})
+	expected := GetOutputPaths(t, ctx, variant, []string{"a", "c", "b", "d"})
 
 	if !reflect.DeepEqual(actual, expected) {
 		t.Errorf("staticDeps orderings were not propagated correctly"+
@@ -897,10 +897,10 @@ func TestStaticLibDepReorderingWithShared(t *testing.T) {
 	`)
 
 	variant := "android_arm64_armv8-a_static"
-	moduleA := ctx.ModuleForTests("a", variant).Module().(*Module)
+	moduleA := ctx.ModuleForTests(t, "a", variant).Module().(*Module)
 	staticLibInfo, _ := android.OtherModuleProvider(ctx, moduleA, StaticLibraryInfoProvider)
 	actual := android.Paths(staticLibInfo.TransitiveStaticLibrariesForOrdering.ToList()).RelativeToTop()
-	expected := GetOutputPaths(ctx, variant, []string{"a", "c", "b"})
+	expected := GetOutputPaths(t, ctx, variant, []string{"a", "c", "b"})
 
 	if !reflect.DeepEqual(actual, expected) {
 		t.Errorf("staticDeps orderings did not account for shared libs"+
@@ -1004,12 +1004,12 @@ func TestLlndkLibrary(t *testing.T) {
 	}
 	android.AssertArrayString(t, "variants for llndk stubs", expected, actual)
 
-	params := result.ModuleForTests("libllndk", "android_vendor_arm_armv7-a-neon_shared").Description("generate stub")
+	params := result.ModuleForTests(t, "libllndk", "android_vendor_arm_armv7-a-neon_shared").Description("generate stub")
 	android.AssertSame(t, "use Vendor API level for default stubs", "35", params.Args["apiLevel"])
 
 	checkExportedIncludeDirs := func(module, variant string, expectedSystemDirs []string, expectedDirs ...string) {
 		t.Helper()
-		m := result.ModuleForTests(module, variant).Module()
+		m := result.ModuleForTests(t, module, variant).Module()
 		f, _ := android.OtherModuleProvider(result, m, FlagExporterInfoProvider)
 		android.AssertPathsRelativeToTopEquals(t, "exported include dirs for "+module+"["+variant+"]",
 			expectedDirs, f.IncludeDirs)
@@ -1030,14 +1030,14 @@ func TestLlndkLibrary(t *testing.T) {
 
 	checkAbiLinkerIncludeDirs := func(module string) {
 		t.Helper()
-		coreModule := result.ModuleForTests(module, coreVariant)
+		coreModule := result.ModuleForTests(t, module, coreVariant)
 		abiCheckFlags := ""
 		for _, output := range coreModule.AllOutputs() {
 			if strings.HasSuffix(output, ".so.llndk.lsdump") {
 				abiCheckFlags = coreModule.Output(output).Args["exportedHeaderFlags"]
 			}
 		}
-		vendorModule := result.ModuleForTests(module, vendorVariant).Module()
+		vendorModule := result.ModuleForTests(t, module, vendorVariant).Module()
 		vendorInfo, _ := android.OtherModuleProvider(result, vendorModule, FlagExporterInfoProvider)
 		vendorDirs := android.Concat(vendorInfo.IncludeDirs, vendorInfo.SystemIncludeDirs)
 		android.AssertStringEquals(t, module+" has different exported include dirs for vendor variant and ABI check",
@@ -1078,7 +1078,7 @@ func TestLlndkHeaders(t *testing.T) {
 	`)
 
 	// _static variant is used since _shared reuses *.o from the static variant
-	cc := ctx.ModuleForTests("libvendor", "android_vendor_arm_armv7-a-neon_static").Rule("cc")
+	cc := ctx.ModuleForTests(t, "libvendor", "android_vendor_arm_armv7-a-neon_static").Rule("cc")
 	cflags := cc.Args["cFlags"]
 	if !strings.Contains(cflags, "-Imy_include") {
 		t.Errorf("cflags for libvendor must contain -Imy_include, but was %#v.", cflags)
@@ -1189,33 +1189,33 @@ func TestRuntimeLibs(t *testing.T) {
 	// runtime_libs for core variants use the module names without suffixes.
 	variant := "android_arm64_armv8-a_shared"
 
-	module := ctx.ModuleForTests("libvendor_available1", variant).Module().(*Module)
+	module := ctx.ModuleForTests(t, "libvendor_available1", variant).Module().(*Module)
 	checkRuntimeLibs(t, []string{"liball_available"}, module)
 
-	module = ctx.ModuleForTests("libproduct_available1", variant).Module().(*Module)
+	module = ctx.ModuleForTests(t, "libproduct_available1", variant).Module().(*Module)
 	checkRuntimeLibs(t, []string{"liball_available"}, module)
 
-	module = ctx.ModuleForTests("libcore", variant).Module().(*Module)
+	module = ctx.ModuleForTests(t, "libcore", variant).Module().(*Module)
 	checkRuntimeLibs(t, []string{"liball_available"}, module)
 
 	// runtime_libs for vendor variants have '.vendor' suffixes if the modules have both core
 	// and vendor variants.
 	variant = "android_vendor_arm64_armv8-a_shared"
 
-	module = ctx.ModuleForTests("libvendor_available1", variant).Module().(*Module)
+	module = ctx.ModuleForTests(t, "libvendor_available1", variant).Module().(*Module)
 	checkRuntimeLibs(t, []string{"liball_available.vendor"}, module)
 
-	module = ctx.ModuleForTests("libvendor2", variant).Module().(*Module)
+	module = ctx.ModuleForTests(t, "libvendor2", variant).Module().(*Module)
 	checkRuntimeLibs(t, []string{"liball_available.vendor", "libvendor1", "libproduct_vendor.vendor"}, module)
 
 	// runtime_libs for product variants have '.product' suffixes if the modules have both core
 	// and product variants.
 	variant = "android_product_arm64_armv8-a_shared"
 
-	module = ctx.ModuleForTests("libproduct_available1", variant).Module().(*Module)
+	module = ctx.ModuleForTests(t, "libproduct_available1", variant).Module().(*Module)
 	checkRuntimeLibs(t, []string{"liball_available.product"}, module)
 
-	module = ctx.ModuleForTests("libproduct2", variant).Module().(*Module)
+	module = ctx.ModuleForTests(t, "libproduct2", variant).Module().(*Module)
 	checkRuntimeLibs(t, []string{"liball_available.product", "libproduct1", "libproduct_vendor"}, module)
 }
 
@@ -1224,11 +1224,11 @@ func TestExcludeRuntimeLibs(t *testing.T) {
 	ctx := testCc(t, runtimeLibAndroidBp)
 
 	variant := "android_arm64_armv8-a_shared"
-	module := ctx.ModuleForTests("libvendor_available2", variant).Module().(*Module)
+	module := ctx.ModuleForTests(t, "libvendor_available2", variant).Module().(*Module)
 	checkRuntimeLibs(t, []string{"liball_available"}, module)
 
 	variant = "android_vendor_arm64_armv8-a_shared"
-	module = ctx.ModuleForTests("libvendor_available2", variant).Module().(*Module)
+	module = ctx.ModuleForTests(t, "libvendor_available2", variant).Module().(*Module)
 	checkRuntimeLibs(t, nil, module)
 }
 
@@ -1261,12 +1261,12 @@ func TestStaticLibDepExport(t *testing.T) {
 
 	// Check the shared version of lib2.
 	variant := "android_arm64_armv8-a_shared"
-	module := ctx.ModuleForTests("lib2", variant).Module().(*Module)
+	module := ctx.ModuleForTests(t, "lib2", variant).Module().(*Module)
 	checkStaticLibs(t, []string{"lib1", "libc++demangle", "libclang_rt.builtins"}, module)
 
 	// Check the static version of lib2.
 	variant = "android_arm64_armv8-a_static"
-	module = ctx.ModuleForTests("lib2", variant).Module().(*Module)
+	module = ctx.ModuleForTests(t, "lib2", variant).Module().(*Module)
 	// libc++_static is linked additionally.
 	checkStaticLibs(t, []string{"lib1", "libc++_static", "libc++demangle", "libclang_rt.builtins"}, module)
 }
@@ -1387,7 +1387,7 @@ func TestRecovery(t *testing.T) {
 		t.Errorf("multilib was set to 32 for librecovery32, but its variants has %s.", arm64)
 	}
 
-	recoveryModule := ctx.ModuleForTests("libHalInRecovery", recoveryVariant).Module().(*Module)
+	recoveryModule := ctx.ModuleForTests(t, "libHalInRecovery", recoveryVariant).Module().(*Module)
 	if !recoveryModule.Platform() {
 		t.Errorf("recovery variant of libHalInRecovery must not specific to device, soc, or product")
 	}
@@ -1412,7 +1412,7 @@ func TestDataLibsPrebuiltSharedTestLibrary(t *testing.T) {
 	config := TestConfig(t.TempDir(), android.Android, nil, bp, nil)
 
 	ctx := testCcWithConfig(t, config)
-	testingModule := ctx.ModuleForTests("main_test", "android_arm_armv7-a-neon")
+	testingModule := ctx.ModuleForTests(t, "main_test", "android_arm_armv7-a-neon")
 	module := testingModule.Module()
 	testBinary := module.(*Module).linker.(*testBinary)
 	outputFiles := testingModule.OutputFiles(ctx, t, "")
@@ -1487,14 +1487,14 @@ func TestVersionedStubs(t *testing.T) {
 		}
 	}
 
-	libBarLinkRule := ctx.ModuleForTests("libBar", "android_arm64_armv8-a_shared").Rule("ld")
+	libBarLinkRule := ctx.ModuleForTests(t, "libBar", "android_arm64_armv8-a_shared").Rule("ld")
 	libFlags := libBarLinkRule.Args["libFlags"]
 	libFoo1StubPath := "libFoo/android_arm64_armv8-a_shared_1/libFoo.so"
 	if !strings.Contains(libFlags, libFoo1StubPath) {
 		t.Errorf("%q is not found in %q", libFoo1StubPath, libFlags)
 	}
 
-	libBarCompileRule := ctx.ModuleForTests("libBar", "android_arm64_armv8-a_shared").Rule("cc")
+	libBarCompileRule := ctx.ModuleForTests(t, "libBar", "android_arm64_armv8-a_shared").Rule("cc")
 	cFlags := libBarCompileRule.Args["cFlags"]
 	libFoo1VersioningMacro := "-D__LIBFOO_API__=1"
 	if !strings.Contains(cFlags, libFoo1VersioningMacro) {
@@ -1550,7 +1550,7 @@ func TestStaticLibArchiveArgs(t *testing.T) {
 		}`)
 
 	variant := "android_arm64_armv8-a_static"
-	arRule := ctx.ModuleForTests("baz", variant).Rule("ar")
+	arRule := ctx.ModuleForTests(t, "baz", variant).Rule("ar")
 
 	// For static libraries, the object files of a whole static dep are included in the archive
 	// directly
@@ -1591,7 +1591,7 @@ func TestSharedLibLinkingArgs(t *testing.T) {
 		}`)
 
 	variant := "android_arm64_armv8-a_shared"
-	linkRule := ctx.ModuleForTests("baz", variant).Rule("ld")
+	linkRule := ctx.ModuleForTests(t, "baz", variant).Rule("ld")
 	libFlags := linkRule.Args["libFlags"]
 	// When dynamically linking, we expect static dependencies to be found on the command line
 	if expected := "foo.a"; !strings.Contains(libFlags, expected) {
@@ -1623,7 +1623,7 @@ func TestStaticExecutable(t *testing.T) {
 		}`)
 
 	variant := "android_arm64_armv8-a"
-	binModuleRule := ctx.ModuleForTests("static_test", variant).Rule("ld")
+	binModuleRule := ctx.ModuleForTests(t, "static_test", variant).Rule("ld")
 	libFlags := binModuleRule.Args["libFlags"]
 	systemStaticLibs := []string{"libc.a", "libm.a"}
 	for _, lib := range systemStaticLibs {
@@ -1666,9 +1666,9 @@ func TestStaticDepsOrderWithStubs(t *testing.T) {
 			},
 		}`)
 
-	mybin := ctx.ModuleForTests("mybin", "android_arm64_armv8-a").Rule("ld")
+	mybin := ctx.ModuleForTests(t, "mybin", "android_arm64_armv8-a").Rule("ld")
 	actual := mybin.Implicits[:2]
-	expected := GetOutputPaths(ctx, "android_arm64_armv8-a_static", []string{"libfooB", "libfooC"})
+	expected := GetOutputPaths(t, ctx, "android_arm64_armv8-a_static", []string{"libfooB", "libfooC"})
 
 	if !reflect.DeepEqual(actual, expected) {
 		t.Errorf("staticDeps orderings were not propagated correctly"+
@@ -1775,7 +1775,7 @@ func VerifyAFLFuzzTargetVariant(t *testing.T, variant string) {
 
 	checkPcGuardFlag := func(
 		modName string, variantName string, shouldHave bool) {
-		cc := ctx.ModuleForTests(modName, variantName).Rule("cc")
+		cc := ctx.ModuleForTests(t, modName, variantName).Rule("cc")
 
 		cFlags, ok := cc.Args["cFlags"]
 		if !ok {
@@ -1802,9 +1802,9 @@ func VerifyAFLFuzzTargetVariant(t *testing.T, variant string) {
 	checkPcGuardFlag(moduleName, variant+"_static", false)
 	checkPcGuardFlag(moduleName, variant+"_static_fuzzer_afl", true)
 
-	ctx.ModuleForTests("afl_fuzz_shared_lib",
+	ctx.ModuleForTests(t, "afl_fuzz_shared_lib",
 		"android_arm64_armv8-a_shared").Rule("cc")
-	ctx.ModuleForTests("afl_fuzz_shared_lib",
+	ctx.ModuleForTests(t, "afl_fuzz_shared_lib",
 		"android_arm64_armv8-a_shared_fuzzer").Rule("cc")
 }
 
@@ -1833,7 +1833,7 @@ func TestFuzzTarget(t *testing.T) {
 		}`)
 
 	variant := "android_arm64_armv8-a_fuzzer"
-	ctx.ModuleForTests("fuzz_smoke_test", variant).Rule("cc")
+	ctx.ModuleForTests(t, "fuzz_smoke_test", variant).Rule("cc")
 }
 
 func assertString(t *testing.T, got, expected string) {
@@ -1897,24 +1897,24 @@ func TestDefaults(t *testing.T) {
 			defaults: ["defaults"],
 		}`)
 
-	shared := ctx.ModuleForTests("libshared", "android_arm64_armv8-a_shared").Rule("ld")
+	shared := ctx.ModuleForTests(t, "libshared", "android_arm64_armv8-a_shared").Rule("ld")
 	if g, w := pathsToBase(shared.Inputs), []string{"foo.o", "baz.o"}; !reflect.DeepEqual(w, g) {
 		t.Errorf("libshared ld rule wanted %q, got %q", w, g)
 	}
-	bothShared := ctx.ModuleForTests("libboth", "android_arm64_armv8-a_shared").Rule("ld")
+	bothShared := ctx.ModuleForTests(t, "libboth", "android_arm64_armv8-a_shared").Rule("ld")
 	if g, w := pathsToBase(bothShared.Inputs), []string{"foo.o", "baz.o"}; !reflect.DeepEqual(w, g) {
 		t.Errorf("libboth ld rule wanted %q, got %q", w, g)
 	}
-	binary := ctx.ModuleForTests("binary", "android_arm64_armv8-a").Rule("ld")
+	binary := ctx.ModuleForTests(t, "binary", "android_arm64_armv8-a").Rule("ld")
 	if g, w := pathsToBase(binary.Inputs), []string{"foo.o"}; !reflect.DeepEqual(w, g) {
 		t.Errorf("binary ld rule wanted %q, got %q", w, g)
 	}
 
-	static := ctx.ModuleForTests("libstatic", "android_arm64_armv8-a_static").Rule("ar")
+	static := ctx.ModuleForTests(t, "libstatic", "android_arm64_armv8-a_static").Rule("ar")
 	if g, w := pathsToBase(static.Inputs), []string{"foo.o", "bar.o"}; !reflect.DeepEqual(w, g) {
 		t.Errorf("libstatic ar rule wanted %q, got %q", w, g)
 	}
-	bothStatic := ctx.ModuleForTests("libboth", "android_arm64_armv8-a_static").Rule("ar")
+	bothStatic := ctx.ModuleForTests(t, "libboth", "android_arm64_armv8-a_static").Rule("ar")
 	if g, w := pathsToBase(bothStatic.Inputs), []string{"foo.o", "bar.o"}; !reflect.DeepEqual(w, g) {
 		t.Errorf("libboth ar rule wanted %q, got %q", w, g)
 	}
@@ -1973,12 +1973,12 @@ func TestEmptyWholeStaticLibsAllowMissingDependencies(t *testing.T) {
 		android.PrepareForTestWithAllowMissingDependencies,
 	).RunTestWithBp(t, bp)
 
-	libbar := result.ModuleForTests("libbar", "android_arm64_armv8-a_static").Output("libbar.a")
+	libbar := result.ModuleForTests(t, "libbar", "android_arm64_armv8-a_static").Output("libbar.a")
 	android.AssertDeepEquals(t, "libbar rule", android.ErrorRule, libbar.Rule)
 
 	android.AssertStringDoesContain(t, "libbar error", libbar.Args["error"], "missing dependencies: libmissing")
 
-	libfoo := result.ModuleForTests("libfoo", "android_arm64_armv8-a_static").Output("libfoo.a")
+	libfoo := result.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_static").Output("libfoo.a")
 	android.AssertStringListContains(t, "libfoo.a dependencies", libfoo.Inputs.Strings(), libbar.Output.String())
 }
 
@@ -2025,11 +2025,11 @@ func TestInstallSharedLibs(t *testing.T) {
 	config := TestConfig(t.TempDir(), android.Android, nil, bp, nil)
 	ctx := testCcWithConfig(t, config)
 
-	hostBin := ctx.ModuleForTests("bin", config.BuildOSTarget.String()).Description("install")
-	hostShared := ctx.ModuleForTests("libshared", config.BuildOSTarget.String()+"_shared").Description("install")
-	hostRuntime := ctx.ModuleForTests("libruntime", config.BuildOSTarget.String()+"_shared").Description("install")
-	hostTransitive := ctx.ModuleForTests("libtransitive", config.BuildOSTarget.String()+"_shared").Description("install")
-	hostTool := ctx.ModuleForTests("tool", config.BuildOSTarget.String()).Description("install")
+	hostBin := ctx.ModuleForTests(t, "bin", config.BuildOSTarget.String()).Description("install")
+	hostShared := ctx.ModuleForTests(t, "libshared", config.BuildOSTarget.String()+"_shared").Description("install")
+	hostRuntime := ctx.ModuleForTests(t, "libruntime", config.BuildOSTarget.String()+"_shared").Description("install")
+	hostTransitive := ctx.ModuleForTests(t, "libtransitive", config.BuildOSTarget.String()+"_shared").Description("install")
+	hostTool := ctx.ModuleForTests(t, "tool", config.BuildOSTarget.String()).Description("install")
 
 	if g, w := hostBin.Implicits.Strings(), hostShared.Output.String(); !android.InList(w, g) {
 		t.Errorf("expected host bin dependency %q, got %q", w, g)
@@ -2051,10 +2051,10 @@ func TestInstallSharedLibs(t *testing.T) {
 		t.Errorf("expected no host bin dependency %q, got %q", w, g)
 	}
 
-	deviceBin := ctx.ModuleForTests("bin", "android_arm64_armv8-a").Description("install")
-	deviceShared := ctx.ModuleForTests("libshared", "android_arm64_armv8-a_shared").Description("install")
-	deviceTransitive := ctx.ModuleForTests("libtransitive", "android_arm64_armv8-a_shared").Description("install")
-	deviceRuntime := ctx.ModuleForTests("libruntime", "android_arm64_armv8-a_shared").Description("install")
+	deviceBin := ctx.ModuleForTests(t, "bin", "android_arm64_armv8-a").Description("install")
+	deviceShared := ctx.ModuleForTests(t, "libshared", "android_arm64_armv8-a_shared").Description("install")
+	deviceTransitive := ctx.ModuleForTests(t, "libtransitive", "android_arm64_armv8-a_shared").Description("install")
+	deviceRuntime := ctx.ModuleForTests(t, "libruntime", "android_arm64_armv8-a_shared").Description("install")
 
 	if g, w := deviceBin.OrderOnly.Strings(), deviceShared.Output.String(); !android.InList(w, g) {
 		t.Errorf("expected device bin dependency %q, got %q", w, g)
@@ -2104,7 +2104,7 @@ func TestStubsLibReexportsHeaders(t *testing.T) {
 			srcs: ["foo.c"],
 		}`)
 
-	cFlags := ctx.ModuleForTests("libclient", "android_arm64_armv8-a_shared").Rule("cc").Args["cFlags"]
+	cFlags := ctx.ModuleForTests(t, "libclient", "android_arm64_armv8-a_shared").Rule("cc").Args["cFlags"]
 
 	if !strings.Contains(cFlags, "-Iinclude/libbar") {
 		t.Errorf("expected %q in cflags, got %q", "-Iinclude/libbar", cFlags)
@@ -2144,7 +2144,7 @@ func TestAidlLibraryWithHeaders(t *testing.T) {
 		}.AddToFixture(),
 	).RunTest(t).TestContext
 
-	libfoo := ctx.ModuleForTests("libfoo", "android_arm64_armv8-a_static")
+	libfoo := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_static")
 
 	android.AssertPathsRelativeToTopEquals(
 		t,
@@ -2192,7 +2192,7 @@ func TestAidlFlagsPassedToTheAidlCompiler(t *testing.T) {
 		}
 	`)
 
-	libfoo := ctx.ModuleForTests("libfoo", "android_arm64_armv8-a_static")
+	libfoo := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_static")
 	manifest := android.RuleBuilderSboxProtoForTests(t, ctx.TestContext, libfoo.Output("aidl.sbox.textproto"))
 	aidlCommand := manifest.Commands[0].GetCommand()
 	expectedAidlFlag := "-Werror"
@@ -2243,7 +2243,7 @@ func TestAidlFlagsWithMinSdkVersion(t *testing.T) {
 					`+tc.sdkVersion+`
 				}
 			`)
-			libfoo := ctx.ModuleForTests("libfoo", tc.variant)
+			libfoo := ctx.ModuleForTests(t, "libfoo", tc.variant)
 			manifest := android.RuleBuilderSboxProtoForTests(t, ctx, libfoo.Output("aidl.sbox.textproto"))
 			aidlCommand := manifest.Commands[0].GetCommand()
 			expectedAidlFlag := "--min_sdk_version=" + tc.expected
@@ -2312,7 +2312,7 @@ func TestMinSdkVersionInClangTriple(t *testing.T) {
 			min_sdk_version: "29",
 		}`)
 
-	cFlags := ctx.ModuleForTests("libfoo", "android_arm64_armv8-a_shared").Rule("cc").Args["cFlags"]
+	cFlags := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_shared").Rule("cc").Args["cFlags"]
 	android.AssertStringDoesContain(t, "min sdk version", cFlags, "-target aarch64-linux-android29")
 }
 
@@ -2332,7 +2332,7 @@ func TestNonDigitMinSdkVersionInClangTriple(t *testing.T) {
 		}),
 	).RunTestWithBp(t, bp)
 	ctx := result.TestContext
-	cFlags := ctx.ModuleForTests("libfoo", "android_arm64_armv8-a_shared").Rule("cc").Args["cFlags"]
+	cFlags := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_shared").Rule("cc").Args["cFlags"]
 	android.AssertStringDoesContain(t, "min sdk version", cFlags, "-target aarch64-linux-android31")
 }
 
@@ -2439,7 +2439,7 @@ func TestIncludeDirsExporting(t *testing.T) {
 			export_generated_headers: ["genrule_bar"],
 		}
 		`)
-		foo := ctx.ModuleForTests("libfoo", "android_arm64_armv8-a_shared").Module()
+		foo := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_shared").Module()
 		checkIncludeDirs(t, ctx, foo,
 			expectedIncludeDirs(`
 				foo/standard
@@ -2450,7 +2450,7 @@ func TestIncludeDirsExporting(t *testing.T) {
 			expectedOrderOnlyDeps(`.intermediates/genrule_foo/gen/generated_headers/foo/generated_header.h`),
 		)
 
-		bar := ctx.ModuleForTests("libbar", "android_arm64_armv8-a_shared").Module()
+		bar := ctx.ModuleForTests(t, "libbar", "android_arm64_armv8-a_shared").Module()
 		checkIncludeDirs(t, ctx, bar,
 			expectedIncludeDirs(`
 				bar/standard
@@ -2483,7 +2483,7 @@ func TestIncludeDirsExporting(t *testing.T) {
 			export_generated_headers: ["genrule_bar"],
 		}
 		`)
-		foo := ctx.ModuleForTests("libfoo", "android_arm64_armv8-a_shared").Module()
+		foo := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_shared").Module()
 		checkIncludeDirs(t, ctx, foo,
 			expectedIncludeDirs(`
 				foo/standard
@@ -2494,7 +2494,7 @@ func TestIncludeDirsExporting(t *testing.T) {
 			expectedOrderOnlyDeps(`.intermediates/genrule_foo/gen/generated_headers/foo/generated_header.h`),
 		)
 
-		bar := ctx.ModuleForTests("libbar", "android_arm64_armv8-a_shared").Module()
+		bar := ctx.ModuleForTests(t, "libbar", "android_arm64_armv8-a_shared").Module()
 		checkIncludeDirs(t, ctx, bar,
 			expectedIncludeDirs(`
 				bar/standard
@@ -2540,7 +2540,7 @@ func TestIncludeDirsExporting(t *testing.T) {
 			}
 		}
 		`).TestContext
-		foo := ctx.ModuleForTests("libfoo", "android_arm64_armv8-a_shared").Module()
+		foo := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_shared").Module()
 		checkIncludeDirs(t, ctx, foo,
 			expectedIncludeDirs(`
 				.intermediates/libfoo/android_arm64_armv8-a_shared/gen/aidl
@@ -2580,7 +2580,7 @@ func TestIncludeDirsExporting(t *testing.T) {
 			}
 		}
 		`)
-		foo := ctx.ModuleForTests("libfoo", "android_arm64_armv8-a_shared").Module()
+		foo := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_shared").Module()
 		checkIncludeDirs(t, ctx, foo,
 			expectedIncludeDirs(`
 				.intermediates/libfoo/android_arm64_armv8-a_shared/gen/proto
@@ -2607,7 +2607,7 @@ func TestIncludeDirsExporting(t *testing.T) {
 			],
 		}
 		`)
-		foo := ctx.ModuleForTests("libfoo", "android_arm64_armv8-a_shared").Module()
+		foo := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_shared").Module()
 		checkIncludeDirs(t, ctx, foo,
 			expectedIncludeDirs(`
 				.intermediates/libfoo/android_arm64_armv8-a_shared/gen/sysprop/include
@@ -2689,7 +2689,7 @@ func TestIncludeDirectoryOrdering(t *testing.T) {
 	cppOnly := []string{"-fPIC", "${config.CommonGlobalCppflags}", "${config.DeviceGlobalCppflags}", "${config.ArmCppflags}"}
 
 	cflags := []string{"-Werror", "-std=candcpp"}
-	cstd := []string{"-std=gnu17", "-std=conly"}
+	cstd := []string{"-std=gnu23", "-std=conly"}
 	cppstd := []string{"-std=gnu++20", "-std=cpp", "-fno-rtti"}
 
 	lastNDKFlags := []string{
@@ -2877,7 +2877,7 @@ func TestIncludeDirectoryOrdering(t *testing.T) {
 					PrepareForIntegrationTestWithCc,
 					android.FixtureAddTextFile("external/foo/Android.bp", bp),
 				).RunTest(t)
-				cflags := ctx.ModuleForTests("libfoo", variant).Output("obj/external/foo/foo.o").Args["cFlags"]
+				cflags := ctx.ModuleForTests(t, "libfoo", variant).Output("obj/external/foo/foo.o").Args["cFlags"]
 
 				var includes []string
 				flags := strings.Split(cflags, " ")
@@ -2931,7 +2931,7 @@ func TestAddnoOverride64GlobalCflags(t *testing.T) {
 			srcs: ["foo.c"],
 		}`)
 
-	cFlags := ctx.ModuleForTests("libclient", "android_arm64_armv8-a_shared").Rule("cc").Args["cFlags"]
+	cFlags := ctx.ModuleForTests(t, "libclient", "android_arm64_armv8-a_shared").Rule("cc").Args["cFlags"]
 
 	if !strings.Contains(cFlags, "${config.NoOverride64GlobalCflags}") {
 		t.Errorf("expected %q in cflags, got %q", "${config.NoOverride64GlobalCflags}", cFlags)
@@ -3095,7 +3095,7 @@ func TestStrippedAllOutputFile(t *testing.T) {
  `
 	config := TestConfig(t.TempDir(), android.Android, nil, bp, nil)
 	ctx := testCcWithConfig(t, config)
-	testingModule := ctx.ModuleForTests("test_lib", "android_arm_armv7-a-neon_shared")
+	testingModule := ctx.ModuleForTests(t, "test_lib", "android_arm_armv7-a-neon_shared")
 	outputFile := testingModule.OutputFiles(ctx, t, "stripped_all")
 	if !strings.HasSuffix(outputFile.Strings()[0], "/stripped_all/test_lib.so") {
 		t.Errorf("Unexpected output file: %s", outputFile.Strings()[0])
@@ -3140,8 +3140,8 @@ func TestImageVariants(t *testing.T) {
 		if imageVariant != "core" {
 			imageVariantStr = "_" + imageVariant
 		}
-		binFooModule := ctx.ModuleForTests("binfoo", "android"+imageVariantStr+"_arm64_armv8-a").Module()
-		libBarModule := ctx.ModuleForTests("libbar", "android"+imageVariantStr+"_arm64_armv8-a_shared").Module()
+		binFooModule := ctx.ModuleForTests(t, "binfoo", "android"+imageVariantStr+"_arm64_armv8-a").Module()
+		libBarModule := ctx.ModuleForTests(t, "libbar", "android"+imageVariantStr+"_arm64_armv8-a_shared").Module()
 		android.AssertBoolEquals(t, "binfoo should have dependency on libbar with image variant "+imageVariant, true, hasDep(binFooModule, libBarModule))
 	}
 
@@ -3172,7 +3172,7 @@ func TestVendorOrProductVariantUsesPlatformSdkVersionAsDefault(t *testing.T) {
 
 	ctx := prepareForCcTest.RunTestWithBp(t, bp)
 	testSdkVersionFlag := func(module, variant, version string) {
-		flags := ctx.ModuleForTests(module, "android_"+variant+"_arm64_armv8-a_static").Rule("cc").Args["cFlags"]
+		flags := ctx.ModuleForTests(t, module, "android_"+variant+"_arm64_armv8-a_static").Rule("cc").Args["cFlags"]
 		android.AssertStringDoesContain(t, "target SDK version", flags, "-target aarch64-linux-android"+version)
 	}
 
@@ -3199,14 +3199,14 @@ func TestClangVerify(t *testing.T) {
 		}
 	`)
 
-	module := ctx.ModuleForTests("lib_no_clang_verify", "android_arm64_armv8-a_shared")
+	module := ctx.ModuleForTests(t, "lib_no_clang_verify", "android_arm64_armv8-a_shared")
 
 	cFlags_no_cv := module.Rule("cc").Args["cFlags"]
 	if strings.Contains(cFlags_no_cv, "-Xclang") || strings.Contains(cFlags_no_cv, "-verify") {
 		t.Errorf("expected %q not in cflags, got %q", "-Xclang -verify", cFlags_no_cv)
 	}
 
-	cFlags_cv := ctx.ModuleForTests("lib_clang_verify", "android_arm64_armv8-a_shared").Rule("cc").Args["cFlags"]
+	cFlags_cv := ctx.ModuleForTests(t, "lib_clang_verify", "android_arm64_armv8-a_shared").Rule("cc").Args["cFlags"]
 	if strings.Contains(cFlags_cv, "-Xclang") && strings.Contains(cFlags_cv, "-verify") {
 		t.Errorf("expected %q in cflags, got %q", "-Xclang -verify", cFlags_cv)
 	}

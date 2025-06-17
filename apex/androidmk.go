@@ -75,7 +75,7 @@ func (a *apexBundle) fullModuleName(apexBundleName string, linkToSystemLib bool,
 // populated by Soong for unconverted APEXes, or Bazel in mixed mode. Use
 // apexFile#isBazelPrebuilt to differentiate.
 func (a *apexBundle) androidMkForFiles(w io.Writer, apexBundleName, moduleDir string,
-	apexAndroidMkData android.AndroidMkData) []string {
+	apexAndroidMkData android.AndroidMkData) (archSpecificModuleNames []string, moduleNames []string) {
 
 	// apexBundleName comes from the 'name' property or soong module.
 	// apexName comes from 'name' property of apex_manifest.
@@ -84,11 +84,12 @@ func (a *apexBundle) androidMkForFiles(w io.Writer, apexBundleName, moduleDir st
 	// However, symbol files for apex files are installed under /apex/<apexBundleName> to avoid
 	// conflicts between two apexes with the same apexName.
 
-	moduleNames := []string{}
-
 	for _, fi := range a.filesInfo {
 		linkToSystemLib := a.linkToSystemLib && fi.transitiveDep && fi.availableToPlatform()
 		moduleName := a.fullModuleName(apexBundleName, linkToSystemLib, &fi)
+		if !android.InList(moduleName, moduleNames) {
+			moduleNames = append(moduleNames, moduleName)
+		}
 
 		// This name will be added to LOCAL_REQUIRED_MODULES of the APEX. We need to be
 		// arch-specific otherwise we will end up installing both ABIs even when only
@@ -100,8 +101,8 @@ func (a *apexBundle) androidMkForFiles(w io.Writer, apexBundleName, moduleDir st
 		case "lib64":
 			aName = aName + ":64"
 		}
-		if !android.InList(aName, moduleNames) {
-			moduleNames = append(moduleNames, aName)
+		if !android.InList(aName, archSpecificModuleNames) {
+			archSpecificModuleNames = append(archSpecificModuleNames, aName)
 		}
 
 		if linkToSystemLib {
@@ -216,7 +217,7 @@ func (a *apexBundle) androidMkForFiles(w io.Writer, apexBundleName, moduleDir st
 			fmt.Fprintf(w, "%s: %s\n", fi.androidMkModuleName, moduleName)
 		}
 	}
-	return moduleNames
+	return
 }
 
 func (a *apexBundle) writeRequiredModules(w io.Writer, moduleNames []string) {
@@ -226,11 +227,6 @@ func (a *apexBundle) writeRequiredModules(w io.Writer, moduleNames []string) {
 	required = append(required, a.required...)
 	targetRequired = append(targetRequired, a.TargetRequiredModuleNames()...)
 	hostRequired = append(hostRequired, a.HostRequiredModuleNames()...)
-	for _, fi := range a.filesInfo {
-		required = append(required, fi.requiredModuleNames...)
-		targetRequired = append(targetRequired, fi.targetRequiredModuleNames...)
-		hostRequired = append(hostRequired, fi.hostRequiredModuleNames...)
-	}
 	android.AndroidMkEmitAssignList(w, "LOCAL_REQUIRED_MODULES", moduleNames, a.makeModulesToInstall, required)
 	android.AndroidMkEmitAssignList(w, "LOCAL_TARGET_REQUIRED_MODULES", targetRequired)
 	android.AndroidMkEmitAssignList(w, "LOCAL_HOST_REQUIRED_MODULES", hostRequired)
@@ -240,9 +236,10 @@ func (a *apexBundle) androidMkForType() android.AndroidMkData {
 	return android.AndroidMkData{
 		// While we do not provide a value for `Extra`, AconfigUpdateAndroidMkData may add some, which we must honor.
 		Custom: func(w io.Writer, name, prefix, moduleDir string, data android.AndroidMkData) {
+			archSpecificModuleNames := []string{}
 			moduleNames := []string{}
 			if a.installable() {
-				moduleNames = a.androidMkForFiles(w, name, moduleDir, data)
+				archSpecificModuleNames, moduleNames = a.androidMkForFiles(w, name, moduleDir, data)
 			}
 
 			fmt.Fprintln(w, "\ninclude $(CLEAR_VARS)  # apex.apexBundle")
@@ -261,6 +258,7 @@ func (a *apexBundle) androidMkForType() android.AndroidMkData {
 				fmt.Fprintln(w, "LOCAL_SOONG_INSTALLED_MODULE :=", a.installedFile.String())
 				fmt.Fprintln(w, "LOCAL_SOONG_INSTALL_PAIRS :=", a.outputFile.String()+":"+a.installedFile.String())
 				fmt.Fprintln(w, "LOCAL_SOONG_INSTALL_SYMLINKS := ", strings.Join(a.compatSymlinks.Strings(), " "))
+				fmt.Fprintln(w, "LOCAL_SOONG_INSTALL_PAIRS +=", a.extraInstalledPairs.String())
 			}
 			fmt.Fprintln(w, "LOCAL_APEX_KEY_PATH := ", a.apexKeysPath.String())
 
@@ -278,7 +276,7 @@ func (a *apexBundle) androidMkForType() android.AndroidMkData {
 			}
 
 			android.AndroidMkEmitAssignList(w, "LOCAL_OVERRIDES_MODULES", a.overridableProperties.Overrides)
-			a.writeRequiredModules(w, moduleNames)
+			a.writeRequiredModules(w, archSpecificModuleNames)
 			// AconfigUpdateAndroidMkData may have added elements to Extra.  Process them here.
 			for _, extra := range data.Extra {
 				extra(w, a.outputFile)
@@ -299,6 +297,9 @@ func (a *apexBundle) androidMkForType() android.AndroidMkData {
 			for _, dist := range data.Entries.GetDistForGoals(a) {
 				fmt.Fprintln(w, dist)
 			}
+
+			fmt.Fprintf(w, "ALL_MODULES.$(my_register_name).SYMBOLIC_OUTPUT_PATH := $(foreach m,%s,$(ALL_MODULES.$(m).SYMBOLIC_OUTPUT_PATH))\n", strings.Join(moduleNames, " "))
+			fmt.Fprintf(w, "ALL_MODULES.$(my_register_name).ELF_SYMBOL_MAPPING_PATH := $(foreach m,%s,$(ALL_MODULES.$(m).ELF_SYMBOL_MAPPING_PATH))\n", strings.Join(moduleNames, " "))
 
 			distCoverageFiles(w, "ndk_apis_usedby_apex", a.nativeApisUsedByModuleFile.String())
 			distCoverageFiles(w, "ndk_apis_backedby_apex", a.nativeApisBackedByModuleFile.String())

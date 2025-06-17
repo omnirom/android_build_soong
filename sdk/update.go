@@ -1145,7 +1145,7 @@ func (s *snapshotBuilder) AddPrebuiltModule(member android.SdkMember, moduleType
 
 	// The licenses are the same for all variants.
 	mctx := s.ctx
-	licenseInfo, _ := android.OtherModuleProvider(mctx, variant, android.LicenseInfoProvider)
+	licenseInfo, _ := android.OtherModuleProvider(mctx, variant, android.LicensesInfoProvider)
 	if len(licenseInfo.Licenses) > 0 {
 		m.AddPropertyWithTag("licenses", licenseInfo.Licenses, s.OptionalSdkMemberReferencePropertyTag())
 	}

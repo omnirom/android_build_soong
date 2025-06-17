@@ -26,22 +26,26 @@ func init() {
 	android.RegisterParallelSingletonType("stublibraries", stubLibrariesSingleton)
 }
 
+func stubLibrariesSingleton() android.Singleton {
+	return &stubLibraries{}
+}
+
 type stubLibraries struct {
-	stubLibraryMap       map[string]bool
-	stubVendorLibraryMap map[string]bool
+	stubLibraries       []string
+	vendorStubLibraries []string
 
 	apiListCoverageXmlPaths []string
 }
 
 // Check if the module defines stub, or itself is stub
-func IsStubTarget(m *Module) bool {
-	return m.IsStubs() || m.HasStubsVariants()
+func IsStubTarget(info *LinkableInfo) bool {
+	return info != nil && (info.IsStubs || info.HasStubsVariants)
 }
 
 // Get target file name to be installed from this module
-func getInstalledFileName(ctx android.SingletonContext, m *Module) string {
+func getInstalledFileName(ctx android.SingletonContext, m android.ModuleProxy) string {
 	for _, ps := range android.OtherModuleProviderOrDefault(
-		ctx, m.Module(), android.InstallFilesProvider).PackagingSpecs {
+		ctx, m, android.InstallFilesProvider).PackagingSpecs {
 		if name := ps.FileName(); name != "" {
 			return name
 		}
@@ -51,36 +55,39 @@ func getInstalledFileName(ctx android.SingletonContext, m *Module) string {
 
 func (s *stubLibraries) GenerateBuildActions(ctx android.SingletonContext) {
 	// Visit all generated soong modules and store stub library file names.
-	ctx.VisitAllModules(func(module android.Module) {
-		if m, ok := module.(*Module); ok {
-			if IsStubTarget(m) {
-				if name := getInstalledFileName(ctx, m); name != "" {
-					s.stubLibraryMap[name] = true
-					if m.InVendor() {
-						s.stubVendorLibraryMap[name] = true
+	stubLibraryMap := make(map[string]bool)
+	vendorStubLibraryMap := make(map[string]bool)
+	ctx.VisitAllModuleProxies(func(module android.ModuleProxy) {
+		if linkableInfo, ok := android.OtherModuleProvider(ctx, module, LinkableInfoProvider); ok {
+			if IsStubTarget(linkableInfo) {
+				if name := getInstalledFileName(ctx, module); name != "" {
+					stubLibraryMap[name] = true
+					if linkableInfo.InVendor {
+						vendorStubLibraryMap[name] = true
 					}
 				}
 			}
-			if m.library != nil && android.IsModulePreferred(m) {
-				if p := m.library.getAPIListCoverageXMLPath().String(); p != "" {
+			if linkableInfo.CcLibraryInterface && android.IsModulePreferredProxy(ctx, module) {
+				if p := linkableInfo.APIListCoverageXMLPath.String(); p != "" {
 					s.apiListCoverageXmlPaths = append(s.apiListCoverageXmlPaths, p)
 				}
 			}
 		}
 	})
+	s.stubLibraries = android.SortedKeys(stubLibraryMap)
+	s.vendorStubLibraries = android.SortedKeys(vendorStubLibraryMap)
+
+	android.WriteFileRule(ctx, StubLibrariesFile(ctx), strings.Join(s.stubLibraries, " "))
 }
 
-func stubLibrariesSingleton() android.Singleton {
-	return &stubLibraries{
-		stubLibraryMap:       make(map[string]bool),
-		stubVendorLibraryMap: make(map[string]bool),
-	}
+func StubLibrariesFile(ctx android.PathContext) android.WritablePath {
+	return android.PathForIntermediates(ctx, "stub_libraries.txt")
 }
 
 func (s *stubLibraries) MakeVars(ctx android.MakeVarsContext) {
 	// Convert stub library file names into Makefile variable.
-	ctx.Strict("STUB_LIBRARIES", strings.Join(android.SortedKeys(s.stubLibraryMap), " "))
-	ctx.Strict("SOONG_STUB_VENDOR_LIBRARIES", strings.Join(android.SortedKeys(s.stubVendorLibraryMap), " "))
+	ctx.Strict("STUB_LIBRARIES", strings.Join(s.stubLibraries, " "))
+	ctx.Strict("SOONG_STUB_VENDOR_LIBRARIES", strings.Join(s.vendorStubLibraries, " "))
 
 	// Export the list of API XML files to Make.
 	sort.Strings(s.apiListCoverageXmlPaths)

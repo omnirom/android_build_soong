@@ -18,6 +18,7 @@ import (
 	"fmt"
 
 	"android/soong/android"
+	"github.com/google/blueprint"
 	"github.com/google/blueprint/proptools"
 )
 
@@ -29,7 +30,15 @@ func init() {
 
 func registerApexKeyBuildComponents(ctx android.RegistrationContext) {
 	ctx.RegisterModuleType("apex_key", ApexKeyFactory)
+	ctx.RegisterParallelSingletonModuleType("all_apex_certs", allApexCertsFactory)
 }
+
+type ApexKeyInfo struct {
+	PublicKeyFile  android.Path
+	PrivateKeyFile android.Path
+}
+
+var ApexKeyInfoProvider = blueprint.NewProvider[ApexKeyInfo]()
 
 type apexKey struct {
 	android.ModuleBase
@@ -93,6 +102,11 @@ func (m *apexKey) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 			m.publicKeyFile.String(), pubKeyName, m.privateKeyFile, privKeyName)
 		return
 	}
+
+	android.SetProvider(ctx, ApexKeyInfoProvider, ApexKeyInfo{
+		PublicKeyFile:  m.publicKeyFile,
+		PrivateKeyFile: m.privateKeyFile,
+	})
 }
 
 type apexKeyEntry struct {
@@ -154,4 +168,65 @@ func writeApexKeys(ctx android.ModuleContext, module android.Module) android.Wri
 	entry := apexKeyEntryFor(ctx, module)
 	android.WriteFileRuleVerbatim(ctx, path, entry.String())
 	return path
+}
+
+var (
+	pemToDer = pctx.AndroidStaticRule("pem_to_der",
+		blueprint.RuleParams{
+			Command:     `openssl x509 -inform PEM -outform DER -in $in -out $out`,
+			Description: "Convert certificate from PEM to DER format",
+		},
+	)
+)
+
+// all_apex_certs is a singleton module that collects the certs of all apexes in the tree.
+// It provides two types of output files
+// 1. .pem: This is usually the checked-in x509 certificate in PEM format
+// 2. .der: This is DER format of the certificate, and is generated from the PEM certificate using `openssl x509`
+func allApexCertsFactory() android.SingletonModule {
+	m := &allApexCerts{}
+	android.InitAndroidArchModule(m, android.DeviceSupported, android.MultilibCommon)
+	return m
+}
+
+type allApexCerts struct {
+	android.SingletonModuleBase
+}
+
+func (_ *allApexCerts) GenerateAndroidBuildActions(ctx android.ModuleContext) {
+	var avbpubkeys android.Paths
+	var certificatesPem android.Paths
+	ctx.VisitDirectDeps(func(m android.Module) {
+		if apex, ok := m.(*apexBundle); ok {
+			pem, _ := apex.getCertificateAndPrivateKey(ctx)
+			if !android.ExistentPathForSource(ctx, pem.String()).Valid() {
+				if ctx.Config().AllowMissingDependencies() {
+					return
+				} else {
+					ctx.ModuleErrorf("Path %s is not valid\n", pem.String())
+				}
+			}
+			certificatesPem = append(certificatesPem, pem)
+			// avbpubkey for signing the apex payload
+			avbpubkeys = append(avbpubkeys, apex.publicKeyFile)
+		}
+	})
+	certificatesPem = android.SortedUniquePaths(certificatesPem) // For hermiticity
+	avbpubkeys = android.SortedUniquePaths(avbpubkeys)           // For hermiticity
+	var certificatesDer android.Paths
+	for index, certificatePem := range certificatesPem {
+		certificateDer := android.PathForModuleOut(ctx, fmt.Sprintf("x509.%v.der", index))
+		ctx.Build(pctx, android.BuildParams{
+			Rule:   pemToDer,
+			Input:  certificatePem,
+			Output: certificateDer,
+		})
+		certificatesDer = append(certificatesDer, certificateDer)
+	}
+	ctx.SetOutputFiles(certificatesPem, ".pem")
+	ctx.SetOutputFiles(certificatesDer, ".der")
+	ctx.SetOutputFiles(avbpubkeys, ".avbpubkey")
+}
+
+func (_ *allApexCerts) GenerateSingletonBuildActions(ctx android.SingletonContext) {
 }

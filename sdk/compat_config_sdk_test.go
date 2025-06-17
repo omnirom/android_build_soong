@@ -76,6 +76,7 @@ prebuilt_platform_compat_config {
 }
 
 func TestSnapshotWithCompatConfig(t *testing.T) {
+	t.Parallel()
 	testSnapshotWithCompatConfig(t, `
 		sdk {
 			name: "mysdk",
@@ -85,6 +86,7 @@ func TestSnapshotWithCompatConfig(t *testing.T) {
 }
 
 func TestSnapshotWithCompatConfig_Apex(t *testing.T) {
+	t.Parallel()
 	testSnapshotWithCompatConfig(t, `
 		apex {
 			name: "myapex",

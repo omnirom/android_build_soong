@@ -123,8 +123,8 @@ func TestDefaultsAllowMissingDependencies(t *testing.T) {
 		FixtureWithRootAndroidBp(bp),
 	).RunTest(t)
 
-	missingDefaults := result.ModuleForTests("missing_defaults", "").Output("out")
-	missingTransitiveDefaults := result.ModuleForTests("missing_transitive_defaults", "").Output("out")
+	missingDefaults := result.ModuleForTests(t, "missing_defaults", "").Output("out")
+	missingTransitiveDefaults := result.ModuleForTests(t, "missing_transitive_defaults", "").Output("out")
 
 	AssertSame(t, "missing_defaults rule", ErrorRule, missingDefaults.Rule)
 

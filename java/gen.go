@@ -26,15 +26,14 @@ import (
 )
 
 func init() {
-	pctx.SourcePathVariable("logtagsCmd", "build/make/tools/java-event-log-tags.py")
-	pctx.SourcePathVariable("logtagsLib", "build/make/tools/event_log_tags.py")
+	pctx.HostBinToolVariable("logtagsCmd", "java-event-log-tags")
 }
 
 var (
 	logtags = pctx.AndroidStaticRule("logtags",
 		blueprint.RuleParams{
 			Command:     "$logtagsCmd -o $out $in",
-			CommandDeps: []string{"$logtagsCmd", "$logtagsLib"},
+			CommandDeps: []string{"$logtagsCmd"},
 		})
 )
 

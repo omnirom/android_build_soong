@@ -107,6 +107,10 @@ func (installer *baseInstaller) installTestData(ctx ModuleContext, data []androi
 	installer.installDeps = append(installer.installDeps, installedData...)
 }
 
+func (installer *baseInstaller) installStandaloneTestDep(ctx ModuleContext, standaloneTestDep android.PackagingSpec) {
+	installer.installTestData(ctx, []android.DataPath{{SrcPath: standaloneTestDep.ToGob().SrcPath, RelativeInstallPath: "standalone-libs"}})
+}
+
 func (installer *baseInstaller) everInstallable() bool {
 	// Most cc modules are installable.
 	return true

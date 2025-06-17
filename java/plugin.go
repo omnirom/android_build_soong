@@ -16,7 +16,20 @@ package java
 
 import (
 	"android/soong/android"
+	"github.com/google/blueprint"
 )
+
+type JavaPluginInfo struct {
+	ProcessorClass *string
+	GeneratesApi   bool
+}
+
+var JavaPluginInfoProvider = blueprint.NewProvider[JavaPluginInfo]()
+
+type KotlinPluginInfo struct {
+}
+
+var KotlinPluginInfoProvider = blueprint.NewProvider[KotlinPluginInfo]()
 
 func init() {
 	registerJavaPluginBuildComponents(android.InitRegistrationContext)
@@ -65,7 +78,22 @@ type PluginProperties struct {
 	Generates_api *bool
 }
 
+func (p *Plugin) GenerateAndroidBuildActions(ctx android.ModuleContext) {
+	p.Library.GenerateAndroidBuildActions(ctx)
+
+	android.SetProvider(ctx, JavaPluginInfoProvider, JavaPluginInfo{
+		ProcessorClass: p.pluginProperties.Processor_class,
+		GeneratesApi:   Bool(p.pluginProperties.Generates_api),
+	})
+}
+
 // Plugin describes a kotlin_plugin module, a host java/kotlin library that will be used by kotlinc as a compiler plugin.
 type KotlinPlugin struct {
 	Library
+}
+
+func (p *KotlinPlugin) GenerateAndroidBuildActions(ctx android.ModuleContext) {
+	p.Library.GenerateAndroidBuildActions(ctx)
+
+	android.SetProvider(ctx, KotlinPluginInfoProvider, KotlinPluginInfo{})
 }

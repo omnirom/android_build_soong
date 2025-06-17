@@ -111,6 +111,10 @@ func (m *otacertsZipModule) outputFileName() string {
 	return proptools.StringDefault(m.properties.Filename, "otacerts.zip")
 }
 
+func (m *otacertsZipModule) onlyInRecovery() bool {
+	return m.ModuleBase.InstallInRecovery()
+}
+
 func (m *otacertsZipModule) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	// Read .x509.pem file defined in PRODUCT_DEFAULT_DEV_CERTIFICATE or the default test key.
 	pem, _ := ctx.Config().DefaultAppCertificate(ctx)
@@ -136,7 +140,7 @@ func (m *otacertsZipModule) GenerateAndroidBuildActions(ctx android.ModuleContex
 
 func (m *otacertsZipModule) AndroidMkEntries() []android.AndroidMkEntries {
 	nameSuffix := ""
-	if m.InRecovery() {
+	if m.InRecovery() && !m.onlyInRecovery() {
 		nameSuffix = ".recovery"
 	}
 	return []android.AndroidMkEntries{android.AndroidMkEntries{

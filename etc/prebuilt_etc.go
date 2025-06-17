@@ -32,6 +32,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/google/blueprint"
 	"github.com/google/blueprint/proptools"
 
 	"android/soong/android"
@@ -60,9 +61,11 @@ func RegisterPrebuiltEtcBuildComponents(ctx android.RegistrationContext) {
 	ctx.RegisterModuleType("prebuilt_usr_keychars", PrebuiltUserKeyCharsFactory)
 	ctx.RegisterModuleType("prebuilt_usr_idc", PrebuiltUserIdcFactory)
 	ctx.RegisterModuleType("prebuilt_usr_srec", PrebuiltUserSrecFactory)
+	ctx.RegisterModuleType("prebuilt_usr_odml", PrebuiltUserOdmlFactory)
 	ctx.RegisterModuleType("prebuilt_font", PrebuiltFontFactory)
 	ctx.RegisterModuleType("prebuilt_overlay", PrebuiltOverlayFactory)
 	ctx.RegisterModuleType("prebuilt_firmware", PrebuiltFirmwareFactory)
+	ctx.RegisterModuleType("prebuilt_gpu", PrebuiltGPUFactory)
 	ctx.RegisterModuleType("prebuilt_dsp", PrebuiltDSPFactory)
 	ctx.RegisterModuleType("prebuilt_rfsa", PrebuiltRFSAFactory)
 	ctx.RegisterModuleType("prebuilt_renderscript_bitcode", PrebuiltRenderScriptBitcodeFactory)
@@ -71,12 +74,15 @@ func RegisterPrebuiltEtcBuildComponents(ctx android.RegistrationContext) {
 	ctx.RegisterModuleType("prebuilt_bin", PrebuiltBinaryFactory)
 	ctx.RegisterModuleType("prebuilt_wallpaper", PrebuiltWallpaperFactory)
 	ctx.RegisterModuleType("prebuilt_priv_app", PrebuiltPrivAppFactory)
+	ctx.RegisterModuleType("prebuilt_radio", PrebuiltRadioFactory)
 	ctx.RegisterModuleType("prebuilt_rfs", PrebuiltRfsFactory)
 	ctx.RegisterModuleType("prebuilt_framework", PrebuiltFrameworkFactory)
 	ctx.RegisterModuleType("prebuilt_res", PrebuiltResFactory)
+	ctx.RegisterModuleType("prebuilt_tee", PrebuiltTeeFactory)
 	ctx.RegisterModuleType("prebuilt_wlc_upt", PrebuiltWlcUptFactory)
 	ctx.RegisterModuleType("prebuilt_odm", PrebuiltOdmFactory)
 	ctx.RegisterModuleType("prebuilt_vendor_dlkm", PrebuiltVendorDlkmFactory)
+	ctx.RegisterModuleType("prebuilt_vendor_overlay", PrebuiltVendorOverlayFactory)
 	ctx.RegisterModuleType("prebuilt_bt_firmware", PrebuiltBtFirmwareFactory)
 	ctx.RegisterModuleType("prebuilt_tvservice", PrebuiltTvServiceFactory)
 	ctx.RegisterModuleType("prebuilt_optee", PrebuiltOpteeFactory)
@@ -90,6 +96,15 @@ func RegisterPrebuiltEtcBuildComponents(ctx android.RegistrationContext) {
 	ctx.RegisterModuleType("prebuilt_defaults", defaultsFactory)
 
 }
+
+type PrebuiltEtcInfo struct {
+	// Returns the base install directory, such as "etc", "usr/share".
+	BaseDir string
+	// Returns the sub install directory relative to BaseDir().
+	SubDir string
+}
+
+var PrebuiltEtcInfoProvider = blueprint.NewProvider[PrebuiltEtcInfo]()
 
 var PrepareForTestWithPrebuiltEtc = android.FixtureRegisterWithContext(RegisterPrebuiltEtcBuildComponents)
 
@@ -510,7 +525,28 @@ func (p *PrebuiltEtc) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		ip.addInstallRules(ctx)
 	}
 
+	p.updateModuleInfoJSON(ctx)
+
 	ctx.SetOutputFiles(p.outputFilePaths.Paths(), "")
+
+	SetCommonPrebuiltEtcInfo(ctx, p)
+}
+
+func SetCommonPrebuiltEtcInfo(ctx android.ModuleContext, p PrebuiltEtcModule) {
+	android.SetProvider(ctx, PrebuiltEtcInfoProvider, PrebuiltEtcInfo{
+		BaseDir: p.BaseDir(),
+		SubDir:  p.SubDir(),
+	})
+}
+
+func (p *PrebuiltEtc) updateModuleInfoJSON(ctx android.ModuleContext) {
+	moduleInfoJSON := ctx.ModuleInfoJSON()
+	moduleInfoJSON.Class = []string{"ETC"}
+	if p.makeClass != "" {
+		moduleInfoJSON.Class = []string{p.makeClass}
+	}
+	moduleInfoJSON.SystemSharedLibs = []string{"none"}
+	moduleInfoJSON.Tags = []string{"optional"}
 }
 
 type installProperties struct {
@@ -782,6 +818,17 @@ func PrebuiltUserSrecFactory() android.Module {
 	return module
 }
 
+// prebuilt_usr_odml is for a prebuilt artifact that is installed in
+// <partition>/usr/odml/<sub_dir> directory.
+func PrebuiltUserOdmlFactory() android.Module {
+	module := &PrebuiltEtc{}
+	InitPrebuiltEtcModule(module, "usr/odml")
+	// This module is device-only
+	android.InitAndroidArchModule(module, android.DeviceSupported, android.MultilibFirst)
+	android.InitDefaultableModule(module)
+	return module
+}
+
 // prebuilt_font installs a font in <partition>/fonts directory.
 func PrebuiltFontFactory() android.Module {
 	module := &PrebuiltEtc{}
@@ -812,6 +859,15 @@ func PrebuiltFirmwareFactory() android.Module {
 	// This module is device-only
 	android.InitAndroidArchModule(module, android.DeviceSupported, android.MultilibFirst)
 	android.InitDefaultableModule(module)
+	return module
+}
+
+// prebuilt_gpu is for a prebuilt artifact in <partition>/gpu directory.
+func PrebuiltGPUFactory() android.Module {
+	module := &PrebuiltEtc{}
+	InitPrebuiltEtcModule(module, "gpu")
+	// This module is device-only
+	android.InitAndroidArchModule(module, android.DeviceSupported, android.MultilibFirst)
 	return module
 }
 
@@ -851,6 +907,16 @@ func PrebuiltRFSAFactory() android.Module {
 	InitPrebuiltEtcModule(module, "lib/rfsa")
 	// This module is device-only
 	android.InitAndroidArchModule(module, android.DeviceSupported, android.MultilibFirst)
+	android.InitDefaultableModule(module)
+	return module
+}
+
+// prebuilt_tee installs files in <partition>/tee directory.
+func PrebuiltTeeFactory() android.Module {
+	module := &PrebuiltEtc{}
+	InitPrebuiltEtcModule(module, "tee")
+	// This module is device-only
+	android.InitAndroidArchModule(module, android.DeviceSupported, android.MultilibCommon)
 	android.InitDefaultableModule(module)
 	return module
 }
@@ -899,6 +965,16 @@ func PrebuiltWallpaperFactory() android.Module {
 func PrebuiltPrivAppFactory() android.Module {
 	module := &PrebuiltEtc{}
 	InitPrebuiltEtcModule(module, "priv-app")
+	// This module is device-only
+	android.InitAndroidArchModule(module, android.DeviceSupported, android.MultilibCommon)
+	android.InitDefaultableModule(module)
+	return module
+}
+
+// prebuilt_radio installs files in <partition>/radio directory.
+func PrebuiltRadioFactory() android.Module {
+	module := &PrebuiltEtc{}
+	InitPrebuiltEtcModule(module, "radio")
 	// This module is device-only
 	android.InitAndroidArchModule(module, android.DeviceSupported, android.MultilibCommon)
 	android.InitDefaultableModule(module)
@@ -1009,6 +1085,16 @@ func PrebuiltTvConfigFactory() android.Module {
 func PrebuiltVendorFactory() android.Module {
 	module := &PrebuiltEtc{}
 	InitPrebuiltEtcModule(module, "vendor")
+	// This module is device-only
+	android.InitAndroidArchModule(module, android.DeviceSupported, android.MultilibCommon)
+	android.InitDefaultableModule(module)
+	return module
+}
+
+// prebuilt_vendor_overlay is for a prebuilt artifact in <partition>/vendor_overlay directory.
+func PrebuiltVendorOverlayFactory() android.Module {
+	module := &PrebuiltEtc{}
+	InitPrebuiltEtcModule(module, "vendor_overlay")
 	// This module is device-only
 	android.InitAndroidArchModule(module, android.DeviceSupported, android.MultilibCommon)
 	android.InitDefaultableModule(module)

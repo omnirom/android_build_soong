@@ -475,13 +475,50 @@ func fillPathPairs(fa FileArg, src string, pathMappings *[]pathMapping,
 	return nil
 }
 
+func (z *ZipWriter) moveJavaFileBasedOnPackage(mapping *pathMapping) error {
+	src := mapping.src
+	var s os.FileInfo
+	var err error
+	if z.followSymlinks {
+		s, err = z.fs.Stat(src)
+	} else {
+		s, err = z.fs.Lstat(src)
+	}
+	if err != nil {
+		if os.IsNotExist(err) && z.ignoreMissingFiles {
+			return nil
+		}
+		return err
+	}
+	if !s.Mode().IsRegular() {
+		return nil
+	}
+	r, err := z.fs.Open(src)
+	if err != nil {
+		return err
+	}
+	// rewrite the destination using the package path if it can be determined
+	pkg, err := jar.JavaPackage(r, src)
+	err2 := r.Close()
+	if err2 != nil {
+		return err2
+	}
+	if err != nil {
+		// ignore errors for now, leaving the file at in its original location in the zip
+	} else {
+		mapping.dest = filepath.Join(filepath.Join(strings.Split(pkg, ".")...), filepath.Base(src))
+	}
+	return nil
+}
+
 func jarSort(mappings []pathMapping) {
 	sort.SliceStable(mappings, func(i int, j int) bool {
 		return jar.EntryNamesLess(mappings[i].dest, mappings[j].dest)
 	})
 }
 
-func (z *ZipWriter) write(f io.Writer, pathMappings []pathMapping, manifest string, emulateJar, srcJar bool,
+func (z *ZipWriter) write(f io.Writer, pathMappings []pathMapping, manifest string,
+	emulateJar, srcJar bool,
 	parallelJobs int) error {
 
 	z.errors = make(chan error)
@@ -511,11 +548,41 @@ func (z *ZipWriter) write(f io.Writer, pathMappings []pathMapping, manifest stri
 		return errors.New("must specify --jar when specifying a manifest via -m")
 	}
 
+	// move java source files to the correct folder based on the package statement inside of them.
+	// This is done before the entry sorting so that they're still in the right order.
+	if srcJar {
+		var javaMoveErrors []error
+		var javaMoveErrorsLock sync.Mutex
+		var wg sync.WaitGroup
+		for i := range pathMappings {
+			if filepath.Ext(pathMappings[i].src) == ".java" {
+				wg.Add(1)
+				go func() {
+					err := z.moveJavaFileBasedOnPackage(&pathMappings[i])
+					if err != nil {
+						javaMoveErrorsLock.Lock()
+						javaMoveErrors = append(javaMoveErrors, err)
+						javaMoveErrorsLock.Unlock()
+					}
+					wg.Done()
+				}()
+			}
+		}
+		wg.Wait()
+		if len(javaMoveErrors) > 0 {
+			return errors.Join(javaMoveErrors...)
+		}
+	}
+
 	if emulateJar {
 		// manifest may be empty, in which case addManifest will fill in a default
 		pathMappings = append(pathMappings, pathMapping{jar.ManifestFile, manifest, zip.Deflate})
 
 		jarSort(pathMappings)
+	} else {
+		sort.SliceStable(pathMappings, func(i int, j int) bool {
+			return pathMappings[i].dest < pathMappings[j].dest
+		})
 	}
 
 	go func() {
@@ -526,7 +593,7 @@ func (z *ZipWriter) write(f io.Writer, pathMappings []pathMapping, manifest stri
 			if emulateJar && ele.dest == jar.ManifestFile {
 				err = z.addManifest(ele.dest, ele.src, ele.zipMethod)
 			} else {
-				err = z.addFile(ele.dest, ele.src, ele.zipMethod, emulateJar, srcJar)
+				err = z.addFile(ele.dest, ele.src, ele.zipMethod, emulateJar)
 			}
 			if err != nil {
 				z.errors <- err
@@ -625,7 +692,7 @@ func (z *ZipWriter) write(f io.Writer, pathMappings []pathMapping, manifest stri
 }
 
 // imports (possibly with compression) <src> into the zip at sub-path <dest>
-func (z *ZipWriter) addFile(dest, src string, method uint16, emulateJar, srcJar bool) error {
+func (z *ZipWriter) addFile(dest, src string, method uint16, emulateJar bool) error {
 	var fileSize int64
 	var executable bool
 
@@ -697,21 +764,6 @@ func (z *ZipWriter) addFile(dest, src string, method uint16, emulateJar, srcJar 
 		r, err := z.fs.Open(src)
 		if err != nil {
 			return err
-		}
-
-		if srcJar && filepath.Ext(src) == ".java" {
-			// rewrite the destination using the package path if it can be determined
-			pkg, err := jar.JavaPackage(r, src)
-			if err != nil {
-				// ignore errors for now, leaving the file at in its original location in the zip
-			} else {
-				dest = filepath.Join(filepath.Join(strings.Split(pkg, ".")...), filepath.Base(src))
-			}
-
-			_, err = r.Seek(0, io.SeekStart)
-			if err != nil {
-				return err
-			}
 		}
 
 		fileSize = s.Size()

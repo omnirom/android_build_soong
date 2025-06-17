@@ -72,6 +72,7 @@ func main() {
 
 	elfFile := flags.String("elf", "", "extract identifier from an elf file")
 	r8File := flags.String("r8", "", "extract identifier from an r8 dictionary")
+	locationFlag := flags.String("location", "", "an override for the value of the location field in the proto. If not specified, the filename will be used")
 	merge := flags.String("merge", "", "merge multiple identifier protos")
 
 	writeIfChanged := flags.Bool("write_if_changed", false, "only write output file if it is modified")
@@ -132,6 +133,10 @@ func main() {
 		}
 	} else {
 		panic("shouldn't get here")
+	}
+
+	if *locationFlag != "" {
+		location = *locationFlag
 	}
 
 	mapping := symbols_map_proto.Mapping{

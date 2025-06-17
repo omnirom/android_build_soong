@@ -47,7 +47,7 @@ type DeclarationsModule struct {
 		// are from RELEASE_ACONFIG_EXTRA_RELEASE_CONFIGS.
 		ReleaseConfigValues []AconfigReleaseConfigValue
 
-		// Container(system/vendor/apex) that this module belongs to
+		// Container(system/system_ext/vendor/apex) that this module belongs to
 		Container string
 
 		// The flags will only be repackaged if this prop is true.
@@ -86,13 +86,6 @@ func (module *DeclarationsModule) DepsMutator(ctx android.BottomUpMutatorContext
 	}
 	if len(module.properties.Container) == 0 {
 		ctx.PropertyErrorf("container", "missing container property")
-	}
-
-	// treating system_ext as system partition as we are combining them as one container
-	// TODO remove this logic once we start enforcing that system_ext cannot be specified as
-	// container in the container field.
-	if module.properties.Container == "system_ext" {
-		module.properties.Container = "system"
 	}
 
 	// Add a dependency on the aconfig_value_sets defined in

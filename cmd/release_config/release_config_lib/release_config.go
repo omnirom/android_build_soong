@@ -67,6 +67,9 @@ type ReleaseConfig struct {
 	// overrides. Build flag value overrides are an error.
 	AconfigFlagsOnly bool
 
+	// True if this release config is not allowed as TARGET_RELEASE.
+	DisallowLunchUse bool
+
 	// Unmarshalled flag artifacts
 	FlagArtifacts FlagArtifacts
 
@@ -93,6 +96,11 @@ type ReleaseConfig struct {
 
 // If true, this is a proper release config that can be used in "lunch".
 func (config *ReleaseConfig) isConfigListable() bool {
+	// Do not list disallowed release configs.
+	if config.DisallowLunchUse {
+		return false
+	}
+	// Logic based on ReleaseConfigType.
 	switch config.ReleaseConfigType {
 	case rc_proto.ReleaseConfigType_RELEASE_CONFIG:
 		return true
@@ -405,6 +413,7 @@ func (config *ReleaseConfig) GenerateReleaseConfig(configs *ReleaseConfigs) erro
 		ValueDirectories:  valueDirectories,
 		PriorStages:       SortedMapKeys(config.PriorStagesMap),
 		ReleaseConfigType: config.ReleaseConfigType.Enum(),
+		DisallowLunchUse:  proto.Bool(config.DisallowLunchUse),
 	}
 
 	config.compileInProgress = false
@@ -481,6 +490,9 @@ func (config *ReleaseConfig) WriteMakefile(outFile, targetRelease string, config
 	}
 	// As it stands this list is not per-product, but conceptually it is, and will be.
 	data += fmt.Sprintf("ALL_RELEASE_CONFIGS_FOR_PRODUCT :=$= %s\n", strings.Join(configs.GetAllReleaseNames(), " "))
+	if config.DisallowLunchUse {
+		data += fmt.Sprintf("_disallow_lunch_use :=$= true\n")
+	}
 	data += fmt.Sprintf("_used_files := %s\n", strings.Join(config.GetSortedFileList(), " "))
 	data += fmt.Sprintf("_ALL_RELEASE_FLAGS :=$= %s\n", strings.Join(names, " "))
 	for _, pName := range pNames {

@@ -45,14 +45,3 @@ type SnapshotJsonFlags struct {
 	LicenseKinds []string `json:",omitempty"`
 	LicenseTexts []string `json:",omitempty"`
 }
-
-func (prop *SnapshotJsonFlags) InitBaseSnapshotPropsWithName(m android.Module, name string) {
-	prop.ModuleName = name
-
-	prop.LicenseKinds = m.EffectiveLicenseKinds()
-	prop.LicenseTexts = m.EffectiveLicenseFiles().Strings()
-}
-
-func (prop *SnapshotJsonFlags) InitBaseSnapshotProps(m android.Module) {
-	prop.InitBaseSnapshotPropsWithName(m, m.Name())
-}

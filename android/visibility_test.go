@@ -2112,7 +2112,10 @@ func (j *mockFilesystemModule) DepsMutator(ctx BottomUpMutatorContext) {
 	ctx.AddVariationDependencies(nil, dependencyTag{name: "mockdeps"}, j.properties.Deps...)
 }
 
-func (p *mockFilesystemModule) GenerateAndroidBuildActions(ModuleContext) {
+func (p *mockFilesystemModule) GenerateAndroidBuildActions(ctx ModuleContext) {
+	SetProvider(ctx, PartitionTypeInfoProvider, PartitionTypeInfo{
+		PartitionType: p.PartitionType(),
+	})
 }
 
 func (p *mockFilesystemModule) PartitionType() string {

@@ -83,7 +83,7 @@ func TestTidyFlagsWarningsAsErrors(t *testing.T) {
 		variant := "android_arm64_armv8-a_shared"
 		ctx := testCc(t, test.bp)
 		t.Run("caseTidyFlags", func(t *testing.T) {
-			flags := ctx.ModuleForTests(test.libName, variant).Rule("clangTidy").Args["tidyFlags"]
+			flags := ctx.ModuleForTests(t, test.libName, variant).Rule("clangTidy").Args["tidyFlags"]
 			for _, flag := range test.flags {
 				if !strings.Contains(flags, flag) {
 					t.Errorf("tidyFlags %v for %s does not contain %s.", flags, test.libName, flag)
@@ -143,7 +143,7 @@ func TestTidyChecks(t *testing.T) {
 		variant := "android_arm64_armv8-a_shared"
 		for _, test := range testCases {
 			libName := fmt.Sprintf("libfoo_%d", test.libNumber)
-			flags := ctx.ModuleForTests(libName, variant).Rule("clangTidy").Args["tidyFlags"]
+			flags := ctx.ModuleForTests(t, libName, variant).Rule("clangTidy").Args["tidyFlags"]
 			splitFlags := strings.Split(flags, " ")
 			foundCheckFlag := false
 			for _, flag := range splitFlags {
@@ -231,7 +231,7 @@ func TestWithTidy(t *testing.T) {
 				checkLibraryRule := func(foo, variant, ruleName string) {
 					libName := fmt.Sprintf("lib%s_%d", foo, n)
 					tidyFile := "out/soong/.intermediates/" + libName + "/" + variant + "/obj/" + foo + ".tidy"
-					depFiles := ctx.ModuleForTests(libName, variant).Rule(ruleName).Validations.Strings()
+					depFiles := ctx.ModuleForTests(t, libName, variant).Rule(ruleName).Validations.Strings()
 					if test.needTidyFile[n] {
 						android.AssertStringListContains(t, libName+" needs .tidy file", depFiles, tidyFile)
 					} else {
@@ -262,7 +262,7 @@ func TestWithGeneratedCode(t *testing.T) {
 	ctx := android.GroupFixturePreparers(prepareForCcTest, android.FixtureMergeEnv(testEnv)).RunTestWithBp(t, bp)
 
 	t.Run("tidy should be only run for source code, not for generated code", func(t *testing.T) {
-		depFiles := ctx.ModuleForTests("libfoo", variant).Rule("ld").Validations.Strings()
+		depFiles := ctx.ModuleForTests(t, "libfoo", variant).Rule("ld").Validations.Strings()
 
 		tidyFileForCpp := "out/soong/.intermediates/libfoo/" + variant + "/obj/foo_src.tidy"
 

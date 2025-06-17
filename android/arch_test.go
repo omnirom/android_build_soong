@@ -432,7 +432,7 @@ func TestArchMutator(t *testing.T) {
 		var ret []string
 		variants := ctx.ModuleVariantsForTests(name)
 		for _, variant := range variants {
-			m := ctx.ModuleForTests(name, variant)
+			m := ctx.ModuleForTests(t, name, variant)
 			if m.Module().Enabled(PanickingConfigAndErrorContext(ctx)) {
 				ret = append(ret, variant)
 			}
@@ -442,7 +442,7 @@ func TestArchMutator(t *testing.T) {
 
 	moduleMultiTargets := func(ctx *TestContext, name string, variant string) []string {
 		var ret []string
-		targets := ctx.ModuleForTests(name, variant).Module().MultiTargets()
+		targets := ctx.ModuleForTests(t, name, variant).Module().MultiTargets()
 		for _, t := range targets {
 			ret = append(ret, t.String())
 		}
@@ -546,7 +546,7 @@ func TestArchMutatorNativeBridge(t *testing.T) {
 		var ret []string
 		variants := ctx.ModuleVariantsForTests(name)
 		for _, variant := range variants {
-			m := ctx.ModuleForTests(name, variant)
+			m := ctx.ModuleForTests(t, name, variant)
 			if m.Module().Enabled(PanickingConfigAndErrorContext(ctx)) {
 				ret = append(ret, variant)
 			}
@@ -758,7 +758,7 @@ func TestArchProperties(t *testing.T) {
 
 			for _, want := range tt.results {
 				t.Run(want.module+"_"+want.variant, func(t *testing.T) {
-					got := result.ModuleForTests(want.module, want.variant).Module().(*testArchPropertiesModule).properties.A
+					got := result.ModuleForTests(t, want.module, want.variant).Module().(*testArchPropertiesModule).properties.A
 					AssertArrayString(t, "arch mutator property", want.property, got)
 				})
 			}

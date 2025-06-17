@@ -22,6 +22,7 @@ import (
 )
 
 func TestCollectJavaLibraryPropertiesAddLibsDeps(t *testing.T) {
+	t.Parallel()
 	ctx, _ := testJava(t,
 		`
 		java_library {name: "Foo"}
@@ -31,7 +32,7 @@ func TestCollectJavaLibraryPropertiesAddLibsDeps(t *testing.T) {
 			libs: ["Foo", "Bar"],
 		}
 	`)
-	module := ctx.ModuleForTests("javalib", "android_common").Module().(*Library)
+	module := ctx.ModuleForTests(t, "javalib", "android_common").Module().(*Library)
 	dpInfo, _ := android.OtherModuleProvider(ctx, module, android.IdeInfoProviderKey)
 
 	for _, expected := range []string{"Foo", "Bar"} {
@@ -42,6 +43,7 @@ func TestCollectJavaLibraryPropertiesAddLibsDeps(t *testing.T) {
 }
 
 func TestCollectJavaLibraryPropertiesAddStaticLibsDeps(t *testing.T) {
+	t.Parallel()
 	ctx, _ := testJava(t,
 		`
 		java_library {name: "Foo"}
@@ -51,7 +53,7 @@ func TestCollectJavaLibraryPropertiesAddStaticLibsDeps(t *testing.T) {
 			static_libs: ["Foo", "Bar"],
 		}
 	`)
-	module := ctx.ModuleForTests("javalib", "android_common").Module().(*Library)
+	module := ctx.ModuleForTests(t, "javalib", "android_common").Module().(*Library)
 	dpInfo, _ := android.OtherModuleProvider(ctx, module, android.IdeInfoProviderKey)
 
 	for _, expected := range []string{"Foo", "Bar"} {
@@ -62,6 +64,7 @@ func TestCollectJavaLibraryPropertiesAddStaticLibsDeps(t *testing.T) {
 }
 
 func TestCollectJavaLibraryPropertiesAddScrs(t *testing.T) {
+	t.Parallel()
 	ctx, _ := testJava(t,
 		`
 		java_library {
@@ -69,7 +72,7 @@ func TestCollectJavaLibraryPropertiesAddScrs(t *testing.T) {
 			srcs: ["Foo.java", "Bar.java"],
 		}
 	`)
-	module := ctx.ModuleForTests("javalib", "android_common").Module().(*Library)
+	module := ctx.ModuleForTests(t, "javalib", "android_common").Module().(*Library)
 	dpInfo, _ := android.OtherModuleProvider(ctx, module, android.IdeInfoProviderKey)
 
 	expected := []string{"Foo.java", "Bar.java"}
@@ -79,6 +82,7 @@ func TestCollectJavaLibraryPropertiesAddScrs(t *testing.T) {
 }
 
 func TestCollectJavaLibraryPropertiesAddAidlIncludeDirs(t *testing.T) {
+	t.Parallel()
 	ctx, _ := testJava(t,
 		`
 		java_library {
@@ -88,7 +92,7 @@ func TestCollectJavaLibraryPropertiesAddAidlIncludeDirs(t *testing.T) {
 			},
 		}
 	`)
-	module := ctx.ModuleForTests("javalib", "android_common").Module().(*Library)
+	module := ctx.ModuleForTests(t, "javalib", "android_common").Module().(*Library)
 	dpInfo, _ := android.OtherModuleProvider(ctx, module, android.IdeInfoProviderKey)
 
 	expected := []string{"Foo", "Bar"}
@@ -98,6 +102,7 @@ func TestCollectJavaLibraryPropertiesAddAidlIncludeDirs(t *testing.T) {
 }
 
 func TestCollectJavaLibraryWithJarJarRules(t *testing.T) {
+	t.Parallel()
 	ctx, _ := testJava(t,
 		`
 		java_library {
@@ -106,7 +111,7 @@ func TestCollectJavaLibraryWithJarJarRules(t *testing.T) {
 			jarjar_rules: "jarjar_rules.txt",
 		}
 	`)
-	module := ctx.ModuleForTests("javalib", "android_common").Module().(*Library)
+	module := ctx.ModuleForTests(t, "javalib", "android_common").Module().(*Library)
 	dpInfo, _ := android.OtherModuleProvider(ctx, module, android.IdeInfoProviderKey)
 
 	android.AssertStringEquals(t, "IdeInfo.Srcs of repackaged library should not be empty", "foo.java", dpInfo.Srcs[0])
@@ -117,6 +122,7 @@ func TestCollectJavaLibraryWithJarJarRules(t *testing.T) {
 }
 
 func TestCollectJavaLibraryLinkingAgainstVersionedSdk(t *testing.T) {
+	t.Parallel()
 	ctx := android.GroupFixturePreparers(
 		prepareForJavaTest,
 		FixtureWithPrebuiltApis(map[string][]string{
@@ -129,7 +135,7 @@ func TestCollectJavaLibraryLinkingAgainstVersionedSdk(t *testing.T) {
 			sdk_version: "29",
 		}
 	`)
-	module := ctx.ModuleForTests("javalib", "android_common").Module().(*Library)
+	module := ctx.ModuleForTests(t, "javalib", "android_common").Module().(*Library)
 	dpInfo, _ := android.OtherModuleProvider(ctx, module, android.IdeInfoProviderKey)
 
 	android.AssertStringListContains(t, "IdeInfo.Deps should contain versioned sdk module", dpInfo.Deps, "sdk_public_29_android")
@@ -165,11 +171,11 @@ func TestDoNotAddNoneSystemModulesToDeps(t *testing.T) {
 			api_surface: "public",
 		}
 	`)
-	javalib := ctx.ModuleForTests("javalib", "android_common").Module().(*Library)
+	javalib := ctx.ModuleForTests(t, "javalib", "android_common").Module().(*Library)
 	dpInfo, _ := android.OtherModuleProvider(ctx, javalib, android.IdeInfoProviderKey)
 	android.AssertStringListDoesNotContain(t, "IdeInfo.Deps should contain not contain `none`", dpInfo.Deps, "none")
 
-	javalib_stubs := ctx.ModuleForTests("javalib.stubs", "android_common").Module().(*ApiLibrary)
+	javalib_stubs := ctx.ModuleForTests(t, "javalib.stubs", "android_common").Module().(*ApiLibrary)
 	dpInfo, _ = android.OtherModuleProvider(ctx, javalib_stubs, android.IdeInfoProviderKey)
 	android.AssertStringListDoesNotContain(t, "IdeInfo.Deps should contain not contain `none`", dpInfo.Deps, "none")
 }

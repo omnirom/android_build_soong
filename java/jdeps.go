@@ -37,8 +37,6 @@ type jdepsGeneratorSingleton struct {
 	outputPath android.Path
 }
 
-var _ android.SingletonMakeVarsProvider = (*jdepsGeneratorSingleton)(nil)
-
 const (
 	jdepsJsonFileName = "module_bp_java_deps.json"
 )
@@ -47,13 +45,13 @@ func (j *jdepsGeneratorSingleton) GenerateBuildActions(ctx android.SingletonCont
 	// (b/204397180) Generate module_bp_java_deps.json by default.
 	moduleInfos := make(map[string]android.IdeInfo)
 
-	ctx.VisitAllModules(func(module android.Module) {
-		if !module.Enabled(ctx) {
+	ctx.VisitAllModuleProxies(func(module android.ModuleProxy) {
+		if !android.OtherModulePointerProviderOrDefault(ctx, module, android.CommonModuleInfoProvider).Enabled {
 			return
 		}
 
 		// Prevent including both prebuilts and matching source modules when one replaces the other.
-		if !android.IsModulePreferred(module) {
+		if !android.IsModulePreferredProxy(ctx, module) {
 			return
 		}
 
@@ -62,9 +60,11 @@ func (j *jdepsGeneratorSingleton) GenerateBuildActions(ctx android.SingletonCont
 			return
 		}
 		name := ideInfoProvider.BaseModuleName
-		ideModuleNameProvider, ok := module.(android.IDECustomizedModuleName)
-		if ok {
-			name = ideModuleNameProvider.IDECustomizedModuleName()
+		if info, ok := android.OtherModuleProvider(ctx, module, JavaLibraryInfoProvider); ok && info.Prebuilt {
+			// TODO(b/113562217): Extract the base module name from the Import name, often the Import name
+			// has a prefix "prebuilt_". Remove the prefix explicitly if needed until we find a better
+			// solution to get the Import name.
+			name = android.RemoveOptionalPrebuiltPrefix(module.Name())
 		}
 
 		dpInfo := moduleInfos[name]
@@ -72,13 +72,12 @@ func (j *jdepsGeneratorSingleton) GenerateBuildActions(ctx android.SingletonCont
 		dpInfo.Paths = []string{ctx.ModuleDir(module)}
 		moduleInfos[name] = dpInfo
 
-		mkProvider, ok := module.(android.AndroidMkDataProvider)
+		mkProvider, ok := android.OtherModuleProvider(ctx, module, android.AndroidMkDataInfoProvider)
 		if !ok {
 			return
 		}
-		data := mkProvider.AndroidMk()
-		if data.Class != "" {
-			dpInfo.Classes = append(dpInfo.Classes, data.Class)
+		if mkProvider.Class != "" {
+			dpInfo.Classes = append(dpInfo.Classes, mkProvider.Class)
 		}
 
 		if dep, ok := android.OtherModuleProvider(ctx, module, JavaInfoProvider); ok {
@@ -101,14 +100,7 @@ func (j *jdepsGeneratorSingleton) GenerateBuildActions(ctx android.SingletonCont
 		Rule:   android.Touch,
 		Output: jfpath,
 	})
-}
-
-func (j *jdepsGeneratorSingleton) MakeVars(ctx android.MakeVarsContext) {
-	if j.outputPath == nil {
-		return
-	}
-
-	ctx.DistForGoal("general-tests", j.outputPath)
+	ctx.DistForGoals([]string{"general-tests", "dist_files"}, j.outputPath)
 }
 
 func createJsonFile(moduleInfos map[string]android.IdeInfo, jfpath android.WritablePath) error {

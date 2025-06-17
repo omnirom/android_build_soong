@@ -58,15 +58,29 @@ const (
 var visibilityRuleRegexp = regexp.MustCompile(visibilityRulePattern)
 
 type visibilityModuleReference struct {
-	name   qualifiedModuleName
-	module Module
+	name          qualifiedModuleName
+	partitionType *string
 }
 
 func createVisibilityModuleReference(name, dir string, module Module) visibilityModuleReference {
-	return visibilityModuleReference{
-		name:   createQualifiedModuleName(name, dir),
-		module: module,
+	vis := visibilityModuleReference{
+		name: createQualifiedModuleName(name, dir),
 	}
+	if m, ok := module.(PartitionTypeInterface); ok {
+		pt := m.PartitionType()
+		vis.partitionType = &pt
+	}
+	return vis
+}
+
+func createVisibilityModuleProxyReference(ctx OtherModuleProviderContext, name, dir string, module ModuleProxy) visibilityModuleReference {
+	vis := visibilityModuleReference{
+		name: createQualifiedModuleName(name, dir),
+	}
+	if m, ok := OtherModuleProvider(ctx, module, PartitionTypeInfoProvider); ok {
+		vis.partitionType = &m.PartitionType
+	}
+	return vis
 }
 
 // A visibility rule is associated with a module and determines which other modules it is visible
@@ -222,9 +236,17 @@ type PartitionTypeInterface interface {
 	PartitionType() string
 }
 
+type PartitionTypeInfo struct {
+	// Identifies which partition this is for //visibility:any_system_image (and others) visibility
+	// checks, and will be used in the future for API surface checks.
+	PartitionType string
+}
+
+var PartitionTypeInfoProvider = blueprint.NewProvider[PartitionTypeInfo]()
+
 func (r anyPartitionRule) matches(m visibilityModuleReference) bool {
-	if m2, ok := m.module.(PartitionTypeInterface); ok {
-		return m2.PartitionType() == r.partitionType
+	if m.partitionType != nil {
+		return *m.partitionType == r.partitionType
 	}
 	return false
 }
@@ -645,42 +667,6 @@ func (v *visibilityRuleSet) Widen(extra []string) error {
 
 func (v *visibilityRuleSet) Strings() []string {
 	return v.rules
-}
-
-// Get the effective visibility rules, i.e. the actual rules that affect the visibility of the
-// property irrespective of where they are defined.
-//
-// Includes visibility rules specified by package default_visibility and/or on defaults.
-// Short hand forms, e.g. //:__subpackages__ are replaced with their full form, e.g.
-// //package/containing/rule:__subpackages__.
-func EffectiveVisibilityRules(ctx BaseModuleContext, module Module) VisibilityRuleSet {
-	moduleName := ctx.OtherModuleName(module)
-	dir := ctx.OtherModuleDir(module)
-	qualified := qualifiedModuleName{dir, moduleName}
-
-	rule := effectiveVisibilityRules(ctx.Config(), qualified)
-
-	currentModule := createVisibilityModuleReference(moduleName, dir, module)
-
-	// Modules are implicitly visible to other modules in the same package,
-	// without checking the visibility rules. Here we need to add that visibility
-	// explicitly.
-	if !rule.matches(currentModule) {
-		if len(rule) == 1 {
-			if _, ok := rule[0].(privateRule); ok {
-				// If the rule is //visibility:private we can't append another
-				// visibility to it. Semantically we need to convert it to a package
-				// visibility rule for the location where the result is used, but since
-				// modules are implicitly visible within the package we get the same
-				// result without any rule at all, so just make it an empty list to be
-				// appended below.
-				rule = nil
-			}
-		}
-		rule = append(rule, packageRule{dir})
-	}
-
-	return &visibilityRuleSet{rule.Strings()}
 }
 
 // Clear the default visibility properties so they can be replaced.

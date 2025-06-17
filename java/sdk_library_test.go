@@ -25,6 +25,7 @@ import (
 )
 
 func TestJavaSdkLibrary(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		prepareForJavaTest,
 		PrepareForTestWithJavaSdkLibraryFiles,
@@ -114,19 +115,19 @@ func TestJavaSdkLibrary(t *testing.T) {
 	`)
 
 	// check the existence of the internal modules
-	foo := result.ModuleForTests("foo", "android_common")
-	result.ModuleForTests(apiScopePublic.stubsLibraryModuleName("foo"), "android_common")
-	result.ModuleForTests(apiScopeSystem.stubsLibraryModuleName("foo"), "android_common")
-	result.ModuleForTests(apiScopeTest.stubsLibraryModuleName("foo"), "android_common")
-	result.ModuleForTests(apiScopePublic.stubsSourceModuleName("foo"), "android_common")
-	result.ModuleForTests(apiScopeSystem.stubsSourceModuleName("foo"), "android_common")
-	result.ModuleForTests(apiScopeTest.stubsSourceModuleName("foo"), "android_common")
-	result.ModuleForTests(apiScopePublic.stubsSourceModuleName("foo")+".api.contribution", "")
-	result.ModuleForTests(apiScopePublic.apiLibraryModuleName("foo"), "android_common")
-	result.ModuleForTests("foo"+sdkXmlFileSuffix, "android_common")
-	result.ModuleForTests("foo.api.public.28", "")
-	result.ModuleForTests("foo.api.system.28", "")
-	result.ModuleForTests("foo.api.test.28", "")
+	foo := result.ModuleForTests(t, "foo", "android_common")
+	result.ModuleForTests(t, apiScopePublic.stubsLibraryModuleName("foo"), "android_common")
+	result.ModuleForTests(t, apiScopeSystem.stubsLibraryModuleName("foo"), "android_common")
+	result.ModuleForTests(t, apiScopeTest.stubsLibraryModuleName("foo"), "android_common")
+	result.ModuleForTests(t, apiScopePublic.stubsSourceModuleName("foo"), "android_common")
+	result.ModuleForTests(t, apiScopeSystem.stubsSourceModuleName("foo"), "android_common")
+	result.ModuleForTests(t, apiScopeTest.stubsSourceModuleName("foo"), "android_common")
+	result.ModuleForTests(t, apiScopePublic.stubsSourceModuleName("foo")+".api.contribution", "")
+	result.ModuleForTests(t, apiScopePublic.apiLibraryModuleName("foo"), "android_common")
+	result.ModuleForTests(t, "foo"+sdkXmlFileSuffix, "android_common")
+	result.ModuleForTests(t, "foo.api.public.28", "")
+	result.ModuleForTests(t, "foo.api.system.28", "")
+	result.ModuleForTests(t, "foo.api.test.28", "")
 
 	exportedComponentsInfo, _ := android.OtherModuleProvider(result, foo.Module(), android.ExportedComponentsInfoProvider)
 	expectedFooExportedComponents := []string{
@@ -146,28 +147,28 @@ func TestJavaSdkLibrary(t *testing.T) {
 	}
 	android.AssertArrayString(t, "foo exported components", expectedFooExportedComponents, exportedComponentsInfo.Components)
 
-	bazJavac := result.ModuleForTests("baz", "android_common").Rule("javac")
+	bazJavac := result.ModuleForTests(t, "baz", "android_common").Rule("javac")
 	// tests if baz is actually linked to the stubs lib
-	android.AssertStringDoesContain(t, "baz javac classpath", bazJavac.Args["classpath"], "foo.stubs.system.jar")
+	android.AssertStringDoesContain(t, "baz javac classpath", bazJavac.Args["classpath"], "foo.stubs.system.from-text.jar")
 	// ... and not to the impl lib
 	android.AssertStringDoesNotContain(t, "baz javac classpath", bazJavac.Args["classpath"], "foo.jar")
 	// test if baz is not linked to the system variant of foo
 	android.AssertStringDoesNotContain(t, "baz javac classpath", bazJavac.Args["classpath"], "foo.stubs.jar")
 
-	bazTestJavac := result.ModuleForTests("baz-test", "android_common").Rule("javac")
+	bazTestJavac := result.ModuleForTests(t, "baz-test", "android_common").Rule("javac")
 	// tests if baz-test is actually linked to the test stubs lib
-	android.AssertStringDoesContain(t, "baz-test javac classpath", bazTestJavac.Args["classpath"], "foo.stubs.test.jar")
+	android.AssertStringDoesContain(t, "baz-test javac classpath", bazTestJavac.Args["classpath"], "foo.stubs.test.from-text.jar")
 
-	baz29Javac := result.ModuleForTests("baz-29", "android_common").Rule("javac")
+	baz29Javac := result.ModuleForTests(t, "baz-29", "android_common").Rule("javac")
 	// tests if baz-29 is actually linked to the system 29 stubs lib
-	android.AssertStringDoesContain(t, "baz-29 javac classpath", baz29Javac.Args["classpath"], "prebuilts/sdk/sdk_system_29_foo/android_common/combined/sdk_system_29_foo.jar")
+	android.AssertStringDoesContain(t, "baz-29 javac classpath", baz29Javac.Args["classpath"], "prebuilts/sdk/sdk_system_29_foo/android_common/local-combined/sdk_system_29_foo.jar")
 
-	bazModule30Javac := result.ModuleForTests("baz-module-30", "android_common").Rule("javac")
+	bazModule30Javac := result.ModuleForTests(t, "baz-module-30", "android_common").Rule("javac")
 	// tests if "baz-module-30" is actually linked to the module 30 stubs lib
-	android.AssertStringDoesContain(t, "baz-module-30 javac classpath", bazModule30Javac.Args["classpath"], "prebuilts/sdk/sdk_module-lib_30_foo/android_common/combined/sdk_module-lib_30_foo.jar")
+	android.AssertStringDoesContain(t, "baz-module-30 javac classpath", bazModule30Javac.Args["classpath"], "prebuilts/sdk/sdk_module-lib_30_foo/android_common/local-combined/sdk_module-lib_30_foo.jar")
 
 	// test if baz has exported SDK lib names foo and bar to qux
-	qux := result.ModuleForTests("qux", "android_common")
+	qux := result.ModuleForTests(t, "qux", "android_common")
 	if quxLib, ok := qux.Module().(*Library); ok {
 		requiredSdkLibs, optionalSdkLibs := quxLib.ClassLoaderContexts().UsesLibs()
 		android.AssertDeepEquals(t, "qux exports (required)", []string{"fred", "quuz", "foo", "bar"}, requiredSdkLibs)
@@ -175,18 +176,19 @@ func TestJavaSdkLibrary(t *testing.T) {
 	}
 
 	// test if quuz have created the api_contribution module
-	result.ModuleForTests(apiScopePublic.stubsSourceModuleName("quuz")+".api.contribution", "")
+	result.ModuleForTests(t, apiScopePublic.stubsSourceModuleName("quuz")+".api.contribution", "")
 
-	fooImplDexJar := result.ModuleForTests("foo.impl", "android_common").Rule("d8")
+	fooImplDexJar := result.ModuleForTests(t, "foo.impl", "android_common").Rule("d8")
 	// tests if kotlinc generated files are NOT excluded from output of foo.impl.
 	android.AssertStringDoesNotContain(t, "foo.impl dex", fooImplDexJar.BuildParams.Args["mergeZipsFlags"], "-stripFile META-INF/*.kotlin_module")
 
-	barImplDexJar := result.ModuleForTests("bar.impl", "android_common").Rule("d8")
+	barImplDexJar := result.ModuleForTests(t, "bar.impl", "android_common").Rule("d8")
 	// tests if kotlinc generated files are excluded from output of bar.impl.
 	android.AssertStringDoesContain(t, "bar.impl dex", barImplDexJar.BuildParams.Args["mergeZipsFlags"], "-stripFile META-INF/*.kotlin_module")
 }
 
 func TestJavaSdkLibrary_UpdatableLibrary(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		prepareForJavaTest,
 		PrepareForTestWithJavaSdkLibraryFiles,
@@ -218,7 +220,7 @@ func TestJavaSdkLibrary_UpdatableLibrary(t *testing.T) {
 `)
 
 	// test that updatability attributes are passed on correctly
-	fooUpdatable := result.ModuleForTests("fooUpdatable.xml", "android_common").Output("fooUpdatable.xml")
+	fooUpdatable := result.ModuleForTests(t, "fooUpdatable.xml", "android_common").Output("fooUpdatable.xml")
 	fooUpdatableContents := android.ContentFromFileRuleForTests(t, result.TestContext, fooUpdatable)
 	android.AssertStringDoesContain(t, "fooUpdatable.xml contents", fooUpdatableContents, `on-bootclasspath-since="U"`)
 	android.AssertStringDoesContain(t, "fooUpdatable.xml contents", fooUpdatableContents, `on-bootclasspath-before="V"`)
@@ -227,7 +229,7 @@ func TestJavaSdkLibrary_UpdatableLibrary(t *testing.T) {
 
 	// double check that updatability attributes are not written if they don't exist in the bp file
 	// the permissions file for the foo library defined above
-	fooPermissions := result.ModuleForTests("foo.xml", "android_common").Output("foo.xml")
+	fooPermissions := result.ModuleForTests(t, "foo.xml", "android_common").Output("foo.xml")
 	fooPermissionsContents := android.ContentFromFileRuleForTests(t, result.TestContext, fooPermissions)
 	android.AssertStringDoesNotContain(t, "foo.xml contents", fooPermissionsContents, `on-bootclasspath-since`)
 	android.AssertStringDoesNotContain(t, "foo.xml contents", fooPermissionsContents, `on-bootclasspath-before`)
@@ -236,6 +238,7 @@ func TestJavaSdkLibrary_UpdatableLibrary(t *testing.T) {
 }
 
 func TestJavaSdkLibrary_UpdatableLibrary_Validation_ValidVersion(t *testing.T) {
+	t.Parallel()
 	android.GroupFixturePreparers(
 		prepareForJavaTest,
 		PrepareForTestWithJavaSdkLibraryFiles,
@@ -263,6 +266,7 @@ func TestJavaSdkLibrary_UpdatableLibrary_Validation_ValidVersion(t *testing.T) {
 }
 
 func TestJavaSdkLibrary_UpdatableLibrary_Validation_AtLeastTAttributes(t *testing.T) {
+	t.Parallel()
 	android.GroupFixturePreparers(
 		prepareForJavaTest,
 		PrepareForTestWithJavaSdkLibraryFiles,
@@ -292,6 +296,7 @@ func TestJavaSdkLibrary_UpdatableLibrary_Validation_AtLeastTAttributes(t *testin
 }
 
 func TestJavaSdkLibrary_UpdatableLibrary_Validation_MinAndMaxDeviceSdk(t *testing.T) {
+	t.Parallel()
 	android.GroupFixturePreparers(
 		prepareForJavaTest,
 		PrepareForTestWithJavaSdkLibraryFiles,
@@ -319,6 +324,7 @@ func TestJavaSdkLibrary_UpdatableLibrary_Validation_MinAndMaxDeviceSdk(t *testin
 }
 
 func TestJavaSdkLibrary_UpdatableLibrary_Validation_MinAndMaxDeviceSdkAndModuleMinSdk(t *testing.T) {
+	t.Parallel()
 	android.GroupFixturePreparers(
 		prepareForJavaTest,
 		PrepareForTestWithJavaSdkLibraryFiles,
@@ -347,6 +353,7 @@ func TestJavaSdkLibrary_UpdatableLibrary_Validation_MinAndMaxDeviceSdkAndModuleM
 }
 
 func TestJavaSdkLibrary_UpdatableLibrary_usesNewTag(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		prepareForJavaTest,
 		PrepareForTestWithJavaSdkLibraryFiles,
@@ -363,13 +370,14 @@ func TestJavaSdkLibrary_UpdatableLibrary_usesNewTag(t *testing.T) {
 		}
 `)
 	// test that updatability attributes are passed on correctly
-	fooUpdatable := result.ModuleForTests("foo.xml", "android_common").Output("foo.xml")
+	fooUpdatable := result.ModuleForTests(t, "foo.xml", "android_common").Output("foo.xml")
 	fooUpdatableContents := android.ContentFromFileRuleForTests(t, result.TestContext, fooUpdatable)
 	android.AssertStringDoesContain(t, "foo.xml contents", fooUpdatableContents, `<apex-library`)
 	android.AssertStringDoesNotContain(t, "foo.xml contents", fooUpdatableContents, `<library`)
 }
 
 func TestJavaSdkLibrary_StubOrImplOnlyLibs(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		prepareForJavaTest,
 		PrepareForTestWithJavaSdkLibraryFiles,
@@ -409,12 +417,12 @@ func TestJavaSdkLibrary_StubOrImplOnlyLibs(t *testing.T) {
 		{lib: "stub-only-static-lib", in_stub_combined: true},
 	}
 	verify := func(sdklib, dep string, cp, combined bool) {
-		sdklibCp := result.ModuleForTests(sdklib, "android_common").Rule("javac").Args["classpath"]
+		sdklibCp := result.ModuleForTests(t, sdklib, "android_common").Rule("javac").Args["classpath"]
 		expected := cp || combined // Every combined jar is also on the classpath.
 		android.AssertStringContainsEquals(t, "bad classpath for "+sdklib, sdklibCp, "/"+dep+".jar", expected)
 
-		combineJarInputs := result.ModuleForTests(sdklib, "android_common").Rule("combineJar").Inputs.Strings()
-		depPath := filepath.Join("out", "soong", ".intermediates", dep, "android_common", "turbine-combined", dep+".jar")
+		combineJarInputs := result.ModuleForTests(t, sdklib, "android_common").Rule("combineJar").Inputs.Strings()
+		depPath := filepath.Join("out", "soong", ".intermediates", dep, "android_common", "turbine", dep+".jar")
 		android.AssertStringListContainsEquals(t, "bad combined inputs for "+sdklib, combineJarInputs, depPath, combined)
 	}
 	for _, expectation := range expectations {
@@ -426,6 +434,7 @@ func TestJavaSdkLibrary_StubOrImplOnlyLibs(t *testing.T) {
 }
 
 func TestJavaSdkLibrary_DoNotAccessImplWhenItIsNotBuilt(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		prepareForJavaTest,
 		PrepareForTestWithJavaSdkLibraryFiles,
@@ -448,13 +457,14 @@ func TestJavaSdkLibrary_DoNotAccessImplWhenItIsNotBuilt(t *testing.T) {
 		`)
 
 	// The bar library should depend on the stubs jar.
-	barLibrary := result.ModuleForTests("bar", "android_common").Rule("javac")
-	if expected, actual := `^-classpath .*:out/soong/[^:]*/turbine-combined/foo\.stubs\.jar$`, barLibrary.Args["classpath"]; !regexp.MustCompile(expected).MatchString(actual) {
+	barLibrary := result.ModuleForTests(t, "bar", "android_common").Rule("javac")
+	if expected, actual := `^-classpath .*:out/soong/[^:]*/foo\.stubs\.from-text/foo\.stubs\.from-text\.jar$`, barLibrary.Args["classpath"]; !regexp.MustCompile(expected).MatchString(actual) {
 		t.Errorf("expected %q, found %#q", expected, actual)
 	}
 }
 
 func TestJavaSdkLibrary_AccessOutputFiles(t *testing.T) {
+	t.Parallel()
 	android.GroupFixturePreparers(
 		prepareForJavaTest,
 		PrepareForTestWithJavaSdkLibraryFiles,
@@ -478,12 +488,13 @@ func TestJavaSdkLibrary_AccessOutputFiles(t *testing.T) {
 }
 
 func TestJavaSdkLibrary_AccessOutputFiles_NoAnnotations(t *testing.T) {
+	t.Parallel()
 	android.GroupFixturePreparers(
 		prepareForJavaTest,
 		PrepareForTestWithJavaSdkLibraryFiles,
 		FixtureWithLastReleaseApis("foo"),
 	).
-		ExtendWithErrorHandler(android.FixtureExpectsAtLeastOneErrorMatchingPattern(`module "bar" variant "android_common": unsupported module reference tag ".public.annotations.zip"`)).
+		ExtendWithErrorHandler(android.FixtureExpectsAtLeastOneErrorMatchingPattern(`module "bar" variant "android_common": unsupported output tag ".public.annotations.zip"`)).
 		RunTestWithBp(t, `
 		java_sdk_library {
 			name: "foo",
@@ -503,12 +514,13 @@ func TestJavaSdkLibrary_AccessOutputFiles_NoAnnotations(t *testing.T) {
 }
 
 func TestJavaSdkLibrary_AccessOutputFiles_MissingScope(t *testing.T) {
+	t.Parallel()
 	android.GroupFixturePreparers(
 		prepareForJavaTest,
 		PrepareForTestWithJavaSdkLibraryFiles,
 		FixtureWithLastReleaseApis("foo"),
 	).
-		ExtendWithErrorHandler(android.FixtureExpectsAtLeastOneErrorMatchingPattern(`module "bar" variant "android_common": unsupported module reference tag ".system.stubs.source"`)).
+		ExtendWithErrorHandler(android.FixtureExpectsAtLeastOneErrorMatchingPattern(`module "bar" variant "android_common": unsupported output tag ".system.stubs.source"`)).
 		RunTestWithBp(t, `
 		java_sdk_library {
 			name: "foo",
@@ -527,6 +539,7 @@ func TestJavaSdkLibrary_AccessOutputFiles_MissingScope(t *testing.T) {
 }
 
 func TestJavaSdkLibrary_Deps(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		prepareForJavaTest,
 		PrepareForTestWithJavaSdkLibraryFiles,
@@ -557,6 +570,7 @@ func TestJavaSdkLibrary_Deps(t *testing.T) {
 }
 
 func TestJavaSdkLibraryImport_AccessOutputFiles(t *testing.T) {
+	t.Parallel()
 	prepareForJavaTest.RunTestWithBp(t, `
 		java_sdk_library_import {
 			name: "foo",
@@ -582,6 +596,7 @@ func TestJavaSdkLibraryImport_AccessOutputFiles(t *testing.T) {
 }
 
 func TestJavaSdkLibraryImport_AccessOutputFiles_Invalid(t *testing.T) {
+	t.Parallel()
 	bp := `
 		java_sdk_library_import {
 			name: "foo",
@@ -592,6 +607,7 @@ func TestJavaSdkLibraryImport_AccessOutputFiles_Invalid(t *testing.T) {
 		`
 
 	t.Run("stubs.source", func(t *testing.T) {
+		t.Parallel()
 		prepareForJavaTest.
 			ExtendWithErrorHandler(android.FixtureExpectsAtLeastOneErrorMatchingPattern(`module "foo" is not a SourceFileProducer or having valid output file for tag ".public.stubs.source"`)).
 			RunTestWithBp(t, bp+`
@@ -607,6 +623,7 @@ func TestJavaSdkLibraryImport_AccessOutputFiles_Invalid(t *testing.T) {
 	})
 
 	t.Run("api.txt", func(t *testing.T) {
+		t.Parallel()
 		prepareForJavaTest.
 			ExtendWithErrorHandler(android.FixtureExpectsAtLeastOneErrorMatchingPattern(`module "foo" is not a SourceFileProducer or having valid output file for tag ".public.api.txt"`)).
 			RunTestWithBp(t, bp+`
@@ -621,6 +638,7 @@ func TestJavaSdkLibraryImport_AccessOutputFiles_Invalid(t *testing.T) {
 	})
 
 	t.Run("removed-api.txt", func(t *testing.T) {
+		t.Parallel()
 		prepareForJavaTest.
 			ExtendWithErrorHandler(android.FixtureExpectsAtLeastOneErrorMatchingPattern(`module "foo" is not a SourceFileProducer or having valid output file for tag ".public.removed-api.txt"`)).
 			RunTestWithBp(t, bp+`
@@ -636,6 +654,7 @@ func TestJavaSdkLibraryImport_AccessOutputFiles_Invalid(t *testing.T) {
 }
 
 func TestJavaSdkLibrary_InvalidScopes(t *testing.T) {
+	t.Parallel()
 	prepareForJavaTest.
 		ExtendWithErrorHandler(android.FixtureExpectsAtLeastOneErrorMatchingPattern(`module "foo": enabled api scope "system" depends on disabled scope "public"`)).
 		RunTestWithBp(t, `
@@ -656,6 +675,7 @@ func TestJavaSdkLibrary_InvalidScopes(t *testing.T) {
 }
 
 func TestJavaSdkLibrary_SdkVersion_ForScope(t *testing.T) {
+	t.Parallel()
 	android.GroupFixturePreparers(
 		prepareForJavaTest,
 		PrepareForTestWithJavaSdkLibraryFiles,
@@ -674,6 +694,7 @@ func TestJavaSdkLibrary_SdkVersion_ForScope(t *testing.T) {
 }
 
 func TestJavaSdkLibrary_ModuleLib(t *testing.T) {
+	t.Parallel()
 	android.GroupFixturePreparers(
 		prepareForJavaTest,
 		PrepareForTestWithJavaSdkLibraryFiles,
@@ -694,6 +715,7 @@ func TestJavaSdkLibrary_ModuleLib(t *testing.T) {
 }
 
 func TestJavaSdkLibrary_SystemServer(t *testing.T) {
+	t.Parallel()
 	android.GroupFixturePreparers(
 		prepareForJavaTest,
 		PrepareForTestWithJavaSdkLibraryFiles,
@@ -714,6 +736,7 @@ func TestJavaSdkLibrary_SystemServer(t *testing.T) {
 }
 
 func TestJavaSdkLibrary_SystemServer_AccessToStubScopeLibs(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		prepareForJavaTest,
 		PrepareForTestWithJavaSdkLibraryFiles,
@@ -768,13 +791,13 @@ func TestJavaSdkLibrary_SystemServer_AccessToStubScopeLibs(t *testing.T) {
 
 	stubsPath := func(name string, scope *apiScope) string {
 		name = scope.stubsLibraryModuleName(name)
-		return fmt.Sprintf("out/soong/.intermediates/%[1]s/android_common/turbine-combined/%[1]s.jar", name)
+		return fmt.Sprintf("out/soong/.intermediates/%[1]s.from-text/android_common/%[1]s.from-text/%[1]s.from-text.jar", name)
 	}
 
 	// The bar library should depend on the highest (where system server is highest and public is
 	// lowest) API scopes provided by each of the foo-* modules. The highest API scope provided by the
 	// foo-<x> module is <x>.
-	barLibrary := result.ModuleForTests("bar", "android_common").Rule("javac")
+	barLibrary := result.ModuleForTests(t, "bar", "android_common").Rule("javac")
 	stubLibraries := []string{
 		stubsPath("foo-public", apiScopePublic),
 		stubsPath("foo-system", apiScopeSystem),
@@ -788,6 +811,7 @@ func TestJavaSdkLibrary_SystemServer_AccessToStubScopeLibs(t *testing.T) {
 }
 
 func TestJavaSdkLibraryImport(t *testing.T) {
+	t.Parallel()
 	result := prepareForJavaTest.RunTestWithBp(t, `
 		java_library {
 			name: "foo",
@@ -826,10 +850,10 @@ func TestJavaSdkLibraryImport(t *testing.T) {
 		`)
 
 	for _, scope := range []string{"", ".system", ".test"} {
-		fooModule := result.ModuleForTests("foo"+scope, "android_common")
+		fooModule := result.ModuleForTests(t, "foo"+scope, "android_common")
 		javac := fooModule.Rule("javac")
 
-		sdklibStubsJar := result.ModuleForTests("sdklib.stubs"+scope, "android_common").Output("combined/sdklib.stubs" + scope + ".jar").Output
+		sdklibStubsJar := result.ModuleForTests(t, "sdklib.stubs"+scope, "android_common").Output("local-combined/sdklib.stubs" + scope + ".jar").Output
 		android.AssertStringDoesContain(t, "foo classpath", javac.Args["classpath"], sdklibStubsJar.String())
 	}
 
@@ -844,6 +868,7 @@ func TestJavaSdkLibraryImport(t *testing.T) {
 }
 
 func TestJavaSdkLibraryImport_WithSource(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		prepareForJavaTest,
 		PrepareForTestWithJavaSdkLibraryFiles,
@@ -968,25 +993,25 @@ func testJavaSdkLibraryImport_Preferred(t *testing.T, prefer string, preparer an
 	CheckModuleDependencies(t, result.TestContext, "combined", "android_common", []string{
 		// Each use of :sdklib{...} adds a dependency onto prebuilt_sdklib.
 		`prebuilt_sdklib`,
-		`prebuilt_sdklib`,
-		`prebuilt_sdklib`,
 		`prebuilt_sdklib.stubs`,
 		`prebuilt_sdklib.stubs.source`,
 	})
 
 	// Make sure that dependencies on sdklib that resolve to one of the child libraries use the
 	// prebuilt library.
-	public := result.ModuleForTests("public", "android_common")
+	public := result.ModuleForTests(t, "public", "android_common")
 	rule := public.Output("javac/public.jar")
 	inputs := rule.Implicits.Strings()
-	expected := "out/soong/.intermediates/prebuilt_sdklib.stubs/android_common/combined/sdklib.stubs.jar"
+	expected := "out/soong/.intermediates/prebuilt_sdklib.stubs/android_common/local-combined/sdklib.stubs.jar"
 	if !android.InList(expected, inputs) {
 		t.Errorf("expected %q to contain %q", inputs, expected)
 	}
 }
 
 func TestJavaSdkLibraryImport_Preferred(t *testing.T) {
+	t.Parallel()
 	t.Run("prefer", func(t *testing.T) {
+		t.Parallel()
 		testJavaSdkLibraryImport_Preferred(t, "prefer: true,", android.NullFixturePreparer)
 	})
 }
@@ -994,6 +1019,7 @@ func TestJavaSdkLibraryImport_Preferred(t *testing.T) {
 // If a module is listed in `mainline_module_contributions, it should be used
 // It will supersede any other source vs prebuilt selection mechanism like `prefer` attribute
 func TestSdkLibraryImport_MetadataModuleSupersedesPreferred(t *testing.T) {
+	t.Parallel()
 	bp := `
 		apex_contributions {
 			name: "my_mainline_module_contributions",
@@ -1093,17 +1119,17 @@ func TestSdkLibraryImport_MetadataModuleSupersedesPreferred(t *testing.T) {
 	).RunTestWithBp(t, bp)
 
 	// Make sure that rdeps get the correct source vs prebuilt based on mainline_module_contributions
-	public := result.ModuleForTests("public", "android_common")
+	public := result.ModuleForTests(t, "public", "android_common")
 	rule := public.Output("javac/public.jar")
 	inputs := rule.Implicits.Strings()
 	expectedInputs := []string{
 		// source
-		"out/soong/.intermediates/sdklib.prebuilt_preferred_using_legacy_flags.stubs/android_common/turbine-combined/sdklib.prebuilt_preferred_using_legacy_flags.stubs.jar",
-		"out/soong/.intermediates/sdklib.prebuilt_preferred_using_legacy_flags.stubs.system/android_common/turbine-combined/sdklib.prebuilt_preferred_using_legacy_flags.stubs.system.jar",
+		"out/soong/.intermediates/sdklib.prebuilt_preferred_using_legacy_flags.stubs.from-text/android_common/sdklib.prebuilt_preferred_using_legacy_flags.stubs.from-text/sdklib.prebuilt_preferred_using_legacy_flags.stubs.from-text.jar",
+		"out/soong/.intermediates/sdklib.prebuilt_preferred_using_legacy_flags.stubs.system.from-text/android_common/sdklib.prebuilt_preferred_using_legacy_flags.stubs.system.from-text/sdklib.prebuilt_preferred_using_legacy_flags.stubs.system.from-text.jar",
 
 		// prebuilt
-		"out/soong/.intermediates/prebuilt_sdklib.source_preferred_using_legacy_flags.stubs/android_common/combined/sdklib.source_preferred_using_legacy_flags.stubs.jar",
-		"out/soong/.intermediates/prebuilt_sdklib.source_preferred_using_legacy_flags.stubs.system/android_common/combined/sdklib.source_preferred_using_legacy_flags.stubs.system.jar",
+		"out/soong/.intermediates/prebuilt_sdklib.source_preferred_using_legacy_flags.stubs/android_common/local-combined/sdklib.source_preferred_using_legacy_flags.stubs.jar",
+		"out/soong/.intermediates/prebuilt_sdklib.source_preferred_using_legacy_flags.stubs.system/android_common/local-combined/sdklib.source_preferred_using_legacy_flags.stubs.system.jar",
 	}
 	for _, expected := range expectedInputs {
 		if !android.InList(expected, inputs) {
@@ -1113,6 +1139,7 @@ func TestSdkLibraryImport_MetadataModuleSupersedesPreferred(t *testing.T) {
 }
 
 func TestJavaSdkLibraryDist(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		PrepareForTestWithJavaBuildComponents,
 		PrepareForTestWithJavaDefaultModules,
@@ -1179,7 +1206,8 @@ func TestJavaSdkLibraryDist(t *testing.T) {
 
 	for _, tt := range testCases {
 		t.Run(tt.module, func(t *testing.T) {
-			m := result.ModuleForTests(apiScopePublic.exportableStubsLibraryModuleName(tt.module), "android_common").Module().(*Library)
+			t.Parallel()
+			m := result.ModuleForTests(t, apiScopePublic.exportableStubsLibraryModuleName(tt.module), "android_common").Module().(*Library)
 			dists := m.Dists()
 			if len(dists) != 1 {
 				t.Fatalf("expected exactly 1 dist entry, got %d", len(dists))
@@ -1195,6 +1223,7 @@ func TestJavaSdkLibraryDist(t *testing.T) {
 }
 
 func TestSdkLibrary_CheckMinSdkVersion(t *testing.T) {
+	t.Parallel()
 	preparer := android.GroupFixturePreparers(
 		PrepareForTestWithJavaBuildComponents,
 		PrepareForTestWithJavaDefaultModules,
@@ -1279,6 +1308,7 @@ func TestSdkLibrary_CheckMinSdkVersion(t *testing.T) {
 }
 
 func TestJavaSdkLibrary_StubOnlyLibs_PassedToDroidstubs(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		prepareForJavaTest,
 		PrepareForTestWithJavaSdkLibraryFiles,
@@ -1300,12 +1330,13 @@ func TestJavaSdkLibrary_StubOnlyLibs_PassedToDroidstubs(t *testing.T) {
 		`)
 
 	// The foo.stubs.source should depend on bar-lib
-	fooStubsSources := result.ModuleForTests("foo.stubs.source", "android_common").Module().(*Droidstubs)
+	fooStubsSources := result.ModuleForTests(t, "foo.stubs.source", "android_common").Module().(*Droidstubs)
 	eval := fooStubsSources.ConfigurableEvaluator(android.PanickingConfigAndErrorContext(result.TestContext))
 	android.AssertStringListContains(t, "foo stubs should depend on bar-lib", fooStubsSources.Javadoc.properties.Libs.GetOrDefault(eval, nil), "bar-lib")
 }
 
 func TestJavaSdkLibrary_Scope_Libs_PassedToDroidstubs(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		prepareForJavaTest,
 		PrepareForTestWithJavaSdkLibraryFiles,
@@ -1327,12 +1358,13 @@ func TestJavaSdkLibrary_Scope_Libs_PassedToDroidstubs(t *testing.T) {
 		`)
 
 	// The foo.stubs.source should depend on bar-lib
-	fooStubsSources := result.ModuleForTests("foo.stubs.source", "android_common").Module().(*Droidstubs)
+	fooStubsSources := result.ModuleForTests(t, "foo.stubs.source", "android_common").Module().(*Droidstubs)
 	eval := fooStubsSources.ConfigurableEvaluator(android.PanickingConfigAndErrorContext(result.TestContext))
 	android.AssertStringListContains(t, "foo stubs should depend on bar-lib", fooStubsSources.Javadoc.properties.Libs.GetOrDefault(eval, nil), "bar-lib")
 }
 
 func TestJavaSdkLibrary_ApiLibrary(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		prepareForJavaTest,
 		PrepareForTestWithJavaSdkLibraryFiles,
@@ -1377,12 +1409,13 @@ func TestJavaSdkLibrary_ApiLibrary(t *testing.T) {
 	}
 
 	for _, c := range testCases {
-		m := result.ModuleForTests(c.scope.apiLibraryModuleName("foo"), "android_common").Module().(*ApiLibrary)
+		m := result.ModuleForTests(t, c.scope.apiLibraryModuleName("foo"), "android_common").Module().(*ApiLibrary)
 		android.AssertArrayString(t, "Module expected to contain api contributions", c.apiContributions, m.properties.Api_contributions)
 	}
 }
 
 func TestStaticDepStubLibrariesVisibility(t *testing.T) {
+	t.Parallel()
 	android.GroupFixturePreparers(
 		prepareForJavaTest,
 		PrepareForTestWithJavaSdkLibraryFiles,
@@ -1412,6 +1445,7 @@ func TestStaticDepStubLibrariesVisibility(t *testing.T) {
 }
 
 func TestSdkLibraryDependency(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		prepareForJavaTest,
 		PrepareForTestWithJavaSdkLibraryFiles,
@@ -1438,12 +1472,13 @@ func TestSdkLibraryDependency(t *testing.T) {
 		}
 `)
 
-	barPermissions := result.ModuleForTests("bar.xml", "android_common").Output("bar.xml")
+	barPermissions := result.ModuleForTests(t, "bar.xml", "android_common").Output("bar.xml")
 	barContents := android.ContentFromFileRuleForTests(t, result.TestContext, barPermissions)
 	android.AssertStringDoesContain(t, "bar.xml java_sdk_xml command", barContents, `dependency="foo"`)
 }
 
 func TestSdkLibraryExportableStubsLibrary(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		prepareForJavaTest,
 		PrepareForTestWithJavaSdkLibraryFiles,
@@ -1480,8 +1515,8 @@ func TestSdkLibraryExportableStubsLibrary(t *testing.T) {
 	exportableSourceStubsLibraryModuleName := apiScopePublic.exportableSourceStubsLibraryModuleName("foo")
 
 	// Check modules generation
-	result.ModuleForTests(exportableStubsLibraryModuleName, "android_common")
-	result.ModuleForTests(exportableSourceStubsLibraryModuleName, "android_common")
+	result.ModuleForTests(t, exportableStubsLibraryModuleName, "android_common")
+	result.ModuleForTests(t, exportableSourceStubsLibraryModuleName, "android_common")
 
 	// Check static lib dependency
 	android.AssertBoolEquals(t, "exportable top level stubs library module depends on the"+
@@ -1494,6 +1529,7 @@ func TestSdkLibraryExportableStubsLibrary(t *testing.T) {
 // For java libraries depending on java_sdk_library(_import) via libs, assert that
 // rdep gets stubs of source if source is listed in apex_contributions and prebuilt has prefer (legacy mechanism)
 func TestStubResolutionOfJavaSdkLibraryInLibs(t *testing.T) {
+	t.Parallel()
 	bp := `
 		apex_contributions {
 			name: "my_mainline_module_contributions",
@@ -1539,14 +1575,16 @@ func TestStubResolutionOfJavaSdkLibraryInLibs(t *testing.T) {
 
 	result := fixture.RunTestWithBp(t, bp)
 	// Make sure that rdeps get the correct source vs prebuilt based on mainline_module_contributions
-	public := result.ModuleForTests("mymodule", "android_common")
+	public := result.ModuleForTests(t, "mymodule", "android_common")
 	rule := public.Output("javac/mymodule.jar")
 	inputs := rule.Implicits.Strings()
-	android.AssertStringListContains(t, "Could not find the expected stub on classpath", inputs, "out/soong/.intermediates/sdklib.stubs/android_common/turbine-combined/sdklib.stubs.jar")
+	android.AssertStringListContains(t, "Could not find the expected stub on classpath", inputs,
+		"out/soong/.intermediates/sdklib.stubs.from-text/android_common/sdklib.stubs.from-text/sdklib.stubs.from-text.jar")
 }
 
 // test that rdep gets resolved to the correct version of a java_sdk_library (source or a specific prebuilt)
 func TestMultipleSdkLibraryPrebuilts(t *testing.T) {
+	t.Parallel()
 	bp := `
 		apex_contributions {
 			name: "my_mainline_module_contributions",
@@ -1599,17 +1637,17 @@ func TestMultipleSdkLibraryPrebuilts(t *testing.T) {
 		{
 			desc:                   "Source library is selected using apex_contributions",
 			selectedDependencyName: "sdklib",
-			expectedStubPath:       "out/soong/.intermediates/sdklib.stubs/android_common/turbine-combined/sdklib.stubs.jar",
+			expectedStubPath:       "out/soong/.intermediates/sdklib.stubs.from-text/android_common/sdklib.stubs.from-text/sdklib.stubs.from-text.jar",
 		},
 		{
 			desc:                   "Prebuilt library v1 is selected using apex_contributions",
 			selectedDependencyName: "prebuilt_sdklib.v1",
-			expectedStubPath:       "out/soong/.intermediates/prebuilt_sdklib.v1.stubs/android_common/combined/sdklib.stubs.jar",
+			expectedStubPath:       "out/soong/.intermediates/prebuilt_sdklib.v1.stubs/android_common/local-combined/sdklib.stubs.jar",
 		},
 		{
 			desc:                   "Prebuilt library v2 is selected using apex_contributions",
 			selectedDependencyName: "prebuilt_sdklib.v2",
-			expectedStubPath:       "out/soong/.intermediates/prebuilt_sdklib.v2.stubs/android_common/combined/sdklib.stubs.jar",
+			expectedStubPath:       "out/soong/.intermediates/prebuilt_sdklib.v2.stubs/android_common/local-combined/sdklib.stubs.jar",
 		},
 	}
 
@@ -1624,7 +1662,7 @@ func TestMultipleSdkLibraryPrebuilts(t *testing.T) {
 		result := fixture.RunTestWithBp(t, fmt.Sprintf(bp, tc.selectedDependencyName))
 
 		// Make sure that rdeps get the correct source vs prebuilt based on mainline_module_contributions
-		public := result.ModuleForTests("mymodule", "android_common")
+		public := result.ModuleForTests(t, "mymodule", "android_common")
 		rule := public.Output("javac/mymodule.jar")
 		inputs := rule.Implicits.Strings()
 		android.AssertStringListContains(t, "Could not find the expected stub on classpath", inputs, tc.expectedStubPath)
@@ -1632,6 +1670,7 @@ func TestMultipleSdkLibraryPrebuilts(t *testing.T) {
 }
 
 func TestStubLinkType(t *testing.T) {
+	t.Parallel()
 	android.GroupFixturePreparers(
 		prepareForJavaTest,
 		PrepareForTestWithJavaSdkLibraryFiles,
@@ -1668,6 +1707,7 @@ func TestStubLinkType(t *testing.T) {
 }
 
 func TestSdkLibDirectDependency(t *testing.T) {
+	t.Parallel()
 	android.GroupFixturePreparers(
 		prepareForJavaTest,
 		PrepareForTestWithJavaSdkLibraryFiles,
@@ -1732,6 +1772,7 @@ func TestSdkLibDirectDependency(t *testing.T) {
 }
 
 func TestSdkLibDirectDependencyWithPrebuiltSdk(t *testing.T) {
+	t.Parallel()
 	android.GroupFixturePreparers(
 		prepareForJavaTest,
 		PrepareForTestWithJavaSdkLibraryFiles,

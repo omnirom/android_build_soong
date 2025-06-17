@@ -46,13 +46,14 @@ import (
 
 const SystemPartition = "/system/"
 const SystemOtherPartition = "/system_other/"
+const SystemServerDexjarsDir = "system_server_dexjars"
 
 var DexpreoptRunningInSoong = false
 
 // GenerateDexpreoptRule generates a set of commands that will preopt a module based on a GlobalConfig and a
 // ModuleConfig.  The produced files and their install locations will be available through rule.Installs().
 func GenerateDexpreoptRule(ctx android.BuilderContext, globalSoong *GlobalSoongConfig,
-	global *GlobalConfig, module *ModuleConfig, productPackages android.Path, copyApexSystemServerJarDex bool) (
+	global *GlobalConfig, module *ModuleConfig, productPackages android.Path) (
 	rule *android.RuleBuilder, err error) {
 
 	defer func() {
@@ -83,7 +84,7 @@ func GenerateDexpreoptRule(ctx android.BuilderContext, globalSoong *GlobalSoongC
 
 	if !dexpreoptDisabled(ctx, global, module) {
 		if valid, err := validateClassLoaderContext(module.ClassLoaderContexts); err != nil {
-			android.ReportPathErrorf(ctx, err.Error())
+			android.ReportPathErrorf(ctx, "%s", err.Error())
 		} else if valid {
 			fixClassLoaderContext(module.ClassLoaderContexts)
 
@@ -94,7 +95,7 @@ func GenerateDexpreoptRule(ctx android.BuilderContext, globalSoong *GlobalSoongC
 
 			for archIdx, _ := range module.Archs {
 				dexpreoptCommand(ctx, globalSoong, global, module, rule, archIdx, profile, appImage,
-					generateDM, productPackages, copyApexSystemServerJarDex)
+					generateDM, productPackages)
 			}
 		}
 	}
@@ -231,7 +232,7 @@ func ToOdexPath(path string, arch android.ArchType, partition string) string {
 
 func dexpreoptCommand(ctx android.BuilderContext, globalSoong *GlobalSoongConfig,
 	global *GlobalConfig, module *ModuleConfig, rule *android.RuleBuilder, archIdx int,
-	profile android.WritablePath, appImage bool, generateDM bool, productPackages android.Path, copyApexSystemServerJarDex bool) {
+	profile android.WritablePath, appImage bool, generateDM bool, productPackages android.Path) {
 
 	arch := module.Archs[archIdx]
 
@@ -279,25 +280,10 @@ func dexpreoptCommand(ctx android.BuilderContext, globalSoong *GlobalSoongConfig
 			clcTarget = append(clcTarget, GetSystemServerDexLocation(ctx, global, lib))
 		}
 
-		if DexpreoptRunningInSoong && copyApexSystemServerJarDex {
-			// Copy the system server jar to a predefined location where dex2oat will find it.
-			dexPathHost := SystemServerDexJarHostPath(ctx, module.Name)
-			rule.Command().Text("mkdir -p").Flag(filepath.Dir(dexPathHost.String()))
-			rule.Command().Text("cp -f").Input(module.DexPath).Output(dexPathHost)
-		} else {
-			// For Make modules the copy rule is generated in the makefiles, not in dexpreopt.sh.
-			// This is necessary to expose the rule to Ninja, otherwise it has rules that depend on
-			// the jar (namely, dexpreopt commands for all subsequent system server jars that have
-			// this one in their class loader context), but no rule that creates it (because Ninja
-			// cannot see the rule in the generated dexpreopt.sh script).
-		}
-
 		clcHostString := "PCL[" + strings.Join(clcHost.Strings(), ":") + "]"
 		clcTargetString := "PCL[" + strings.Join(clcTarget, ":") + "]"
 
-		if systemServerClasspathJars.ContainsJar(module.Name) {
-			checkSystemServerOrder(ctx, jarIndex)
-		} else {
+		if !systemServerClasspathJars.ContainsJar(module.Name) {
 			// Standalone jars are loaded by separate class loaders with SYSTEMSERVERCLASSPATH as the
 			// parent.
 			clcHostString = "PCL[];" + clcHostString
@@ -581,34 +567,11 @@ func makefileMatch(pattern, s string) bool {
 func SystemServerDexJarHostPath(ctx android.PathContext, jar string) android.OutputPath {
 	if DexpreoptRunningInSoong {
 		// Soong module, just use the default output directory $OUT/soong.
-		return android.PathForOutput(ctx, "system_server_dexjars", jar+".jar")
+		return android.PathForOutput(ctx, SystemServerDexjarsDir, jar+".jar")
 	} else {
 		// Make module, default output directory is $OUT (passed via the "null config" created
 		// by dexpreopt_gen). Append Soong subdirectory to match Soong module paths.
-		return android.PathForOutput(ctx, "soong", "system_server_dexjars", jar+".jar")
-	}
-}
-
-// Check the order of jars on the system server classpath and give a warning/error if a jar precedes
-// one of its dependencies. This is not an error, but a missed optimization, as dexpreopt won't
-// have the dependency jar in the class loader context, and it won't be able to resolve any
-// references to its classes and methods.
-func checkSystemServerOrder(ctx android.PathContext, jarIndex int) {
-	mctx, isModule := ctx.(android.ModuleContext)
-	if isModule {
-		config := GetGlobalConfig(ctx)
-		jars := config.AllSystemServerClasspathJars(ctx)
-		mctx.WalkDeps(func(dep android.Module, parent android.Module) bool {
-			depIndex := jars.IndexOfJar(dep.Name())
-			if jarIndex < depIndex && !config.BrokenSuboptimalOrderOfSystemServerJars {
-				jar := jars.Jar(jarIndex)
-				dep := jars.Jar(depIndex)
-				mctx.ModuleErrorf("non-optimal order of jars on the system server classpath:"+
-					" '%s' precedes its dependency '%s', so dexpreopt is unable to resolve any"+
-					" references from '%s' to '%s'.\n", jar, dep, jar, dep)
-			}
-			return true
-		})
+		return android.PathForOutput(ctx, "soong", SystemServerDexjarsDir, jar+".jar")
 	}
 }
 

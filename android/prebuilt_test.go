@@ -335,7 +335,7 @@ func TestPrebuilts(t *testing.T) {
 			).RunTestWithBp(t, bp)
 
 			for _, variant := range result.ModuleVariantsForTests("foo") {
-				foo := result.ModuleForTests("foo", variant)
+				foo := result.ModuleForTests(t, "foo", variant)
 				t.Run(foo.Module().Target().Os.String(), func(t *testing.T) {
 					var dependsOnSourceModule, dependsOnPrebuiltModule bool
 					result.VisitDirectDeps(foo.Module(), func(m blueprint.Module) {
@@ -551,6 +551,9 @@ func (s *sourceModule) GenerateAndroidBuildActions(ctx ModuleContext) {
 }
 
 func (s *sourceModule) Srcs() Paths {
+	if s.src == nil {
+		return nil
+	}
 	return Paths{s.src}
 }
 

@@ -69,6 +69,11 @@ type LintProperties struct {
 		// If soong gets support for testonly, this flag should be replaced with that.
 		Test *bool
 
+		// Same as the regular Test property, but set by internal soong code based on if the module
+		// type is a test module type. This will act as the default value for the test property,
+		// but can be overridden by the user.
+		Test_module_type *bool `blueprint:"mutated"`
+
 		// Whether to ignore the exit code of Android lint. This is the --exit_code
 		// option. Defaults to false.
 		Suppress_exit_code *bool
@@ -257,7 +262,12 @@ func (l *linter) writeLintProjectXML(ctx android.ModuleContext, rule *android.Ru
 	if l.library {
 		cmd.Flag("--library")
 	}
-	if proptools.BoolDefault(l.properties.Lint.Test, false) {
+
+	test := proptools.BoolDefault(l.properties.Lint.Test_module_type, false)
+	if l.properties.Lint.Test != nil {
+		test = *l.properties.Lint.Test
+	}
+	if test {
 		cmd.Flag("--test")
 	}
 	if l.manifest != nil {
@@ -388,7 +398,7 @@ func (l *linter) lint(ctx android.ModuleContext) {
 		}
 	}
 
-	extraLintCheckModules := ctx.GetDirectDepsWithTag(extraLintCheckTag)
+	extraLintCheckModules := ctx.GetDirectDepsProxyWithTag(extraLintCheckTag)
 	for _, extraLintCheckModule := range extraLintCheckModules {
 		if dep, ok := android.OtherModuleProvider(ctx, extraLintCheckModule, JavaInfoProvider); ok {
 			l.extraLintCheckJars = append(l.extraLintCheckJars, dep.ImplementationAndResourcesJars...)
@@ -413,7 +423,7 @@ func (l *linter) lint(ctx android.ModuleContext) {
 
 	depSetsBuilder := NewLintDepSetBuilder().Direct(html, text, xml, baseline)
 
-	ctx.VisitDirectDepsWithTag(staticLibTag, func(dep android.Module) {
+	ctx.VisitDirectDepsProxyWithTag(staticLibTag, func(dep android.ModuleProxy) {
 		if info, ok := android.OtherModuleProvider(ctx, dep, LintProvider); ok {
 			depSetsBuilder.Transitive(info)
 		}
@@ -470,7 +480,7 @@ func (l *linter) lint(ctx android.ModuleContext) {
 
 	cmd := rule.Command()
 
-	cmd.Flag(`JAVA_OPTS="-Xmx3072m --add-opens java.base/java.util=ALL-UNNAMED"`).
+	cmd.Flag(`JAVA_OPTS="-Xmx4096m --add-opens java.base/java.util=ALL-UNNAMED"`).
 		FlagWithArg("ANDROID_SDK_HOME=", lintPaths.homeDir.String()).
 		FlagWithInput("SDK_ANNOTATIONS=", annotationsZipPath).
 		FlagWithInput("LINT_OPTS=-DLINT_API_DATABASE=", apiVersionsXMLPath)
@@ -585,12 +595,12 @@ func (l *lintSingleton) GenerateBuildActions(ctx android.SingletonContext) {
 	l.copyLintDependencies(ctx)
 }
 
-func findModuleOrErr(ctx android.SingletonContext, moduleName string) android.Module {
-	var res android.Module
-	ctx.VisitAllModules(func(m android.Module) {
+func findModuleOrErr(ctx android.SingletonContext, moduleName string) *android.ModuleProxy {
+	var res *android.ModuleProxy
+	ctx.VisitAllModuleProxies(func(m android.ModuleProxy) {
 		if ctx.ModuleName(m) == moduleName {
 			if res == nil {
-				res = m
+				res = &m
 			} else {
 				ctx.Errorf("lint: multiple %s modules found: %s and %s", moduleName,
 					ctx.ModuleSubDir(m), ctx.ModuleSubDir(res))
@@ -625,13 +635,13 @@ func (l *lintSingleton) copyLintDependencies(ctx android.SingletonContext) {
 
 		ctx.Build(pctx, android.BuildParams{
 			Rule:   android.CpIfChanged,
-			Input:  android.OutputFileForModule(ctx, sdkAnnotations, ""),
+			Input:  android.OutputFileForModule(ctx, *sdkAnnotations, ""),
 			Output: copiedLintDatabaseFilesPath(ctx, files.annotationCopiedName),
 		})
 
 		ctx.Build(pctx, android.BuildParams{
 			Rule:   android.CpIfChanged,
-			Input:  android.OutputFileForModule(ctx, apiVersionsDb, ".api_versions.xml"),
+			Input:  android.OutputFileForModule(ctx, *apiVersionsDb, ".api_versions.xml"),
 			Output: copiedLintDatabaseFilesPath(ctx, files.apiVersionsCopiedName),
 		})
 	}
@@ -648,12 +658,13 @@ func (l *lintSingleton) generateLintReportZips(ctx android.SingletonContext) {
 
 	var outputs []*LintInfo
 	var dirs []string
-	ctx.VisitAllModules(func(m android.Module) {
-		if ctx.Config().KatiEnabled() && !m.ExportedToMake() {
+	ctx.VisitAllModuleProxies(func(m android.ModuleProxy) {
+		commonInfo := android.OtherModulePointerProviderOrDefault(ctx, m, android.CommonModuleInfoProvider)
+		if ctx.Config().KatiEnabled() && !commonInfo.ExportedToMake {
 			return
 		}
 
-		if apex, ok := m.(android.ApexModule); ok && apex.NotAvailableForPlatform() {
+		if commonInfo.IsApexModule && commonInfo.NotAvailableForPlatform {
 			apexInfo, _ := android.OtherModuleProvider(ctx, m, android.ApexInfoProvider)
 			if apexInfo.IsForPlatform() {
 				// There are stray platform variants of modules in apexes that are not available for
@@ -694,15 +705,11 @@ func (l *lintSingleton) generateLintReportZips(ctx android.SingletonContext) {
 	zip(l.referenceBaselineZip, func(l *LintInfo) android.Path { return l.ReferenceBaseline })
 
 	ctx.Phony("lint-check", l.htmlZip, l.textZip, l.xmlZip, l.referenceBaselineZip)
-}
 
-func (l *lintSingleton) MakeVars(ctx android.MakeVarsContext) {
 	if !ctx.Config().UnbundledBuild() {
 		ctx.DistForGoal("lint-check", l.htmlZip, l.textZip, l.xmlZip, l.referenceBaselineZip)
 	}
 }
-
-var _ android.SingletonMakeVarsProvider = (*lintSingleton)(nil)
 
 func init() {
 	android.RegisterParallelSingletonType("lint",

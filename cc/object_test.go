@@ -46,13 +46,13 @@ func TestMinSdkVersionsOfCrtObjects(t *testing.T) {
 
 	ctx := prepareForCcTest.RunTestWithBp(t, bp)
 	for _, v := range variants {
-		cflags := ctx.ModuleForTests("crt_foo", v.variant).Rule("cc").Args["cFlags"]
+		cflags := ctx.ModuleForTests(t, "crt_foo", v.variant).Rule("cc").Args["cFlags"]
 		expected := "-target aarch64-linux-android" + v.num + " "
 		android.AssertStringDoesContain(t, "cflag", cflags, expected)
 	}
 	ctx = prepareForCcTest.RunTestWithBp(t, bp)
 	android.AssertStringDoesContain(t, "cflag",
-		ctx.ModuleForTests("crt_foo", "android_vendor_arm64_armv8-a").Rule("cc").Args["cFlags"],
+		ctx.ModuleForTests(t, "crt_foo", "android_vendor_arm64_armv8-a").Rule("cc").Args["cFlags"],
 		"-target aarch64-linux-android10000 ")
 }
 
@@ -69,13 +69,13 @@ func TestUseCrtObjectOfCorrectVersion(t *testing.T) {
 
 	// Sdk variant uses the crt object of the matching min_sdk_version
 	variant := "android_arm64_armv8-a_sdk"
-	crt := ctx.ModuleForTests("bin", variant).Rule("ld").Args["crtBegin"]
+	crt := ctx.ModuleForTests(t, "bin", variant).Rule("ld").Args["crtBegin"]
 	android.AssertStringDoesContain(t, "crt dep of sdk variant", crt,
 		"29/crtbegin_dynamic.o")
 
 	// platform variant uses the crt object built for platform
 	variant = "android_arm64_armv8-a"
-	crt = ctx.ModuleForTests("bin", variant).Rule("ld").Args["crtBegin"]
+	crt = ctx.ModuleForTests(t, "bin", variant).Rule("ld").Args["crtBegin"]
 	android.AssertStringDoesContain(t, "crt dep of platform variant", crt,
 		variant+"/crtbegin_dynamic.o")
 }
@@ -147,7 +147,7 @@ func TestCcObjectOutputFile(t *testing.T) {
 			ctx := PrepareForIntegrationTestWithCc.RunTestWithBp(t, bp)
 			android.AssertPathRelativeToTopEquals(t, "expected output file foo.o",
 				fmt.Sprintf("out/soong/.intermediates/%s/android_arm64_armv8-a/foo.o", testcase.moduleName),
-				ctx.ModuleForTests(testcase.moduleName, "android_arm64_armv8-a").Output("foo.o").Output)
+				ctx.ModuleForTests(t, testcase.moduleName, "android_arm64_armv8-a").Output("foo.o").Output)
 		})
 	}
 

@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/google/blueprint/gobtools"
 )
 
 func init() {
@@ -50,6 +52,34 @@ type ApiLevel struct {
 
 	// Identifies this API level as either a preview or final API level.
 	isPreview bool
+}
+
+type apiLevelGob struct {
+	Value     string
+	Number    int
+	IsPreview bool
+}
+
+func (a *ApiLevel) ToGob() *apiLevelGob {
+	return &apiLevelGob{
+		Value:     a.value,
+		Number:    a.number,
+		IsPreview: a.isPreview,
+	}
+}
+
+func (a *ApiLevel) FromGob(data *apiLevelGob) {
+	a.value = data.Value
+	a.number = data.Number
+	a.isPreview = data.IsPreview
+}
+
+func (a ApiLevel) GobEncode() ([]byte, error) {
+	return gobtools.CustomGobEncode[apiLevelGob](&a)
+}
+
+func (a *ApiLevel) GobDecode(data []byte) error {
+	return gobtools.CustomGobDecode[apiLevelGob](data, a)
 }
 
 func (this ApiLevel) FinalInt() int {
@@ -252,6 +282,9 @@ var NoneApiLevel = ApiLevel{
 	isPreview: true,
 }
 
+// A special ApiLevel that all modules should at least support.
+var MinApiLevel = ApiLevel{number: 1}
+
 // Sentinel ApiLevel to validate that an apiLevel is either an int or a recognized codename.
 var InvalidApiLevel = NewInvalidApiLevel("invalid")
 
@@ -311,7 +344,7 @@ func ReplaceFinalizedCodenames(config Config, raw string) (string, error) {
 
 // ApiLevelFrom converts the given string `raw` to an ApiLevel.
 // If `raw` is invalid (empty string, unrecognized codename etc.) it returns an invalid ApiLevel
-func ApiLevelFrom(ctx PathContext, raw string) ApiLevel {
+func ApiLevelFrom(ctx ConfigContext, raw string) ApiLevel {
 	ret, err := ApiLevelFromUser(ctx, raw)
 	if err != nil {
 		return NewInvalidApiLevel(raw)
@@ -333,7 +366,7 @@ func ApiLevelFrom(ctx PathContext, raw string) ApiLevel {
 //
 // Inputs that are not "current", known previews, or convertible to an integer
 // will return an error.
-func ApiLevelFromUser(ctx PathContext, raw string) (ApiLevel, error) {
+func ApiLevelFromUser(ctx ConfigContext, raw string) (ApiLevel, error) {
 	return ApiLevelFromUserWithConfig(ctx.Config(), raw)
 }
 
@@ -413,7 +446,7 @@ func ApiLevelForTest(raw string) ApiLevel {
 // Converts an API level string `raw` into an ApiLevel in the same method as
 // `ApiLevelFromUser`, but the input is assumed to have no errors and any errors
 // will panic instead of returning an error.
-func ApiLevelOrPanic(ctx PathContext, raw string) ApiLevel {
+func ApiLevelOrPanic(ctx ConfigContext, raw string) ApiLevel {
 	value, err := ApiLevelFromUser(ctx, raw)
 	if err != nil {
 		panic(err.Error())
@@ -465,6 +498,7 @@ func getApiLevelsMapReleasedVersions() (map[string]int, error) {
 		"Tiramisu":        33,
 		"UpsideDownCake":  34,
 		"VanillaIceCream": 35,
+		"Baklava":         36,
 	}, nil
 }
 

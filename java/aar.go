@@ -217,13 +217,9 @@ func (p propagateRROEnforcementTransitionMutator) Mutate(ctx android.BottomUpMut
 }
 
 func (a *aapt) useResourceProcessorBusyBox(ctx android.BaseModuleContext) bool {
-	return BoolDefault(a.aaptProperties.Use_resource_processor, ctx.Config().UseResourceProcessorByDefault()) &&
+	return BoolDefault(a.aaptProperties.Use_resource_processor, true) &&
 		// TODO(b/331641946): remove this when ResourceProcessorBusyBox supports generating shared libraries.
-		!slices.Contains(a.aaptProperties.Aaptflags, "--shared-lib") &&
-		// Use the legacy resource processor in kythe builds.
-		// The legacy resource processor creates an R.srcjar, which kythe can use for generating crossrefs.
-		// TODO(b/354854007): Re-enable BusyBox in kythe builds
-		!ctx.Config().EmitXrefRules()
+		!slices.Contains(a.aaptProperties.Aaptflags, "--shared-lib")
 }
 
 func (a *aapt) filterProduct() string {
@@ -391,8 +387,9 @@ func (a *aapt) aapt2Flags(ctx android.ModuleContext, sdkContext android.SdkConte
 		versionName = proptools.NinjaEscape(versionName)
 		linkFlags = append(linkFlags, "--version-name ", versionName)
 	}
-
-	linkFlags, compileFlags = android.FilterList(linkFlags, []string{"--legacy"})
+	// Split the flags by prefix, as --png-compression-level has the "=value" suffix.
+	linkFlags, compileFlags = android.FilterListByPrefix(linkFlags,
+		[]string{"--legacy", "--png-compression-level"})
 
 	// Always set --pseudo-localize, it will be stripped out later for release
 	// builds that don't want it.
@@ -878,13 +875,15 @@ func aaptLibs(ctx android.ModuleContext, sdkContext android.SdkContext,
 	rroDirsDepSetBuilder := depset.NewBuilder[rroDir](depset.TOPOLOGICAL)
 	manifestsDepSetBuilder := depset.NewBuilder[android.Path](depset.TOPOLOGICAL)
 
-	ctx.VisitDirectDeps(func(module android.Module) {
+	ctx.VisitDirectDepsProxy(func(module android.ModuleProxy) {
 		depTag := ctx.OtherModuleDependencyTag(module)
 
 		var exportPackage android.Path
-		aarDep, _ := module.(AndroidLibraryDependency)
-		if aarDep != nil {
-			exportPackage = aarDep.ExportPackage()
+		var aarDep *AndroidLibraryDependencyInfo
+		javaInfo, ok := android.OtherModuleProvider(ctx, module, JavaInfoProvider)
+		if ok && javaInfo.AndroidLibraryDependencyInfo != nil {
+			aarDep = javaInfo.AndroidLibraryDependencyInfo
+			exportPackage = aarDep.ExportPackage
 		}
 
 		switch depTag {
@@ -892,7 +891,7 @@ func aaptLibs(ctx android.ModuleContext, sdkContext android.SdkContext,
 			// Nothing, instrumentationForTag is treated as libTag for javac but not for aapt2.
 		case sdkLibTag, libTag, rroDepTag:
 			if exportPackage != nil {
-				sharedResourcesNodeDepSets = append(sharedResourcesNodeDepSets, aarDep.ResourcesNodeDepSet())
+				sharedResourcesNodeDepSets = append(sharedResourcesNodeDepSets, aarDep.ResourcesNodeDepSet)
 				sharedLibs = append(sharedLibs, exportPackage)
 			}
 		case frameworkResTag, omniromResTag:
@@ -901,9 +900,9 @@ func aaptLibs(ctx android.ModuleContext, sdkContext android.SdkContext,
 			}
 		case staticLibTag:
 			if exportPackage != nil {
-				staticResourcesNodeDepSets = append(staticResourcesNodeDepSets, aarDep.ResourcesNodeDepSet())
-				rroDirsDepSetBuilder.Transitive(aarDep.RRODirsDepSet())
-				manifestsDepSetBuilder.Transitive(aarDep.ManifestsDepSet())
+				staticResourcesNodeDepSets = append(staticResourcesNodeDepSets, aarDep.ResourcesNodeDepSet)
+				rroDirsDepSetBuilder.Transitive(aarDep.RRODirsDepSet)
+				manifestsDepSetBuilder.Transitive(aarDep.ManifestsDepSet)
 			}
 		}
 
@@ -938,6 +937,18 @@ func aaptLibs(ctx android.ModuleContext, sdkContext android.SdkContext,
 
 	return staticResourcesNodes, sharedResourcesNodes, staticRRODirs, staticManifests, sharedLibs, flags
 }
+
+type AndroidLibraryInfo struct {
+	// Empty for now
+}
+
+var AndroidLibraryInfoProvider = blueprint.NewProvider[AndroidLibraryInfo]()
+
+type AARImportInfo struct {
+	// Empty for now
+}
+
+var AARImportInfoProvider = blueprint.NewProvider[AARImportInfo]()
 
 type AndroidLibrary struct {
 	Library
@@ -1025,7 +1036,7 @@ func (a *AndroidLibrary) GenerateAndroidBuildActions(ctx android.ModuleContext) 
 		extraSrcJars = android.Paths{a.aapt.aaptSrcJar}
 	}
 
-	a.Module.compile(ctx, extraSrcJars, extraClasspathJars, extraCombinedJars, nil)
+	javaInfo := a.Module.compile(ctx, extraSrcJars, extraClasspathJars, extraCombinedJars, nil)
 
 	a.aarFile = android.PathForModuleOut(ctx, ctx.ModuleName()+".aar")
 	var res android.Paths
@@ -1034,7 +1045,7 @@ func (a *AndroidLibrary) GenerateAndroidBuildActions(ctx android.ModuleContext) 
 	}
 
 	prebuiltJniPackages := android.Paths{}
-	ctx.VisitDirectDeps(func(module android.Module) {
+	ctx.VisitDirectDepsProxy(func(module android.ModuleProxy) {
 		if info, ok := android.OtherModuleProvider(ctx, module, JniPackageProvider); ok {
 			prebuiltJniPackages = append(prebuiltJniPackages, info.JniPackages...)
 		}
@@ -1049,7 +1060,16 @@ func (a *AndroidLibrary) GenerateAndroidBuildActions(ctx android.ModuleContext) 
 		AconfigTextFiles: aconfigTextFilePaths,
 	})
 
+	android.SetProvider(ctx, AndroidLibraryInfoProvider, AndroidLibraryInfo{})
+
+	if javaInfo != nil {
+		setExtraJavaInfo(ctx, a, javaInfo)
+		android.SetProvider(ctx, JavaInfoProvider, javaInfo)
+	}
+
 	a.setOutputFiles(ctx)
+
+	buildComplianceMetadata(ctx)
 }
 
 func (a *AndroidLibrary) setOutputFiles(ctx android.ModuleContext) {
@@ -1445,7 +1465,7 @@ func (a *AARImport) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	var transitiveStaticLibsImplementationJars []depset.DepSet[android.Path]
 	var transitiveStaticLibsResourceJars []depset.DepSet[android.Path]
 
-	ctx.VisitDirectDeps(func(module android.Module) {
+	ctx.VisitDirectDepsProxy(func(module android.ModuleProxy) {
 		if dep, ok := android.OtherModuleProvider(ctx, module, JavaInfoProvider); ok {
 			tag := ctx.OtherModuleDependencyTag(module)
 			switch tag {
@@ -1467,12 +1487,7 @@ func (a *AARImport) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	completeStaticLibsResourceJars := depset.New(depset.PREORDER, nil, transitiveStaticLibsResourceJars)
 
 	var implementationJarFile android.Path
-	var combineJars android.Paths
-	if ctx.Config().UseTransitiveJarsInClasspath() {
-		combineJars = completeStaticLibsImplementationJars.ToList()
-	} else {
-		combineJars = append(android.Paths{classpathFile}, staticJars...)
-	}
+	combineJars := completeStaticLibsImplementationJars.ToList()
 
 	if len(combineJars) > 1 {
 		implementationJarOutputPath := android.PathForModuleOut(ctx, "combined", jarName)
@@ -1483,12 +1498,8 @@ func (a *AARImport) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	}
 
 	var resourceJarFile android.Path
-	var resourceJars android.Paths
-	if ctx.Config().UseTransitiveJarsInClasspath() {
-		resourceJars = completeStaticLibsResourceJars.ToList()
-	} else {
-		resourceJars = staticResourceJars
-	}
+	resourceJars := completeStaticLibsResourceJars.ToList()
+
 	if len(resourceJars) > 1 {
 		combinedJar := android.PathForModuleOut(ctx, "res-combined", jarName)
 		TransformJarsToJar(ctx, combinedJar, "for resources", resourceJars, android.OptionalPath{},
@@ -1499,12 +1510,8 @@ func (a *AARImport) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	}
 
 	// merge implementation jar with resources if necessary
-	var implementationAndResourcesJars android.Paths
-	if ctx.Config().UseTransitiveJarsInClasspath() {
-		implementationAndResourcesJars = append(slices.Clone(resourceJars), combineJars...)
-	} else {
-		implementationAndResourcesJars = android.PathsIfNonNil(resourceJarFile, implementationJarFile)
-	}
+	implementationAndResourcesJars := append(slices.Clone(resourceJars), combineJars...)
+
 	var implementationAndResourcesJar android.Path
 	if len(implementationAndResourcesJars) > 1 {
 		combinedJar := android.PathForModuleOut(ctx, "withres", jarName)
@@ -1519,12 +1526,7 @@ func (a *AARImport) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	// Save the output file with no relative path so that it doesn't end up in a subdirectory when used as a resource
 	a.implementationAndResourcesJarFile = implementationAndResourcesJar.WithoutRel()
 
-	var headerJars android.Paths
-	if ctx.Config().UseTransitiveJarsInClasspath() {
-		headerJars = completeStaticLibsHeaderJars.ToList()
-	} else {
-		headerJars = append(android.Paths{classpathFile}, staticHeaderJars...)
-	}
+	headerJars := completeStaticLibsHeaderJars.ToList()
 	if len(headerJars) > 1 {
 		headerJarFile := android.PathForModuleOut(ctx, "turbine-combined", jarName)
 		TransformJarsToJar(ctx, headerJarFile, "combine header jars", headerJars, android.OptionalPath{}, false, nil, nil)
@@ -1533,14 +1535,9 @@ func (a *AARImport) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		a.headerJarFile = headerJars[0]
 	}
 
-	if ctx.Config().UseTransitiveJarsInClasspath() {
-		ctx.CheckbuildFile(classpathFile)
-	} else {
-		ctx.CheckbuildFile(a.headerJarFile)
-		ctx.CheckbuildFile(a.implementationJarFile)
-	}
+	ctx.CheckbuildFile(classpathFile)
 
-	android.SetProvider(ctx, JavaInfoProvider, &JavaInfo{
+	javaInfo := &JavaInfo{
 		HeaderJars:                             android.PathsIfNonNil(a.headerJarFile),
 		LocalHeaderJars:                        android.PathsIfNonNil(classpathFile),
 		TransitiveStaticLibsHeaderJars:         completeStaticLibsHeaderJars,
@@ -1553,7 +1550,9 @@ func (a *AARImport) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		ImplementationJars:                     android.PathsIfNonNil(a.implementationJarFile),
 		StubsLinkType:                          Implementation,
 		// TransitiveAconfigFiles: // TODO(b/289117800): LOCAL_ACONFIG_FILES for prebuilts
-	})
+	}
+	setExtraJavaInfo(ctx, a, javaInfo)
+	android.SetProvider(ctx, JavaInfoProvider, javaInfo)
 
 	if proptools.Bool(a.properties.Extract_jni) {
 		for _, t := range ctx.MultiTargets() {
@@ -1580,8 +1579,12 @@ func (a *AARImport) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		JniPackages: a.jniPackages,
 	})
 
+	android.SetProvider(ctx, AARImportInfoProvider, AARImportInfo{})
+
 	ctx.SetOutputFiles([]android.Path{a.implementationAndResourcesJarFile}, "")
 	ctx.SetOutputFiles([]android.Path{a.aarPath}, ".aar")
+
+	buildComplianceMetadata(ctx)
 }
 
 func (a *AARImport) HeaderJars() android.Paths {
@@ -1609,14 +1612,21 @@ var _ UsesLibraryDependency = (*AARImport)(nil)
 var _ android.ApexModule = (*AARImport)(nil)
 
 // Implements android.ApexModule
-func (a *AARImport) DepIsInSameApex(ctx android.BaseModuleContext, dep android.Module) bool {
-	return a.depIsInSameApex(ctx, dep)
+func (m *AARImport) GetDepInSameApexChecker() android.DepInSameApexChecker {
+	return AARImportDepInSameApexChecker{}
+}
+
+type AARImportDepInSameApexChecker struct {
+	android.BaseDepInSameApexChecker
+}
+
+func (m AARImportDepInSameApexChecker) OutgoingDepIsInSameApex(tag blueprint.DependencyTag) bool {
+	return depIsInSameApex(tag)
 }
 
 // Implements android.ApexModule
-func (a *AARImport) ShouldSupportSdkVersion(ctx android.BaseModuleContext,
-	sdkVersion android.ApiLevel) error {
-	return nil
+func (a *AARImport) MinSdkVersionSupported(ctx android.BaseModuleContext) android.ApiLevel {
+	return android.MinApiLevel
 }
 
 var _ android.PrebuiltInterface = (*AARImport)(nil)
@@ -1646,5 +1656,5 @@ func AARImportFactory() android.Module {
 }
 
 func (a *AARImport) IDEInfo(ctx android.BaseModuleContext, dpInfo *android.IdeInfo) {
-	dpInfo.Jars = append(dpInfo.Jars, a.headerJarFile.String(), a.rJar.String())
+	dpInfo.Jars = append(dpInfo.Jars, a.implementationJarFile.String(), a.rJar.String())
 }

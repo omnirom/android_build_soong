@@ -92,9 +92,6 @@ func (mod *Module) AndroidMkEntries() []android.AndroidMkEntries {
 func (binary *binaryDecorator) AndroidMk(ctx AndroidMkContext, ret *android.AndroidMkEntries) {
 	ctx.SubAndroidMk(ret, binary.baseCompiler)
 
-	if binary.distFile.Valid() {
-		ret.DistFiles = android.MakeDefaultDistFiles(binary.distFile.Path())
-	}
 	ret.Class = "EXECUTABLES"
 }
 
@@ -143,9 +140,6 @@ func (library *libraryDecorator) AndroidMk(ctx AndroidMkContext, ret *android.An
 	} else if library.shared() {
 		ret.Class = "SHARED_LIBRARIES"
 	}
-	if library.distFile.Valid() {
-		ret.DistFiles = android.MakeDefaultDistFiles(library.distFile.Path())
-	}
 	ret.ExtraEntries = append(ret.ExtraEntries,
 		func(ctx android.AndroidMkExtraEntriesContext, entries *android.AndroidMkEntries) {
 			if library.tocFile.Valid() {
@@ -158,10 +152,6 @@ func (procMacro *procMacroDecorator) AndroidMk(ctx AndroidMkContext, ret *androi
 	ctx.SubAndroidMk(ret, procMacro.baseCompiler)
 
 	ret.Class = "PROC_MACRO_LIBRARIES"
-	if procMacro.distFile.Valid() {
-		ret.DistFiles = android.MakeDefaultDistFiles(procMacro.distFile.Path())
-	}
-
 }
 
 func (sourceProvider *BaseSourceProvider) AndroidMk(ctx AndroidMkContext, ret *android.AndroidMkEntries) {

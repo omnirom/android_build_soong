@@ -1,0 +1,21 @@
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+bootstrap_go_package {
+    name: "soong-ci-tests",
+    pkgPath: "android/soong/ci_tests",
+    deps: [
+        "blueprint",
+        "blueprint-proptools",
+        "soong",
+        "soong-android",
+    ],
+    srcs: [
+        "ci_test_package_zip.go",
+    ],
+    testSrcs: [
+    ],
+    pluginFor: ["soong_build"],
+    visibility: ["//visibility:public"],
+}

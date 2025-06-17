@@ -209,6 +209,10 @@ type ModuleErrorfContext interface {
 
 var _ ModuleErrorfContext = blueprint.ModuleContext(nil)
 
+type AddMissingDependenciesContext interface {
+	AddMissingDependencies([]string)
+}
+
 // reportPathError will register an error with the attached context. It
 // attempts ctx.ModuleErrorf for a better error message first, then falls
 // back to ctx.Errorf.
@@ -220,7 +224,9 @@ func reportPathError(ctx PathContext, err error) {
 // attempts ctx.ModuleErrorf for a better error message first, then falls
 // back to ctx.Errorf.
 func ReportPathErrorf(ctx PathContext, format string, args ...interface{}) {
-	if mctx, ok := ctx.(ModuleErrorfContext); ok {
+	if mctx, ok := ctx.(AddMissingDependenciesContext); ok && ctx.Config().AllowMissingDependencies() {
+		mctx.AddMissingDependencies([]string{fmt.Sprintf(format, args...)})
+	} else if mctx, ok := ctx.(ModuleErrorfContext); ok {
 		mctx.ModuleErrorf(format, args...)
 	} else if ectx, ok := ctx.(errorfContext); ok {
 		ectx.Errorf(format, args...)
@@ -229,6 +235,8 @@ func ReportPathErrorf(ctx PathContext, format string, args ...interface{}) {
 	}
 }
 
+// TODO(b/397766191): Change the signature to take ModuleProxy
+// Please only access the module's internal data through providers.
 func pathContextName(ctx PathContext, module blueprint.Module) string {
 	if x, ok := ctx.(interface{ ModuleName(blueprint.Module) string }); ok {
 		return x.ModuleName(module)
@@ -675,7 +683,7 @@ func getPathsFromModuleDep(ctx ModuleWithDepsPathContext, path, moduleName, tag 
 	if module == nil {
 		return nil, missingDependencyError{[]string{moduleName}}
 	}
-	if !OtherModuleProviderOrDefault(ctx, *module, CommonModuleInfoKey).Enabled {
+	if !OtherModulePointerProviderOrDefault(ctx, *module, CommonModuleInfoProvider).Enabled {
 		return nil, missingDependencyError{[]string{moduleName}}
 	}
 
@@ -1378,7 +1386,7 @@ func PathForSource(ctx PathContext, pathComponents ...string) SourcePath {
 
 // PathForArbitraryOutput creates a path for the given components. Unlike PathForOutput,
 // the path is relative to the root of the output folder, not the out/soong folder.
-func PathForArbitraryOutput(ctx PathContext, pathComponents ...string) Path {
+func PathForArbitraryOutput(ctx PathContext, pathComponents ...string) WritablePath {
 	path, err := validatePath(pathComponents...)
 	if err != nil {
 		reportPathError(ctx, err)
@@ -1485,33 +1493,6 @@ func (p SourcePath) join(ctx PathContext, paths ...string) SourcePath {
 		reportPathError(ctx, err)
 	}
 	return p.withRel(path)
-}
-
-// OverlayPath returns the overlay for `path' if it exists. This assumes that the
-// SourcePath is the path to a resource overlay directory.
-func (p SourcePath) OverlayPath(ctx ModuleMissingDepsPathContext, path Path) OptionalPath {
-	var relDir string
-	if srcPath, ok := path.(SourcePath); ok {
-		relDir = srcPath.path
-	} else {
-		ReportPathErrorf(ctx, "Cannot find relative path for %s(%s)", reflect.TypeOf(path).Name(), path)
-		// No need to put the error message into the returned path since it has been reported already.
-		return OptionalPath{}
-	}
-	dir := filepath.Join(p.path, relDir)
-	// Use Glob so that we are run again if the directory is added.
-	if pathtools.IsGlob(dir) {
-		ReportPathErrorf(ctx, "Path may not contain a glob: %s", dir)
-	}
-	paths, err := ctx.GlobWithDeps(dir, nil)
-	if err != nil {
-		ReportPathErrorf(ctx, "glob: %s", err.Error())
-		return OptionalPath{}
-	}
-	if len(paths) == 0 {
-		return InvalidOptionalPath(dir + " does not exist")
-	}
-	return OptionalPathForPath(PathForSource(ctx, paths[0]))
 }
 
 // OutputPath is a Path representing an intermediates file path rooted from the build directory
@@ -2123,7 +2104,7 @@ func pathForInstall(ctx PathContext, os OsType, arch ArchType, partition string,
 	var partitionPaths []string
 
 	if os.Class == Device {
-		partitionPaths = []string{"target", "product", ctx.Config().DeviceName(), partition}
+		partitionPaths = []string{"target", "product", *ctx.Config().deviceNameToInstall, partition}
 	} else {
 		osName := os.String()
 		if os == Linux {
@@ -2153,7 +2134,7 @@ func pathForInstall(ctx PathContext, os OsType, arch ArchType, partition string,
 		reportPathError(ctx, err)
 	}
 
-	base := pathForPartitionInstallDir(ctx, partition, partitionPath, ctx.Config().KatiEnabled())
+	base := pathForPartitionInstallDir(ctx, partition, partitionPath, true)
 	return base.Join(ctx, pathComponents...)
 }
 

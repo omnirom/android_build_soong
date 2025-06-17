@@ -70,32 +70,32 @@ func TestVendorPublicLibraries(t *testing.T) {
 
 	// test if header search paths are correctly added
 	// _static variant is used since _shared reuses *.o from the static variant
-	cc := ctx.ModuleForTests("libsystem", strings.Replace(coreVariant, "_shared", "_static", 1)).Rule("cc")
+	cc := ctx.ModuleForTests(t, "libsystem", strings.Replace(coreVariant, "_shared", "_static", 1)).Rule("cc")
 	cflags := cc.Args["cFlags"]
 	if !strings.Contains(cflags, "-Imy_include") {
 		t.Errorf("cflags for libsystem must contain -Imy_include, but was %#v.", cflags)
 	}
 
 	// test if libsystem is linked to the stub
-	ld := ctx.ModuleForTests("libsystem", coreVariant).Rule("ld")
+	ld := ctx.ModuleForTests(t, "libsystem", coreVariant).Rule("ld")
 	libflags := ld.Args["libFlags"]
-	stubPaths := GetOutputPaths(ctx, coreVariant, []string{"libvendorpublic"})
+	stubPaths := GetOutputPaths(t, ctx, coreVariant, []string{"libvendorpublic"})
 	if !strings.Contains(libflags, stubPaths[0].String()) {
 		t.Errorf("libflags for libsystem must contain %#v, but was %#v", stubPaths[0], libflags)
 	}
 
 	// test if libsystem is linked to the stub
-	ld = ctx.ModuleForTests("libproduct", productVariant).Rule("ld")
+	ld = ctx.ModuleForTests(t, "libproduct", productVariant).Rule("ld")
 	libflags = ld.Args["libFlags"]
-	stubPaths = GetOutputPaths(ctx, productVariant, []string{"libvendorpublic"})
+	stubPaths = GetOutputPaths(t, ctx, productVariant, []string{"libvendorpublic"})
 	if !strings.Contains(libflags, stubPaths[0].String()) {
 		t.Errorf("libflags for libproduct must contain %#v, but was %#v", stubPaths[0], libflags)
 	}
 
 	// test if libvendor is linked to the real shared lib
-	ld = ctx.ModuleForTests("libvendor", vendorVariant).Rule("ld")
+	ld = ctx.ModuleForTests(t, "libvendor", vendorVariant).Rule("ld")
 	libflags = ld.Args["libFlags"]
-	stubPaths = GetOutputPaths(ctx, vendorVariant, []string{"libvendorpublic"})
+	stubPaths = GetOutputPaths(t, ctx, vendorVariant, []string{"libvendorpublic"})
 
 	if !strings.Contains(libflags, stubPaths[0].String()) {
 		t.Errorf("libflags for libvendor must contain %#v, but was %#v", stubPaths[0], libflags)

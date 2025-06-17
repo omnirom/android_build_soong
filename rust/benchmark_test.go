@@ -28,7 +28,7 @@ func TestRustBenchmark(t *testing.T) {
 			srcs: ["foo.rs"],
 		}`)
 
-	testingModule := ctx.ModuleForTests("my_bench", "linux_glibc_x86_64")
+	testingModule := ctx.ModuleForTests(t, "my_bench", "linux_glibc_x86_64")
 	expectedOut := "my_bench/linux_glibc_x86_64/my_bench"
 	outPath := testingModule.Output("my_bench").Output.String()
 	if !strings.Contains(outPath, expectedOut) {
@@ -43,7 +43,7 @@ func TestRustBenchmarkLinkage(t *testing.T) {
 			srcs: ["foo.rs"],
 		}`)
 
-	testingModule := ctx.ModuleForTests("my_bench", "android_arm64_armv8-a").Module().(*Module)
+	testingModule := ctx.ModuleForTests(t, "my_bench", "android_arm64_armv8-a").Module().(*Module)
 
 	if !android.InList("libcriterion.rlib-std", testingModule.Properties.AndroidMkRlibs) {
 		t.Errorf("rlib-std variant for libcriterion not detected as a rustlib-defined rlib dependency for device rust_benchmark module")

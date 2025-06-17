@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"github.com/google/blueprint/depset"
 	"github.com/google/blueprint/proptools"
 
 	"android/soong/android"
@@ -29,8 +30,8 @@ type TestLinkerProperties struct {
 	// if set, build against the gtest library. Defaults to true.
 	Gtest *bool
 
-	// if set, use the isolated gtest runner. Defaults to true if gtest is also true and the arch is Windows, false
-	// otherwise.
+	// if set, use the isolated gtest runner. Defaults to false.
+	// Isolation is not supported on Windows.
 	Isolated *bool
 }
 
@@ -83,15 +84,20 @@ type TestBinaryProperties struct {
 	// the test
 	Data []string `android:"path,arch_variant"`
 
-	// Same as data, but adds depedencies on modules using the device's os variant, and common
+	// Same as data, but adds dependencies on modules using the device's os variant, and common
 	// architecture's variant. Can be useful to add device-built apps to the data of a host
 	// test.
 	Device_common_data []string `android:"path_device_common"`
 
-	// Same as data, but adds depedencies on modules using the device's os variant, and the device's
-	// first architecture's variant. Can be useful to add device-built apps to the data of a host
-	// test.
+	// Same as data, but adds dependencies on modules using the device's os variant, and the
+	// device's first architecture's variant. Can be useful to add device-built apps to the data
+	// of a host test.
 	Device_first_data []string `android:"path_device_first"`
+
+	// Same as data, but will add dependencies on modules using the host's os variation and
+	// the common arch variation. Useful for a device test that wants to depend on a host
+	// module, for example to include a custom Tradefed test runner.
+	Host_common_data []string `android:"path_host_common"`
 
 	// list of shared library modules that should be installed alongside the test
 	Data_libs []string `android:"arch_variant"`
@@ -128,6 +134,13 @@ type TestBinaryProperties struct {
 
 	// Install the test into a folder named for the module in all test suites.
 	Per_testcase_directory *bool
+
+	// Install the test's dependencies into a folder named standalone-libs relative to the
+	// test's installation path. ld-library-path will be set to this path in the test's
+	// auto-generated config. This way the dependencies can be used by the test without having
+	// to manually install them to the device. See more details in
+	// go/standalone-native-device-tests.
+	Standalone_test *bool
 }
 
 func init() {
@@ -198,8 +211,8 @@ func (test *testDecorator) gtest() bool {
 	return BoolDefault(test.LinkerProperties.Gtest, true)
 }
 
-func (test *testDecorator) isolated(ctx android.EarlyModuleContext) bool {
-	return BoolDefault(test.LinkerProperties.Isolated, false)
+func (test *testDecorator) isolated(ctx android.BaseModuleContext) bool {
+	return BoolDefault(test.LinkerProperties.Isolated, false) && !ctx.Windows()
 }
 
 // NOTE: Keep this in sync with cc/cc_test.bzl#gtest_copts
@@ -259,6 +272,12 @@ func (test *testDecorator) moduleInfoJSON(ctx android.ModuleContext, moduleInfoJ
 		!android.InList("mts", moduleInfoJSON.CompatibilitySuites) {
 		moduleInfoJSON.CompatibilitySuites = append(moduleInfoJSON.CompatibilitySuites, "mts")
 	}
+}
+
+func (test *testDecorator) testSuiteInfo(ctx ModuleContext) {
+	android.SetProvider(ctx, android.TestSuiteInfoProvider, android.TestSuiteInfo{
+		TestSuites: test.InstallerProperties.Test_suites,
+	})
 }
 
 func NewTestInstaller() *baseInstaller {
@@ -329,6 +348,10 @@ func (test *testBinary) moduleInfoJSON(ctx ModuleContext, moduleInfoJSON *androi
 
 }
 
+func (test *testBinary) testSuiteInfo(ctx ModuleContext) {
+	test.testDecorator.testSuiteInfo(ctx)
+}
+
 func (test *testBinary) installerProps() []interface{} {
 	return append(test.baseInstaller.installerProps(), test.testDecorator.installerProps()...)
 }
@@ -337,33 +360,34 @@ func (test *testBinary) install(ctx ModuleContext, file android.Path) {
 	dataSrcPaths := android.PathsForModuleSrc(ctx, test.Properties.Data)
 	dataSrcPaths = append(dataSrcPaths, android.PathsForModuleSrc(ctx, test.Properties.Device_common_data)...)
 	dataSrcPaths = append(dataSrcPaths, android.PathsForModuleSrc(ctx, test.Properties.Device_first_data)...)
+	dataSrcPaths = append(dataSrcPaths, android.PathsForModuleSrc(ctx, test.Properties.Host_common_data)...)
 
 	for _, dataSrcPath := range dataSrcPaths {
 		test.data = append(test.data, android.DataPath{SrcPath: dataSrcPath})
 	}
 
-	ctx.VisitDirectDepsWithTag(dataLibDepTag, func(dep android.Module) {
+	ctx.VisitDirectDepsProxyWithTag(dataLibDepTag, func(dep android.ModuleProxy) {
 		depName := ctx.OtherModuleName(dep)
-		linkableDep, ok := dep.(LinkableInterface)
+		linkableDep, ok := android.OtherModuleProvider(ctx, dep, LinkableInfoProvider)
 		if !ok {
 			ctx.ModuleErrorf("data_lib %q is not a LinkableInterface module", depName)
 		}
-		if linkableDep.OutputFile().Valid() {
+		if linkableDep.OutputFile.Valid() {
 			test.data = append(test.data,
-				android.DataPath{SrcPath: linkableDep.OutputFile().Path(),
-					RelativeInstallPath: linkableDep.RelativeInstallPath()})
+				android.DataPath{SrcPath: linkableDep.OutputFile.Path(),
+					RelativeInstallPath: linkableDep.RelativeInstallPath})
 		}
 	})
-	ctx.VisitDirectDepsWithTag(dataBinDepTag, func(dep android.Module) {
+	ctx.VisitDirectDepsProxyWithTag(dataBinDepTag, func(dep android.ModuleProxy) {
 		depName := ctx.OtherModuleName(dep)
-		linkableDep, ok := dep.(LinkableInterface)
+		linkableDep, ok := android.OtherModuleProvider(ctx, dep, LinkableInfoProvider)
 		if !ok {
 			ctx.ModuleErrorf("data_bin %q is not a LinkableInterface module", depName)
 		}
-		if linkableDep.OutputFile().Valid() {
+		if linkableDep.OutputFile.Valid() {
 			test.data = append(test.data,
-				android.DataPath{SrcPath: linkableDep.OutputFile().Path(),
-					RelativeInstallPath: linkableDep.RelativeInstallPath()})
+				android.DataPath{SrcPath: linkableDep.OutputFile.Path(),
+					RelativeInstallPath: linkableDep.RelativeInstallPath})
 		}
 	})
 
@@ -380,6 +404,7 @@ func (test *testBinary) install(ctx ModuleContext, file android.Path) {
 		TestInstallBase:        testInstallBase,
 		DeviceTemplate:         "${NativeTestConfigTemplate}",
 		HostTemplate:           "${NativeHostTestConfigTemplate}",
+		StandaloneTest:         test.Properties.Standalone_test,
 	})
 
 	test.extraTestConfigs = android.PathsForModuleSrc(ctx, test.Properties.Test_options.Extra_test_configs)
@@ -397,8 +422,55 @@ func (test *testBinary) install(ctx ModuleContext, file android.Path) {
 		test.Properties.Test_options.Unit_test = proptools.BoolPtr(true)
 	}
 
+	if !ctx.Config().KatiEnabled() { // TODO(spandandas): Remove the special case for kati
+		// Install the test config in testcases/ directory for atest.
+		c, ok := ctx.Module().(*Module)
+		if !ok {
+			ctx.ModuleErrorf("Not a cc_test module")
+		}
+		// Install configs in the root of $PRODUCT_OUT/testcases/$module
+		testCases := android.PathForModuleInPartitionInstall(ctx, "testcases", ctx.ModuleName()+c.SubName())
+		if ctx.PrimaryArch() {
+			if test.testConfig != nil {
+				ctx.InstallFile(testCases, ctx.ModuleName()+".config", test.testConfig)
+			}
+			dynamicConfig := android.ExistentPathForSource(ctx, ctx.ModuleDir(), "DynamicConfig.xml")
+			if dynamicConfig.Valid() {
+				ctx.InstallFile(testCases, ctx.ModuleName()+".dynamic", dynamicConfig.Path())
+			}
+			for _, extraTestConfig := range test.extraTestConfigs {
+				ctx.InstallFile(testCases, extraTestConfig.Base(), extraTestConfig)
+			}
+		}
+		// Install tests and data in arch specific subdir $PRODUCT_OUT/testcases/$module/$arch
+		testCases = testCases.Join(ctx, ctx.Target().Arch.ArchType.String())
+		ctx.InstallTestData(testCases, test.data)
+		ctx.InstallFile(testCases, file.Base(), file)
+	}
+
 	test.binaryDecorator.baseInstaller.installTestData(ctx, test.data)
 	test.binaryDecorator.baseInstaller.install(ctx, file)
+	if Bool(test.Properties.Standalone_test) {
+		packagingSpecsBuilder := depset.NewBuilder[android.PackagingSpec](depset.TOPOLOGICAL)
+
+		ctx.VisitDirectDeps(func(dep android.Module) {
+			deps := android.OtherModuleProviderOrDefault(ctx, dep, android.InstallFilesProvider)
+			packagingSpecsBuilder.Transitive(deps.TransitivePackagingSpecs)
+		})
+
+		for _, standaloneTestDep := range packagingSpecsBuilder.Build().ToList() {
+			if standaloneTestDep.ToGob().SrcPath == nil {
+				continue
+			}
+			if standaloneTestDep.SkipInstall() {
+				continue
+			}
+			if standaloneTestDep.Partition() == "data" {
+				continue
+			}
+			test.binaryDecorator.baseInstaller.installStandaloneTestDep(ctx, standaloneTestDep)
+		}
+	}
 }
 
 func getTestInstallBase(useVendor bool) string {
@@ -516,6 +588,10 @@ func (test *testLibrary) moduleInfoJSON(ctx ModuleContext, moduleInfoJSON *andro
 	test.testDecorator.moduleInfoJSON(ctx, moduleInfoJSON)
 }
 
+func (test *testLibrary) testSuiteInfo(ctx ModuleContext) {
+	test.testDecorator.testSuiteInfo(ctx)
+}
+
 func (test *testLibrary) installerProps() []interface{} {
 	return append(test.baseInstaller.installerProps(), test.testDecorator.installerProps()...)
 }
@@ -631,6 +707,12 @@ func (benchmark *benchmarkDecorator) moduleInfoJSON(ctx ModuleContext, moduleInf
 		}
 		moduleInfoJSON.TestConfig = []string{benchmark.testConfig.String()}
 	}
+}
+
+func (benchmark *benchmarkDecorator) testSuiteInfo(ctx ModuleContext) {
+	android.SetProvider(ctx, android.TestSuiteInfoProvider, android.TestSuiteInfo{
+		TestSuites: benchmark.Properties.Test_suites,
+	})
 }
 
 func NewBenchmark(hod android.HostOrDeviceSupported) *Module {

@@ -28,9 +28,9 @@ func TestProvenanceSingleton(t *testing.T) {
 		PrepareForTestWithProvenanceSingleton,
 		android.PrepareForTestWithAndroidMk).RunTestWithBp(t, "")
 
-	outputs := result.SingletonForTests("provenance_metadata_singleton").AllOutputs()
+	outputs := result.SingletonForTests(t, "provenance_metadata_singleton").AllOutputs()
 	for _, output := range outputs {
-		testingBuildParam := result.SingletonForTests("provenance_metadata_singleton").Output(output)
+		testingBuildParam := result.SingletonForTests(t, "provenance_metadata_singleton").Output(output)
 		switch {
 		case strings.Contains(output, "soong/provenance_metadata.textproto"):
 			android.AssertStringEquals(t, "Invalid build rule", "android/soong/provenance.mergeProvenanceMetaData", testingBuildParam.Rule.String())

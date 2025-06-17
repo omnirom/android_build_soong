@@ -24,6 +24,7 @@ import (
 )
 
 func TestKotlin(t *testing.T) {
+	t.Parallel()
 	bp := `
 		java_library {
 			name: "foo",
@@ -49,13 +50,6 @@ func TestKotlin(t *testing.T) {
 			srcs: ["d.kt"],
 		}`
 
-	kotlinStdlibTurbineCombinedJars := []string{
-		"out/soong/.intermediates/default/java/kotlin-stdlib/android_common/turbine-combined/kotlin-stdlib.jar",
-		"out/soong/.intermediates/default/java/kotlin-stdlib-jdk7/android_common/turbine-combined/kotlin-stdlib-jdk7.jar",
-		"out/soong/.intermediates/default/java/kotlin-stdlib-jdk8/android_common/turbine-combined/kotlin-stdlib-jdk8.jar",
-		"out/soong/.intermediates/default/java/kotlin-annotations/android_common/turbine-combined/kotlin-annotations.jar",
-	}
-
 	kotlinStdlibTurbineJars := []string{
 		"out/soong/.intermediates/default/java/kotlin-stdlib/android_common/turbine/kotlin-stdlib.jar",
 		"out/soong/.intermediates/default/java/kotlin-stdlib-jdk7/android_common/turbine/kotlin-stdlib-jdk7.jar",
@@ -70,19 +64,9 @@ func TestKotlin(t *testing.T) {
 		"out/soong/.intermediates/default/java/kotlin-annotations/android_common/javac/kotlin-annotations.jar",
 	}
 
-	bootclasspathTurbineCombinedJars := []string{
-		"out/soong/.intermediates/default/java/stable.core.platform.api.stubs/android_common/turbine-combined/stable.core.platform.api.stubs.jar",
-		"out/soong/.intermediates/default/java/core-lambda-stubs/android_common/turbine-combined/core-lambda-stubs.jar",
-	}
-
 	bootclasspathTurbineJars := []string{
 		"out/soong/.intermediates/default/java/stable.core.platform.api.stubs/android_common/turbine/stable.core.platform.api.stubs.jar",
 		"out/soong/.intermediates/default/java/core-lambda-stubs/android_common/turbine/core-lambda-stubs.jar",
-	}
-
-	frameworkTurbineCombinedJars := []string{
-		"out/soong/.intermediates/default/java/ext/android_common/turbine-combined/ext.jar",
-		"out/soong/.intermediates/default/java/framework/android_common/turbine-combined/framework.jar",
 	}
 
 	frameworkTurbineJars := []string{
@@ -108,68 +92,8 @@ func TestKotlin(t *testing.T) {
 		barHeaderCombinedInputs []string
 	}{
 		{
-			name:             "normal",
-			preparer:         android.NullFixturePreparer,
-			fooKotlincInputs: []string{"a.java", "b.kt"},
-			fooJavacInputs:   []string{"a.java"},
-			fooKotlincClasspath: slices.Concat(
-				bootclasspathTurbineCombinedJars,
-				frameworkTurbineCombinedJars,
-				[]string{"out/soong/.intermediates/quz/android_common/turbine-combined/quz.jar"},
-				kotlinStdlibTurbineCombinedJars,
-			),
-			fooJavacClasspath: slices.Concat(
-				[]string{"out/soong/.intermediates/foo/android_common/kotlin_headers/foo.jar"},
-				frameworkTurbineCombinedJars,
-				[]string{"out/soong/.intermediates/quz/android_common/turbine-combined/quz.jar"},
-				kotlinStdlibTurbineCombinedJars,
-			),
-			fooCombinedInputs: slices.Concat(
-				[]string{
-					"out/soong/.intermediates/foo/android_common/kotlin/foo.jar",
-					"out/soong/.intermediates/foo/android_common/javac/foo.jar",
-					"out/soong/.intermediates/quz/android_common/combined/quz.jar",
-				},
-				kotlinStdlibJavacJars,
-			),
-			fooHeaderCombinedInputs: slices.Concat(
-				[]string{
-					"out/soong/.intermediates/foo/android_common/turbine/foo.jar",
-					"out/soong/.intermediates/foo/android_common/kotlin_headers/foo.jar",
-					"out/soong/.intermediates/quz/android_common/turbine-combined/quz.jar",
-				},
-				kotlinStdlibTurbineCombinedJars,
-			),
-
-			barKotlincInputs: []string{"b.kt"},
-			barKotlincClasspath: slices.Concat(
-				bootclasspathTurbineCombinedJars,
-				frameworkTurbineCombinedJars,
-				[]string{
-					"out/soong/.intermediates/foo/android_common/turbine-combined/foo.jar",
-					"out/soong/.intermediates/baz/android_common/turbine-combined/baz.jar",
-				},
-				kotlinStdlibTurbineCombinedJars,
-			),
-			barCombinedInputs: slices.Concat(
-				[]string{
-					"out/soong/.intermediates/bar/android_common/kotlin/bar.jar",
-					"out/soong/.intermediates/baz/android_common/combined/baz.jar",
-				},
-				kotlinStdlibJavacJars,
-				[]string{},
-			),
-			barHeaderCombinedInputs: slices.Concat(
-				[]string{
-					"out/soong/.intermediates/bar/android_common/kotlin_headers/bar.jar",
-					"out/soong/.intermediates/baz/android_common/turbine-combined/baz.jar",
-				},
-				kotlinStdlibTurbineCombinedJars,
-			),
-		},
-		{
 			name:             "transitive classpath",
-			preparer:         PrepareForTestWithTransitiveClasspathEnabled,
+			preparer:         android.NullFixturePreparer,
 			fooKotlincInputs: []string{"a.java", "b.kt"},
 			fooJavacInputs:   []string{"a.java"},
 			fooKotlincClasspath: slices.Concat(
@@ -234,11 +158,12 @@ func TestKotlin(t *testing.T) {
 
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			result := android.GroupFixturePreparers(
 				PrepareForTestWithJavaDefaultModules,
 				tt.preparer,
 			).RunTestWithBp(t, bp)
-			foo := result.ModuleForTests("foo", "android_common")
+			foo := result.ModuleForTests(t, "foo", "android_common")
 			fooKotlinc := foo.Rule("kotlinc")
 			android.AssertPathsRelativeToTopEquals(t, "foo kotlinc inputs", tt.fooKotlincInputs, fooKotlinc.Inputs)
 
@@ -258,7 +183,7 @@ func TestKotlin(t *testing.T) {
 			fooCombinedHeaderJar := foo.Output("turbine-combined/foo.jar")
 			android.AssertPathsRelativeToTopEquals(t, "foo header combined inputs", tt.fooHeaderCombinedInputs, fooCombinedHeaderJar.Inputs)
 
-			bar := result.ModuleForTests("bar", "android_common")
+			bar := result.ModuleForTests(t, "bar", "android_common")
 			barKotlinc := bar.Rule("kotlinc")
 			android.AssertPathsRelativeToTopEquals(t, "bar kotlinc inputs", tt.barKotlincInputs, barKotlinc.Inputs)
 
@@ -275,6 +200,7 @@ func TestKotlin(t *testing.T) {
 }
 
 func TestKapt(t *testing.T) {
+	t.Parallel()
 	bp := `
 		java_library {
 			name: "foo",
@@ -303,18 +229,19 @@ func TestKapt(t *testing.T) {
 		}
 	`
 	t.Run("", func(t *testing.T) {
+		t.Parallel()
 		ctx, _ := testJava(t, bp)
 
 		buildOS := ctx.Config().BuildOS.String()
 
-		foo := ctx.ModuleForTests("foo", "android_common")
+		foo := ctx.ModuleForTests(t, "foo", "android_common")
 		kaptStubs := foo.Rule("kapt")
 		turbineApt := foo.Description("turbine apt")
 		kotlinc := foo.Rule("kotlinc")
 		javac := foo.Rule("javac")
 
-		bar := ctx.ModuleForTests("bar", buildOS+"_common").Rule("javac").Output.String()
-		baz := ctx.ModuleForTests("baz", buildOS+"_common").Rule("javac").Output.String()
+		bar := ctx.ModuleForTests(t, "bar", buildOS+"_common").Rule("javac").Output.String()
+		baz := ctx.ModuleForTests(t, "baz", buildOS+"_common").Rule("javac").Output.String()
 
 		// Test that the kotlin and java sources are passed to kapt and kotlinc
 		if len(kaptStubs.Inputs) != 2 || kaptStubs.Inputs[0].String() != "a.java" || kaptStubs.Inputs[1].String() != "b.kt" {
@@ -384,6 +311,7 @@ func TestKapt(t *testing.T) {
 	})
 
 	t.Run("errorprone", func(t *testing.T) {
+		t.Parallel()
 		env := map[string]string{
 			"RUN_ERROR_PRONE": "true",
 		}
@@ -395,13 +323,13 @@ func TestKapt(t *testing.T) {
 
 		buildOS := result.Config.BuildOS.String()
 
-		kapt := result.ModuleForTests("foo", "android_common").Rule("kapt")
-		javac := result.ModuleForTests("foo", "android_common").Description("javac")
-		errorprone := result.ModuleForTests("foo", "android_common").Description("errorprone")
+		kapt := result.ModuleForTests(t, "foo", "android_common").Rule("kapt")
+		javac := result.ModuleForTests(t, "foo", "android_common").Description("javac")
+		errorprone := result.ModuleForTests(t, "foo", "android_common").Description("errorprone")
 
-		bar := result.ModuleForTests("bar", buildOS+"_common").Description("javac").Output.String()
-		baz := result.ModuleForTests("baz", buildOS+"_common").Description("javac").Output.String()
-		myCheck := result.ModuleForTests("my_check", buildOS+"_common").Description("javac").Output.String()
+		bar := result.ModuleForTests(t, "bar", buildOS+"_common").Description("javac").Output.String()
+		baz := result.ModuleForTests(t, "baz", buildOS+"_common").Description("javac").Output.String()
+		myCheck := result.ModuleForTests(t, "my_check", buildOS+"_common").Description("javac").Output.String()
 
 		// Test that the errorprone plugins are not passed to kapt
 		expectedProcessorPath := "-P plugin:org.jetbrains.kotlin.kapt3:apclasspath=" + bar +
@@ -434,6 +362,7 @@ func TestKapt(t *testing.T) {
 }
 
 func TestKaptEncodeFlags(t *testing.T) {
+	t.Parallel()
 	// Compares the kaptEncodeFlags against the results of the example implementation at
 	// https://kotlinlang.org/docs/reference/kapt.html#apjavac-options-encoding
 	tests := []struct {
@@ -484,6 +413,7 @@ func TestKaptEncodeFlags(t *testing.T) {
 
 	for i, test := range tests {
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
+			t.Parallel()
 			got := kaptEncodeFlags(test.in)
 			if got != test.out {
 				t.Errorf("\nwant %q\n got %q", test.out, got)
@@ -493,6 +423,7 @@ func TestKaptEncodeFlags(t *testing.T) {
 }
 
 func TestKotlinCompose(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		PrepareForTestWithJavaDefaultModules,
 	).RunTestWithBp(t, `
@@ -501,7 +432,7 @@ func TestKotlinCompose(t *testing.T) {
 		}
 
 		kotlin_plugin {
-			name: "androidx.compose.compiler_compiler-hosted-plugin",
+			name: "kotlin-compose-compiler-plugin",
 		}
 
 		java_library {
@@ -523,9 +454,9 @@ func TestKotlinCompose(t *testing.T) {
 
 	buildOS := result.Config.BuildOS.String()
 
-	composeCompiler := result.ModuleForTests("androidx.compose.compiler_compiler-hosted-plugin", buildOS+"_common").Rule("combineJar").Output
-	withCompose := result.ModuleForTests("withcompose", "android_common")
-	noCompose := result.ModuleForTests("nocompose", "android_common")
+	composeCompiler := result.ModuleForTests(t, "kotlin-compose-compiler-plugin", buildOS+"_common").Rule("combineJar").Output
+	withCompose := result.ModuleForTests(t, "withcompose", "android_common")
+	noCompose := result.ModuleForTests(t, "nocompose", "android_common")
 
 	android.AssertStringListContains(t, "missing compose compiler dependency",
 		withCompose.Rule("kotlinc").Implicits.Strings(), composeCompiler.String())
@@ -544,6 +475,7 @@ func TestKotlinCompose(t *testing.T) {
 }
 
 func TestKotlinPlugin(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		PrepareForTestWithJavaDefaultModules,
 	).RunTestWithBp(t, `
@@ -570,9 +502,9 @@ func TestKotlinPlugin(t *testing.T) {
 
 	buildOS := result.Config.BuildOS.String()
 
-	kotlinPlugin := result.ModuleForTests("kotlin_plugin", buildOS+"_common").Rule("combineJar").Output
-	withKotlinPlugin := result.ModuleForTests("with_kotlin_plugin", "android_common")
-	noKotlinPlugin := result.ModuleForTests("no_kotlin_plugin", "android_common")
+	kotlinPlugin := result.ModuleForTests(t, "kotlin_plugin", buildOS+"_common").Rule("combineJar").Output
+	withKotlinPlugin := result.ModuleForTests(t, "with_kotlin_plugin", "android_common")
+	noKotlinPlugin := result.ModuleForTests(t, "no_kotlin_plugin", "android_common")
 
 	android.AssertStringListContains(t, "missing plugin compiler dependency",
 		withKotlinPlugin.Rule("kotlinc").Implicits.Strings(), kotlinPlugin.String())

@@ -36,7 +36,7 @@ func TestCcPreprocessNoConfiguration(t *testing.T) {
 
 	result := fixture.RunTest(t)
 
-	foo := result.ModuleForTests("foo", "")
+	foo := result.ModuleForTests(t, "foo", "")
 	actual := foo.Rule("cc").Args["cFlags"]
 	expected := "-E -DANDROID -Ifoo/bar"
 	android.AssertStringEquals(t, "cflags should be correct", expected, actual)

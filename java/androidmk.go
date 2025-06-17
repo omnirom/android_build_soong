@@ -23,13 +23,12 @@ import (
 	"github.com/google/blueprint/proptools"
 )
 
-func (library *Library) AndroidMkEntriesHostDex() android.AndroidMkEntries {
-	hostDexNeeded := Bool(library.deviceProperties.Hostdex) && !library.Host()
-	if library.hideApexVariantFromMake {
-		hostDexNeeded = false
-	}
+func (library *Library) hostDexNeeded() bool {
+	return Bool(library.deviceProperties.Hostdex) && !library.Host() && !library.hideApexVariantFromMake
+}
 
-	if hostDexNeeded {
+func (library *Library) AndroidMkEntriesHostDex() android.AndroidMkEntries {
+	if library.hostDexNeeded() {
 		var output android.Path
 		if library.dexJarFile.IsSet() {
 			output = library.dexJarFile.Path()
@@ -71,11 +70,7 @@ func (library *Library) AndroidMkEntries() []android.AndroidMkEntries {
 	if library.hideApexVariantFromMake {
 		// For a java library built for an APEX, we don't need a Make module for itself. Otherwise, it
 		// will conflict with the platform variant because they have the same module name in the
-		// makefile. However, we need to add its dexpreopt outputs as sub-modules, if it is preopted.
-		dexpreoptEntries := library.dexpreopter.AndroidMkEntriesForApex()
-		if len(dexpreoptEntries) > 0 {
-			entriesList = append(entriesList, dexpreoptEntries...)
-		}
+		// makefile.
 		entriesList = append(entriesList, android.AndroidMkEntries{Disabled: true})
 	} else if !library.ApexModuleBase.AvailableFor(android.AvailableToPlatform) {
 		// Platform variant.  If not available for the platform, we don't need Make module.
@@ -122,6 +117,14 @@ func (library *Library) AndroidMkEntries() []android.AndroidMkEntries {
 
 					if library.dexpreopter.configPath != nil {
 						entries.SetPath("LOCAL_SOONG_DEXPREOPT_CONFIG", library.dexpreopter.configPath)
+					}
+				},
+			},
+			ExtraFooters: []android.AndroidMkExtraFootersFunc{
+				func(w io.Writer, name, prefix, moduleDir string) {
+					if library.apiXmlFile != nil {
+						fmt.Fprintf(w, "$(call declare-1p-target,%s,)\n", library.apiXmlFile.String())
+						fmt.Fprintf(w, "$(eval $(call copy-one-file,%s,$(TARGET_OUT_COMMON_INTERMEDIATES)/%s))\n", library.apiXmlFile.String(), library.apiXmlFile.Base())
 					}
 				},
 			},
@@ -555,72 +558,10 @@ func (dstubs *Droidstubs) AndroidMkEntries() []android.AndroidMkEntries {
 		},
 		ExtraFooters: []android.AndroidMkExtraFootersFunc{
 			func(w io.Writer, name, prefix, moduleDir string) {
-				if dstubs.apiFile != nil {
-					fmt.Fprintf(w, ".PHONY: %s %s.txt\n", dstubs.Name(), dstubs.Name())
-					fmt.Fprintf(w, "%s %s.txt: %s\n", dstubs.Name(), dstubs.Name(), dstubs.apiFile)
-				}
-				if dstubs.removedApiFile != nil {
-					fmt.Fprintf(w, ".PHONY: %s %s.txt\n", dstubs.Name(), dstubs.Name())
-					fmt.Fprintf(w, "%s %s.txt: %s\n", dstubs.Name(), dstubs.Name(), dstubs.removedApiFile)
-				}
-				if dstubs.checkCurrentApiTimestamp != nil {
-					fmt.Fprintln(w, ".PHONY:", dstubs.Name()+"-check-current-api")
-					fmt.Fprintln(w, dstubs.Name()+"-check-current-api:",
-						dstubs.checkCurrentApiTimestamp.String())
-
-					fmt.Fprintln(w, ".PHONY: checkapi")
-					fmt.Fprintln(w, "checkapi:",
-						dstubs.checkCurrentApiTimestamp.String())
-
-					fmt.Fprintln(w, ".PHONY: droidcore")
-					fmt.Fprintln(w, "droidcore: checkapi")
-				}
-				if dstubs.updateCurrentApiTimestamp != nil {
-					fmt.Fprintln(w, ".PHONY:", dstubs.Name()+"-update-current-api")
-					fmt.Fprintln(w, dstubs.Name()+"-update-current-api:",
-						dstubs.updateCurrentApiTimestamp.String())
-
-					fmt.Fprintln(w, ".PHONY: update-api")
-					fmt.Fprintln(w, "update-api:",
-						dstubs.updateCurrentApiTimestamp.String())
-				}
-				if dstubs.checkLastReleasedApiTimestamp != nil {
-					fmt.Fprintln(w, ".PHONY:", dstubs.Name()+"-check-last-released-api")
-					fmt.Fprintln(w, dstubs.Name()+"-check-last-released-api:",
-						dstubs.checkLastReleasedApiTimestamp.String())
-
-					fmt.Fprintln(w, ".PHONY: checkapi")
-					fmt.Fprintln(w, "checkapi:",
-						dstubs.checkLastReleasedApiTimestamp.String())
-
-					fmt.Fprintln(w, ".PHONY: droidcore")
-					fmt.Fprintln(w, "droidcore: checkapi")
-				}
 				if dstubs.apiLintTimestamp != nil {
-					fmt.Fprintln(w, ".PHONY:", dstubs.Name()+"-api-lint")
-					fmt.Fprintln(w, dstubs.Name()+"-api-lint:",
-						dstubs.apiLintTimestamp.String())
-
-					fmt.Fprintln(w, ".PHONY: checkapi")
-					fmt.Fprintln(w, "checkapi:",
-						dstubs.Name()+"-api-lint")
-
-					fmt.Fprintln(w, ".PHONY: droidcore")
-					fmt.Fprintln(w, "droidcore: checkapi")
-
 					if dstubs.apiLintReport != nil {
-						fmt.Fprintf(w, "$(call dist-for-goals,%s,%s:%s)\n", dstubs.Name()+"-api-lint",
-							dstubs.apiLintReport.String(), "apilint/"+dstubs.Name()+"-lint-report.txt")
 						fmt.Fprintf(w, "$(call declare-0p-target,%s)\n", dstubs.apiLintReport.String())
 					}
-				}
-				if dstubs.checkNullabilityWarningsTimestamp != nil {
-					fmt.Fprintln(w, ".PHONY:", dstubs.Name()+"-check-nullability-warnings")
-					fmt.Fprintln(w, dstubs.Name()+"-check-nullability-warnings:",
-						dstubs.checkNullabilityWarningsTimestamp.String())
-
-					fmt.Fprintln(w, ".PHONY:", "droidcore")
-					fmt.Fprintln(w, "droidcore: ", dstubs.Name()+"-check-nullability-warnings")
 				}
 			},
 		},

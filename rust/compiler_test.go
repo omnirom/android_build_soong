@@ -34,7 +34,7 @@ func TestFeaturesToFlags(t *testing.T) {
 			],
 		}`)
 
-	libfooDylib := ctx.ModuleForTests("libfoo", "linux_glibc_x86_64_dylib").Rule("rustc")
+	libfooDylib := ctx.ModuleForTests(t, "libfoo", "linux_glibc_x86_64_dylib").Rule("rustc")
 
 	if !strings.Contains(libfooDylib.Args["rustcFlags"], "cfg 'feature=\"fizz\"'") ||
 		!strings.Contains(libfooDylib.Args["rustcFlags"], "cfg 'feature=\"buzz\"'") {
@@ -55,7 +55,7 @@ func TestCfgsToFlags(t *testing.T) {
 			],
 		}`)
 
-	libfooDylib := ctx.ModuleForTests("libfoo", "linux_glibc_x86_64_dylib").Rule("rustc")
+	libfooDylib := ctx.ModuleForTests(t, "libfoo", "linux_glibc_x86_64_dylib").Rule("rustc")
 
 	if !strings.Contains(libfooDylib.Args["rustcFlags"], "cfg 'std'") ||
 		!strings.Contains(libfooDylib.Args["rustcFlags"], "cfg 'cfg1=\"one\"'") {
@@ -81,8 +81,8 @@ func TestLtoFlag(t *testing.T) {
 		}
 		`)
 
-	libfoo := ctx.ModuleForTests("libfoo", "linux_glibc_x86_64_dylib").Rule("rustc")
-	libfooLto := ctx.ModuleForTests("libfoo_lto", "linux_glibc_x86_64_dylib").Rule("rustc")
+	libfoo := ctx.ModuleForTests(t, "libfoo", "linux_glibc_x86_64_dylib").Rule("rustc")
+	libfooLto := ctx.ModuleForTests(t, "libfoo_lto", "linux_glibc_x86_64_dylib").Rule("rustc")
 
 	if strings.Contains(libfoo.Args["rustcFlags"], "-C lto=thin") {
 		t.Fatalf("libfoo expected to disable lto -- rustcFlags: %#v", libfoo.Args["rustcFlags"])
@@ -174,7 +174,7 @@ func TestCargoCompat(t *testing.T) {
 			cargo_pkg_version: "1.0.0"
 		}`)
 
-	fizz := ctx.ModuleForTests("fizz", "android_arm64_armv8-a").Rule("rustc")
+	fizz := ctx.ModuleForTests(t, "fizz", "android_arm64_armv8-a").Rule("rustc")
 
 	if !strings.Contains(fizz.Args["envVars"], "CARGO_BIN_NAME=fizz") {
 		t.Fatalf("expected 'CARGO_BIN_NAME=fizz' in envVars, actual envVars: %#v", fizz.Args["envVars"])
@@ -199,11 +199,11 @@ func TestInstallDir(t *testing.T) {
 			srcs: ["foo.rs"],
 		}`)
 
-	install_path_lib64 := ctx.ModuleForTests("libfoo",
+	install_path_lib64 := ctx.ModuleForTests(t, "libfoo",
 		"android_arm64_armv8-a_dylib").Module().(*Module).compiler.(*libraryDecorator).path.String()
-	install_path_lib32 := ctx.ModuleForTests("libfoo",
+	install_path_lib32 := ctx.ModuleForTests(t, "libfoo",
 		"android_arm_armv7-a-neon_dylib").Module().(*Module).compiler.(*libraryDecorator).path.String()
-	install_path_bin := ctx.ModuleForTests("fizzbuzz",
+	install_path_bin := ctx.ModuleForTests(t, "fizzbuzz",
 		"android_arm64_armv8-a").Module().(*Module).compiler.(*binaryDecorator).path.String()
 
 	if !strings.HasSuffix(install_path_lib64, "system/lib64/libfoo.dylib.so") {
@@ -259,13 +259,13 @@ func TestLints(t *testing.T) {
 				android.FixtureAddTextFile(tc.modulePath+"Android.bp", bp),
 			).RunTest(t)
 
-			r := result.ModuleForTests("libfoo", "android_arm64_armv8-a_dylib").MaybeRule("rustc")
+			r := result.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_dylib").MaybeRule("rustc")
 			android.AssertStringDoesContain(t, "libfoo flags", r.Args["rustcFlags"], tc.fooFlags)
 
-			r = result.ModuleForTests("libbar", "android_arm64_armv8-a_dylib").MaybeRule("rustc")
+			r = result.ModuleForTests(t, "libbar", "android_arm64_armv8-a_dylib").MaybeRule("rustc")
 			android.AssertStringDoesContain(t, "libbar flags", r.Args["rustcFlags"], "${config.RustDefaultLints}")
 
-			r = result.ModuleForTests("libfoobar", "android_arm64_armv8-a_dylib").MaybeRule("rustc")
+			r = result.ModuleForTests(t, "libfoobar", "android_arm64_armv8-a_dylib").MaybeRule("rustc")
 			android.AssertStringDoesContain(t, "libfoobar flags", r.Args["rustcFlags"], "${config.RustAllowAllLints}")
 		})
 	}
@@ -283,9 +283,9 @@ func TestStdDeviceLinkage(t *testing.T) {
 			srcs: ["foo.rs"],
 			crate_name: "foo",
 		}`)
-	fizz := ctx.ModuleForTests("fizz", "android_arm64_armv8-a").Module().(*Module)
-	fooRlib := ctx.ModuleForTests("libfoo", "android_arm64_armv8-a_rlib_dylib-std").Module().(*Module)
-	fooDylib := ctx.ModuleForTests("libfoo", "android_arm64_armv8-a_dylib").Module().(*Module)
+	fizz := ctx.ModuleForTests(t, "fizz", "android_arm64_armv8-a").Module().(*Module)
+	fooRlib := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_rlib_dylib-std").Module().(*Module)
+	fooDylib := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_dylib").Module().(*Module)
 
 	if !android.InList("libstd", fizz.Properties.AndroidMkDylibs) {
 		t.Errorf("libstd is not linked dynamically for device binaries")

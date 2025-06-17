@@ -193,7 +193,7 @@ func commonDefaultModules() string {
 			},
 			apex_available: [
 				"//apex_available:platform",
-				"myapex"
+				"//apex_available:anyapex",
 			],
 			llndk: {
 				symbol_file: "libm.map.txt",
@@ -253,7 +253,7 @@ func commonDefaultModules() string {
 			},
 			apex_available: [
 				"//apex_available:platform",
-				"myapex"
+				"//apex_available:anyapex",
 			],
 			llndk: {
 				symbol_file: "libdl.map.txt",
@@ -708,7 +708,7 @@ func CreateTestContext(config android.Config) *android.TestContext {
 
 func checkSnapshotIncludeExclude(t *testing.T, ctx *android.TestContext, singleton android.TestingSingleton, moduleName, snapshotFilename, subDir, variant string, include bool, fake bool) {
 	t.Helper()
-	mod := ctx.ModuleForTests(moduleName, variant)
+	mod := ctx.ModuleForTests(t, moduleName, variant)
 	outputFiles := mod.OutputFiles(ctx, t, "")
 	if len(outputFiles) != 1 {
 		t.Errorf("%q must have single output\n", moduleName)
@@ -750,9 +750,10 @@ func CheckSnapshotRule(t *testing.T, ctx *android.TestContext, singleton android
 	checkSnapshotIncludeExclude(t, ctx, singleton, moduleName, snapshotFilename, subDir, variant, true, true)
 }
 
-func GetOutputPaths(ctx *android.TestContext, variant string, moduleNames []string) (paths android.Paths) {
+func GetOutputPaths(t *testing.T, ctx *android.TestContext, variant string, moduleNames []string) (paths android.Paths) {
+	t.Helper()
 	for _, moduleName := range moduleNames {
-		module := ctx.ModuleForTests(moduleName, variant).Module().(*Module)
+		module := ctx.ModuleForTests(t, moduleName, variant).Module().(*Module)
 		output := module.outputFile.Path().RelativeToTop()
 		paths = append(paths, output)
 	}

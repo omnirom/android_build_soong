@@ -15,16 +15,28 @@
 package fsgen
 
 import (
+	"strings"
+	"testing"
+
 	"android/soong/android"
 	"android/soong/etc"
 	"android/soong/filesystem"
 	"android/soong/java"
-	"testing"
 
 	"github.com/google/blueprint/proptools"
 )
 
 var prepareForTestWithFsgenBuildComponents = android.FixtureRegisterWithContext(registerBuildComponents)
+
+var prepareMockRamdiksNodeList = android.FixtureMergeMockFs(android.MockFS{
+	"ramdisk_node_list/ramdisk_node_list": nil,
+	"ramdisk_node_list/Android.bp": []byte(`
+		filegroup {
+			name: "ramdisk_node_list",
+			srcs: ["ramdisk_node_list"],
+		}
+	`),
+})
 
 func TestFileSystemCreatorSystemImageProps(t *testing.T) {
 	result := android.GroupFixturePreparers(
@@ -45,6 +57,7 @@ func TestFileSystemCreatorSystemImageProps(t *testing.T) {
 					},
 				}
 		}),
+		prepareMockRamdiksNodeList,
 		android.FixtureMergeMockFs(android.MockFS{
 			"external/avb/test/data/testkey_rsa4096.pem": nil,
 			"external/avb/test/Android.bp": []byte(`
@@ -61,7 +74,7 @@ func TestFileSystemCreatorSystemImageProps(t *testing.T) {
 		}),
 	).RunTest(t)
 
-	fooSystem := result.ModuleForTests("test_product_generated_system_image", "android_common").Module().(interface {
+	fooSystem := result.ModuleForTests(t, "test_product_generated_system_image", "android_common").Module().(interface {
 		FsProps() filesystem.FilesystemProperties
 	})
 	android.AssertBoolEquals(
@@ -114,6 +127,7 @@ func TestFileSystemCreatorSetPartitionDeps(t *testing.T) {
 					},
 				}
 		}),
+		prepareMockRamdiksNodeList,
 		android.FixtureMergeMockFs(android.MockFS{
 			"external/avb/test/data/testkey_rsa4096.pem": nil,
 			"build/soong/fsgen/Android.bp": []byte(`
@@ -170,6 +184,7 @@ func TestFileSystemCreatorDepsWithNamespace(t *testing.T) {
 				}
 		}),
 		android.PrepareForNativeBridgeEnabled,
+		prepareMockRamdiksNodeList,
 		android.FixtureMergeMockFs(android.MockFS{
 			"external/avb/test/data/testkey_rsa4096.pem": nil,
 			"build/soong/fsgen/Android.bp": []byte(`
@@ -198,14 +213,14 @@ func TestFileSystemCreatorDepsWithNamespace(t *testing.T) {
 	).RunTest(t)
 
 	var packagingProps android.PackagingProperties
-	for _, prop := range result.ModuleForTests("test_product_generated_system_image", "android_common").Module().GetProperties() {
+	for _, prop := range result.ModuleForTests(t, "test_product_generated_system_image", "android_common").Module().GetProperties() {
 		if packagingPropStruct, ok := prop.(*android.PackagingProperties); ok {
 			packagingProps = *packagingPropStruct
 		}
 	}
 	moduleDeps := packagingProps.Multilib.Lib64.Deps
 
-	eval := result.ModuleForTests("test_product_generated_system_image", "android_common").Module().ConfigurableEvaluator(android.PanickingConfigAndErrorContext(result.TestContext))
+	eval := result.ModuleForTests(t, "test_product_generated_system_image", "android_common").Module().ConfigurableEvaluator(android.PanickingConfigAndErrorContext(result.TestContext))
 	android.AssertStringListContains(
 		t,
 		"Generated system image expected to depend on \"bar\" defined in \"a/b\" namespace",
@@ -227,6 +242,7 @@ func TestRemoveOverriddenModulesFromDeps(t *testing.T) {
 		android.PrepareForTestWithAllowMissingDependencies,
 		prepareForTestWithFsgenBuildComponents,
 		java.PrepareForTestWithJavaBuildComponents,
+		prepareMockRamdiksNodeList,
 		android.FixtureMergeMockFs(android.MockFS{
 			"external/avb/test/data/testkey_rsa4096.pem": nil,
 			"build/soong/fsgen/Android.bp": []byte(`
@@ -273,6 +289,10 @@ func TestPrebuiltEtcModuleGen(t *testing.T) {
 				"device/sample/etc/apns-full-conf.xml:product/etc/apns-conf-2.xml",
 				"device/sample/etc/apns-full-conf.xml:system/foo/file.txt",
 				"device/sample/etc/apns-full-conf.xml:system/foo/apns-full-conf.xml",
+				"device/sample/firmware/firmware.bin:recovery/root/firmware.bin",
+				"device/sample/firmware/firmware.bin:recovery/root/firmware-2.bin",
+				"device/sample/firmware/firmware.bin:recovery/root/lib/firmware/firmware.bin",
+				"device/sample/firmware/firmware.bin:recovery/root/lib/firmware/firmware-2.bin",
 			}
 			config.TestProductVariables.PartitionVarsForSoongMigrationOnlyDoNotUse.PartitionQualifiedVariables =
 				map[string]android.PartitionQualifiedVariablesType{
@@ -281,6 +301,7 @@ func TestPrebuiltEtcModuleGen(t *testing.T) {
 					},
 				}
 		}),
+		prepareMockRamdiksNodeList,
 		android.FixtureMergeMockFs(android.MockFS{
 			"external/avb/test/data/testkey_rsa4096.pem": nil,
 			"build/soong/fsgen/Android.bp": []byte(`
@@ -292,22 +313,23 @@ func TestPrebuiltEtcModuleGen(t *testing.T) {
 			"frameworks/base/data/keyboards/Vendor_0079_Product_0011.kl": nil,
 			"frameworks/base/data/keyboards/Vendor_0079_Product_18d4.kl": nil,
 			"device/sample/etc/apns-full-conf.xml":                       nil,
+			"device/sample/firmware/firmware.bin":                        nil,
 		}),
 	).RunTest(t)
 
-	checkModuleProp := func(m android.Module, matcher func(actual interface{}) bool) bool {
+	getModuleProp := func(m android.Module, matcher func(actual interface{}) string) string {
 		for _, prop := range m.GetProperties() {
 
-			if matcher(prop) {
-				return true
+			if str := matcher(prop); str != "" {
+				return str
 			}
 		}
-		return false
+		return ""
 	}
 
 	// check generated prebuilt_* module type install path and install partition
-	generatedModule := result.ModuleForTests("system-frameworks_base_config-etc-0", "android_arm64_armv8-a").Module()
-	etcModule, _ := generatedModule.(*etc.PrebuiltEtc)
+	generatedModule := result.ModuleForTests(t, "system-frameworks_base_config-etc-0", "android_arm64_armv8-a").Module()
+	etcModule := generatedModule.(*etc.PrebuiltEtc)
 	android.AssertStringEquals(
 		t,
 		"module expected to have etc install path",
@@ -324,8 +346,8 @@ func TestPrebuiltEtcModuleGen(t *testing.T) {
 	)
 
 	// check generated prebuilt_* module specifies correct relative_install_path property
-	generatedModule = result.ModuleForTests("system-frameworks_base_data_keyboards-usr_keylayout_subdir-0", "android_arm64_armv8-a").Module()
-	etcModule, _ = generatedModule.(*etc.PrebuiltEtc)
+	generatedModule = result.ModuleForTests(t, "system-frameworks_base_data_keyboards-usr_keylayout_subdir-0", "android_arm64_armv8-a").Module()
+	etcModule = generatedModule.(*etc.PrebuiltEtc)
 	android.AssertStringEquals(
 		t,
 		"module expected to set correct relative_install_path properties",
@@ -333,73 +355,308 @@ func TestPrebuiltEtcModuleGen(t *testing.T) {
 		etcModule.SubDir(),
 	)
 
+	// check that generated prebuilt_* module sets correct srcs
+	eval := generatedModule.ConfigurableEvaluator(android.PanickingConfigAndErrorContext(result.TestContext))
+	android.AssertStringEquals(
+		t,
+		"module expected to set correct srcs property",
+		"Vendor_0079_Product_0011.kl",
+		getModuleProp(generatedModule, func(actual interface{}) string {
+			if p, ok := actual.(*etc.PrebuiltEtcProperties); ok {
+				srcs := p.Srcs.GetOrDefault(eval, nil)
+				if len(srcs) == 2 {
+					return srcs[0]
+				}
+			}
+			return ""
+		}),
+	)
+	android.AssertStringEquals(
+		t,
+		"module expected to set correct srcs property",
+		"Vendor_0079_Product_18d4.kl",
+		getModuleProp(generatedModule, func(actual interface{}) string {
+			if p, ok := actual.(*etc.PrebuiltEtcProperties); ok {
+				srcs := p.Srcs.GetOrDefault(eval, nil)
+				if len(srcs) == 2 {
+					return srcs[1]
+				}
+			}
+			return ""
+		}),
+	)
+
 	// check that prebuilt_* module is not generated for non existing source file
-	android.AssertPanicMessageContains(
+	android.AssertStringEquals(
 		t,
 		"prebuilt_* module not generated for non existing source file",
-		"failed to find module \"system-some_non_existing-etc-0\"",
-		func() { result.ModuleForTests("system-some_non_existing-etc-0", "android_arm64_armv8-a") },
+		"",
+		strings.Join(result.ModuleVariantsForTests("system-some_non_existing-etc-0"), ","),
 	)
 
 	// check that duplicate src file can exist in PRODUCT_COPY_FILES and generates separate modules
-	generatedModule0 := result.ModuleForTests("product-device_sample_etc-etc-0", "android_arm64_armv8-a").Module()
-	generatedModule1 := result.ModuleForTests("product-device_sample_etc-etc-1", "android_arm64_armv8-a").Module()
+	generatedModule0 := result.ModuleForTests(t, "product-device_sample_etc-etc-0", "android_arm64_armv8-a").Module()
+	generatedModule1 := result.ModuleForTests(t, "product-device_sample_etc-etc-1", "android_arm64_armv8-a").Module()
 
 	// check that generated prebuilt_* module sets correct srcs and dsts property
-	eval := generatedModule0.ConfigurableEvaluator(android.PanickingConfigAndErrorContext(result.TestContext))
-	android.AssertBoolEquals(
+	eval = generatedModule0.ConfigurableEvaluator(android.PanickingConfigAndErrorContext(result.TestContext))
+	android.AssertStringEquals(
 		t,
 		"module expected to set correct srcs property",
-		true,
-		checkModuleProp(generatedModule0, func(actual interface{}) bool {
+		"apns-full-conf.xml",
+		getModuleProp(generatedModule0, func(actual interface{}) string {
 			if p, ok := actual.(*etc.PrebuiltEtcProperties); ok {
 				srcs := p.Srcs.GetOrDefault(eval, nil)
-				return len(srcs) == 1 &&
-					srcs[0] == "apns-full-conf.xml"
+				if len(srcs) == 1 {
+					return srcs[0]
+				}
 			}
-			return false
+			return ""
 		}),
 	)
-	android.AssertBoolEquals(
+	android.AssertStringEquals(
 		t,
 		"module expected to set correct dsts property",
-		true,
-		checkModuleProp(generatedModule0, func(actual interface{}) bool {
+		"apns-conf.xml",
+		getModuleProp(generatedModule0, func(actual interface{}) string {
 			if p, ok := actual.(*etc.PrebuiltDstsProperties); ok {
 				dsts := p.Dsts.GetOrDefault(eval, nil)
-				return len(dsts) == 1 &&
-					dsts[0] == "apns-conf.xml"
+				if len(dsts) == 1 {
+					return dsts[0]
+				}
 			}
-			return false
+			return ""
 		}),
 	)
 
 	// check that generated prebuilt_* module sets correct srcs and dsts property
 	eval = generatedModule1.ConfigurableEvaluator(android.PanickingConfigAndErrorContext(result.TestContext))
-	android.AssertBoolEquals(
+	android.AssertStringEquals(
 		t,
 		"module expected to set correct srcs property",
-		true,
-		checkModuleProp(generatedModule1, func(actual interface{}) bool {
+		"apns-full-conf.xml",
+		getModuleProp(generatedModule1, func(actual interface{}) string {
 			if p, ok := actual.(*etc.PrebuiltEtcProperties); ok {
 				srcs := p.Srcs.GetOrDefault(eval, nil)
-				return len(srcs) == 1 &&
-					srcs[0] == "apns-full-conf.xml"
+				if len(srcs) == 1 {
+					return srcs[0]
+				}
 			}
-			return false
+			return ""
 		}),
 	)
-	android.AssertBoolEquals(
+	android.AssertStringEquals(
 		t,
 		"module expected to set correct dsts property",
-		true,
-		checkModuleProp(generatedModule1, func(actual interface{}) bool {
+		"apns-conf-2.xml",
+		getModuleProp(generatedModule1, func(actual interface{}) string {
 			if p, ok := actual.(*etc.PrebuiltDstsProperties); ok {
 				dsts := p.Dsts.GetOrDefault(eval, nil)
-				return len(dsts) == 1 &&
-					dsts[0] == "apns-conf-2.xml"
+				if len(dsts) == 1 {
+					return dsts[0]
+				}
 			}
-			return false
+			return ""
+		}),
+	)
+
+	generatedModule0 = result.ModuleForTests(t, "system-device_sample_etc-foo-0", "android_common").Module()
+	generatedModule1 = result.ModuleForTests(t, "system-device_sample_etc-foo-1", "android_common").Module()
+
+	// check that generated prebuilt_* module sets correct srcs and dsts property
+	eval = generatedModule0.ConfigurableEvaluator(android.PanickingConfigAndErrorContext(result.TestContext))
+	android.AssertStringEquals(
+		t,
+		"module expected to set correct srcs property",
+		"apns-full-conf.xml",
+		getModuleProp(generatedModule0, func(actual interface{}) string {
+			if p, ok := actual.(*etc.PrebuiltEtcProperties); ok {
+				srcs := p.Srcs.GetOrDefault(eval, nil)
+				if len(srcs) == 1 {
+					return srcs[0]
+				}
+			}
+			return ""
+		}),
+	)
+	android.AssertStringEquals(
+		t,
+		"module expected to set correct dsts property",
+		"foo/file.txt",
+		getModuleProp(generatedModule0, func(actual interface{}) string {
+			if p, ok := actual.(*etc.PrebuiltDstsProperties); ok {
+				dsts := p.Dsts.GetOrDefault(eval, nil)
+				if len(dsts) == 1 {
+					return dsts[0]
+				}
+			}
+			return ""
+		}),
+	)
+
+	// check generated prebuilt_* module specifies correct install path and relative install path
+	etcModule = generatedModule1.(*etc.PrebuiltEtc)
+	android.AssertStringEquals(
+		t,
+		"module expected to have . install path",
+		".",
+		etcModule.BaseDir(),
+	)
+	android.AssertStringEquals(
+		t,
+		"module expected to set correct relative_install_path properties",
+		"foo",
+		etcModule.SubDir(),
+	)
+
+	// check that generated prebuilt_* module sets correct srcs
+	eval = generatedModule1.ConfigurableEvaluator(android.PanickingConfigAndErrorContext(result.TestContext))
+	android.AssertStringEquals(
+		t,
+		"module expected to set correct srcs property",
+		"apns-full-conf.xml",
+		getModuleProp(generatedModule1, func(actual interface{}) string {
+			if p, ok := actual.(*etc.PrebuiltEtcProperties); ok {
+				srcs := p.Srcs.GetOrDefault(eval, nil)
+				if len(srcs) == 1 {
+					return srcs[0]
+				}
+			}
+			return ""
+		}),
+	)
+
+	generatedModule0 = result.ModuleForTests(t, "recovery-device_sample_firmware-0", "android_recovery_arm64_armv8-a").Module()
+	generatedModule1 = result.ModuleForTests(t, "recovery-device_sample_firmware-1", "android_recovery_common").Module()
+
+	// check generated prebuilt_* module specifies correct install path and relative install path
+	etcModule = generatedModule0.(*etc.PrebuiltEtc)
+	android.AssertStringEquals(
+		t,
+		"module expected to have . install path",
+		".",
+		etcModule.BaseDir(),
+	)
+	android.AssertStringEquals(
+		t,
+		"module expected to set empty relative_install_path properties",
+		"",
+		etcModule.SubDir(),
+	)
+
+	// check that generated prebuilt_* module don't set dsts
+	eval = generatedModule0.ConfigurableEvaluator(android.PanickingConfigAndErrorContext(result.TestContext))
+	android.AssertStringEquals(
+		t,
+		"module expected to not set dsts property",
+		"",
+		getModuleProp(generatedModule0, func(actual interface{}) string {
+			if p, ok := actual.(*etc.PrebuiltDstsProperties); ok {
+				dsts := p.Dsts.GetOrDefault(eval, nil)
+				if len(dsts) != 0 {
+					return dsts[0]
+				}
+			}
+			return ""
+		}),
+	)
+
+	// check generated prebuilt_* module specifies correct install path and relative install path
+	etcModule = generatedModule1.(*etc.PrebuiltEtc)
+	android.AssertStringEquals(
+		t,
+		"module expected to have . install path",
+		".",
+		etcModule.BaseDir(),
+	)
+	android.AssertStringEquals(
+		t,
+		"module expected to set empty relative_install_path properties",
+		"",
+		etcModule.SubDir(),
+	)
+
+	// check that generated prebuilt_* module sets correct dsts
+	eval = generatedModule1.ConfigurableEvaluator(android.PanickingConfigAndErrorContext(result.TestContext))
+	android.AssertStringEquals(
+		t,
+		"module expected to set correct dsts property",
+		"firmware-2.bin",
+		getModuleProp(generatedModule1, func(actual interface{}) string {
+			if p, ok := actual.(*etc.PrebuiltDstsProperties); ok {
+				dsts := p.Dsts.GetOrDefault(eval, nil)
+				if len(dsts) == 1 {
+					return dsts[0]
+				}
+			}
+			return ""
+		}),
+	)
+
+	generatedModule0 = result.ModuleForTests(t, "recovery-device_sample_firmware-lib_firmware-0", "android_recovery_common").Module()
+	generatedModule1 = result.ModuleForTests(t, "recovery-device_sample_firmware-lib_firmware-1", "android_recovery_common").Module()
+
+	// check generated prebuilt_* module specifies correct install path and relative install path
+	etcModule = generatedModule0.(*etc.PrebuiltEtc)
+	android.AssertStringEquals(
+		t,
+		"module expected to have . install path",
+		".",
+		etcModule.BaseDir(),
+	)
+	android.AssertStringEquals(
+		t,
+		"module expected to set correct relative_install_path properties",
+		"lib/firmware",
+		etcModule.SubDir(),
+	)
+
+	// check that generated prebuilt_* module sets correct srcs
+	eval = generatedModule0.ConfigurableEvaluator(android.PanickingConfigAndErrorContext(result.TestContext))
+	android.AssertStringEquals(
+		t,
+		"module expected to not set dsts property",
+		"",
+		getModuleProp(generatedModule0, func(actual interface{}) string {
+			if p, ok := actual.(*etc.PrebuiltDstsProperties); ok {
+				dsts := p.Dsts.GetOrDefault(eval, nil)
+				if len(dsts) != 0 {
+					return dsts[0]
+				}
+			}
+			return ""
+		}),
+	)
+
+	// check generated prebuilt_* module specifies correct install path and relative install path
+	etcModule = generatedModule1.(*etc.PrebuiltEtc)
+	android.AssertStringEquals(
+		t,
+		"module expected to have . install path",
+		".",
+		etcModule.BaseDir(),
+	)
+	android.AssertStringEquals(
+		t,
+		"module expected to set empty relative_install_path properties",
+		"",
+		etcModule.SubDir(),
+	)
+
+	// check that generated prebuilt_* module sets correct srcs
+	eval = generatedModule1.ConfigurableEvaluator(android.PanickingConfigAndErrorContext(result.TestContext))
+	android.AssertStringEquals(
+		t,
+		"module expected to set correct dsts property",
+		"lib/firmware/firmware-2.bin",
+		getModuleProp(generatedModule1, func(actual interface{}) string {
+			if p, ok := actual.(*etc.PrebuiltDstsProperties); ok {
+				dsts := p.Dsts.GetOrDefault(eval, nil)
+				if len(dsts) == 1 {
+					return dsts[0]
+				}
+			}
+			return ""
 		}),
 	)
 }

@@ -388,6 +388,30 @@ var neverallowTests = []struct {
 			`module type not allowed to be defined in bp file`,
 		},
 	},
+	// Test the a neverallowed module type can't be smuggled through a soong config module type
+	{
+		name: `smuggling module types through soong config modules`,
+		fs: map[string][]byte{
+			"a/b/Android.bp": []byte(`
+				soong_config_bool_variable {
+					name: "my_var",
+				}
+				soong_config_module_type {
+					name: "smuggled_prebuilt_usr_srec",
+					module_type: "prebuilt_usr_srec",
+					config_namespace: "ANDROID",
+					variables: ["my_var"],
+					properties: ["enabled"],
+				}
+				smuggled_prebuilt_usr_srec {
+					name: "foo",
+				}
+			`),
+		},
+		expectedErrors: []string{
+			`module type not allowed to be defined in bp file`,
+		},
+	},
 }
 
 var prepareForNeverAllowTest = GroupFixturePreparers(
@@ -399,6 +423,7 @@ var prepareForNeverAllowTest = GroupFixturePreparers(
 		ctx.RegisterModuleType("filesystem", newMockFilesystemModule)
 		ctx.RegisterModuleType("prebuilt_usr_srec", newMockPrebuiltUsrSrecModule)
 	}),
+	PrepareForTestWithSoongConfigModuleBuildComponents,
 )
 
 func TestNeverallow(t *testing.T) {

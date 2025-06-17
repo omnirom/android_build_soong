@@ -153,7 +153,7 @@ func (orderfile *orderfile) begin(ctx BaseModuleContext) {
 	}
 
 	// Currently, we are not enabling orderfiles to begin from static libraries
-	if ctx.static() && !ctx.staticBinary() {
+	if ctx.staticLibrary() {
 		return
 	}
 

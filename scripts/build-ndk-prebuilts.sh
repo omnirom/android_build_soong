@@ -23,9 +23,18 @@ fi
 # TODO: remove ALLOW_MISSING_DEPENDENCIES=true when all the riscv64
 # dependencies exist (currently blocked by http://b/273792258).
 # TODO: remove BUILD_BROKEN_DISABLE_BAZEL=1 when bazel supports riscv64 (http://b/262192655).
+#
+# LTO is disabled because the NDK compiler is not necessarily in-sync with the
+# compiler used to build the platform sysroot, and the sysroot includes static
+# libraries which would be incompatible with mismatched compilers when built
+# with LTO. Disabling LTO globally for the NDK sysroot is okay because the only
+# compiled code in the sysroot that will end up in apps is those static
+# libraries.
+# https://github.com/android/ndk/issues/1591
 TARGET_RELEASE=trunk_staging \
 ALLOW_MISSING_DEPENDENCIES=true \
 BUILD_BROKEN_DISABLE_BAZEL=1 \
+DISABLE_LTO=true \
     TARGET_PRODUCT=ndk build/soong/soong_ui.bash --make-mode --soong-only ${OUT_DIR}/soong/ndk.timestamp
 
 if [ -n "${DIST_DIR}" ]; then

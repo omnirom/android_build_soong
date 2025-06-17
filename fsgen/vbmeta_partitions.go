@@ -17,9 +17,7 @@ package fsgen
 import (
 	"android/soong/android"
 	"android/soong/filesystem"
-	"slices"
 	"strconv"
-	"strings"
 
 	"github.com/google/blueprint/proptools"
 )
@@ -30,6 +28,27 @@ type vbmetaModuleInfo struct {
 	// The name of the module that avb understands. This is the name passed to --chain_partition,
 	// and also the basename of the output file. (the output file is called partitionName + ".img")
 	partitionName string
+}
+
+// https://cs.android.com/android/platform/superproject/main/+/main:build/make/core/Makefile;l=4849;drc=62e20f0d218f60bae563b4ee742d88cca1fc1901
+var avbPartitions = []string{
+	"boot",
+	"init_boot",
+	"vendor_boot",
+	"vendor_kernel_boot",
+	"system",
+	"vendor",
+	"product",
+	"system_ext",
+	"odm",
+	"vendor_dlkm",
+	"odm_dlkm",
+	"system_dlkm",
+	"dtbo",
+	"pvmfw",
+	"recovery",
+	"vbmeta_system",
+	"vbmeta_vendor",
 }
 
 // Creates the vbmeta partition and the chained vbmeta partitions. Returns the list of module names
@@ -43,7 +62,7 @@ type vbmetaModuleInfo struct {
 // like vbmeta_system might contain the avb metadata for just a few products. In cuttlefish
 // vbmeta_system contains metadata about product, system, and system_ext. Using chained partitions,
 // that group of partitions can be updated independently from the other signed partitions.
-func createVbmetaPartitions(ctx android.LoadHookContext, generatedPartitionTypes []string) []vbmetaModuleInfo {
+func (f *filesystemCreator) createVbmetaPartitions(ctx android.LoadHookContext, partitions allGeneratedPartitionData) []vbmetaModuleInfo {
 	partitionVars := ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse
 	// Some products seem to have BuildingVbmetaImage as true even when BoardAvbEnable is false
 	if !partitionVars.BuildingVbmetaImage || !partitionVars.BoardAvbEnable {
@@ -52,14 +71,17 @@ func createVbmetaPartitions(ctx android.LoadHookContext, generatedPartitionTypes
 
 	var result []vbmetaModuleInfo
 
-	var chainedPartitions []string
-	var partitionTypesHandledByChainedPartitions []string
+	// https://cs.android.com/android/platform/superproject/main/+/main:build/make/core/Makefile;l=4593;drc=62e20f0d218f60bae563b4ee742d88cca1fc1901
+	var internalAvbPartitionsInChainedVbmetaImages []string
+	var chainedPartitionTypes []string
 	for _, chainedName := range android.SortedKeys(partitionVars.ChainedVbmetaPartitions) {
 		props := partitionVars.ChainedVbmetaPartitions[chainedName]
+		filesystemPartitionType := chainedName
 		chainedName = "vbmeta_" + chainedName
 		if len(props.Partitions) == 0 {
 			continue
 		}
+		internalAvbPartitionsInChainedVbmetaImages = append(internalAvbPartitionsInChainedVbmetaImages, props.Partitions...)
 		if len(props.Key) == 0 {
 			ctx.ModuleErrorf("No key found for chained avb partition %q", chainedName)
 			continue
@@ -92,26 +114,24 @@ func createVbmetaPartitions(ctx android.LoadHookContext, generatedPartitionTypes
 
 		var partitionModules []string
 		for _, partition := range props.Partitions {
-			partitionTypesHandledByChainedPartitions = append(partitionTypesHandledByChainedPartitions, partition)
-			if !slices.Contains(generatedPartitionTypes, partition) {
-				// The partition is probably unsupported.
-				continue
+			if modName := partitions.nameForType(partition); modName != "" {
+				partitionModules = append(partitionModules, modName)
 			}
-			partitionModules = append(partitionModules, generatedModuleNameForPartition(ctx.Config(), partition))
 		}
 
-		name := generatedModuleName(ctx.Config(), chainedName)
+		name := generatedModuleNameForPartition(ctx.Config(), chainedName)
 		ctx.CreateModuleInDirectory(
 			filesystem.VbmetaFactory,
 			".", // Create in the root directory for now so its easy to get the key
 			&filesystem.VbmetaProperties{
-				Partition_name:          proptools.StringPtr(chainedName),
-				Stem:                    proptools.StringPtr(chainedName + ".img"),
-				Private_key:             proptools.StringPtr(props.Key),
-				Algorithm:               &props.Algorithm,
-				Rollback_index:          rollbackIndex,
-				Rollback_index_location: &ril,
-				Partitions:              proptools.NewSimpleConfigurable(partitionModules),
+				Partition_name:            proptools.StringPtr(chainedName),
+				Filesystem_partition_type: proptools.StringPtr(filesystemPartitionType),
+				Stem:                      proptools.StringPtr(chainedName + ".img"),
+				Private_key:               proptools.StringPtr(props.Key),
+				Algorithm:                 &props.Algorithm,
+				Rollback_index:            rollbackIndex,
+				Rollback_index_location:   &ril,
+				Partitions:                proptools.NewSimpleConfigurable(partitionModules),
 			}, &struct {
 				Name *string
 			}{
@@ -119,15 +139,15 @@ func createVbmetaPartitions(ctx android.LoadHookContext, generatedPartitionTypes
 			},
 		).HideFromMake()
 
-		chainedPartitions = append(chainedPartitions, name)
-
 		result = append(result, vbmetaModuleInfo{
 			moduleName:    name,
 			partitionName: chainedName,
 		})
+
+		chainedPartitionTypes = append(chainedPartitionTypes, chainedName)
 	}
 
-	vbmetaModuleName := generatedModuleName(ctx.Config(), "vbmeta")
+	vbmetaModuleName := generatedModuleNameForPartition(ctx.Config(), "vbmeta")
 
 	var algorithm *string
 	var ri *int64
@@ -148,19 +168,83 @@ func createVbmetaPartitions(ctx android.LoadHookContext, generatedPartitionTypes
 		ri = &parsedRi
 	}
 
-	var partitionModules []string
-	for _, partitionType := range generatedPartitionTypes {
-		if slices.Contains(partitionTypesHandledByChainedPartitions, partitionType) {
-			// Already handled by a chained vbmeta partition
+	// --chain_partition argument is only set for partitions that set
+	// `BOARD_AVB_<partition name>_KEY_PATH` value and is not "recovery"
+	// https://cs.android.com/android/platform/superproject/main/+/main:build/make/core/Makefile;l=4823;drc=62e20f0d218f60bae563b4ee742d88cca1fc1901
+	includeAsChainedPartitionInVbmeta := func(partition string) bool {
+		val, ok := partitionVars.PartitionQualifiedVariables[partition]
+		return ok && len(val.BoardAvbKeyPath) > 0 && partition != "recovery"
+	}
+
+	// --include_descriptors_from_image is passed if both conditions are met:
+	// - `BOARD_AVB_<partition name>_KEY_PATH` value is not set
+	// - not included in INTERNAL_AVB_PARTITIONS_IN_CHAINED_VBMETA_IMAGES
+	// for partitions that set INSTALLED_<partition name>IMAGE_TARGET
+	// https://cs.android.com/android/platform/superproject/main/+/main:build/make/core/Makefile;l=4827;drc=62e20f0d218f60bae563b4ee742d88cca1fc1901
+	includeAsIncludedPartitionInVbmeta := func(partition string) bool {
+		if android.InList(partition, internalAvbPartitionsInChainedVbmetaImages) {
+			// Already handled by chained vbmeta partitions
+			return false
+		}
+		partitionQualifiedVars := partitionVars.PartitionQualifiedVariables[partition]
+
+		// The return logic in the switch cases below are identical to
+		// ifdef INSTALLED_<partition name>IMAGE_TARGET
+		switch partition {
+		case "boot":
+			return partitionQualifiedVars.BuildingImage || partitionQualifiedVars.PrebuiltImage || partitionVars.BoardUsesRecoveryAsBoot
+		case "vendor_kernel_boot", "dtbo":
+			return partitionQualifiedVars.PrebuiltImage
+		case "system":
+			return partitionQualifiedVars.BuildingImage
+		case "init_boot", "vendor_boot", "vendor", "product", "system_ext", "odm", "vendor_dlkm", "odm_dlkm", "system_dlkm":
+			return partitionQualifiedVars.BuildingImage || partitionQualifiedVars.PrebuiltImage
+		// TODO: Import BOARD_USES_PVMFWIMAGE
+		// ifeq ($(BOARD_USES_PVMFWIMAGE),true)
+		// case "pvmfw":
+		case "recovery":
+			// ifdef INSTALLED_RECOVERYIMAGE_TARGET
+			return !ctx.DeviceConfig().BoardUsesRecoveryAsBoot() && !ctx.DeviceConfig().BoardMoveRecoveryResourcesToVendorBoot()
+		// Technically these partitions are determined based on len(BOARD_AVB_VBMETA_SYSTEM) and
+		// len(BOARD_AVB_VBMETA_VENDOR) but if these are non empty these partitions are
+		// already included in the chained partitions.
+		case "vbmeta_system", "vbmeta_vendor":
+			return false
+		default:
+			return false
+		}
+	}
+
+	var chainedPartitionModules []string
+	var includePartitionModules []string
+	allGeneratedPartitionTypes := append(partitions.types(),
+		chainedPartitionTypes...,
+	)
+	if len(f.properties.Boot_image) > 0 {
+		allGeneratedPartitionTypes = append(allGeneratedPartitionTypes, "boot")
+	}
+	if len(f.properties.Init_boot_image) > 0 {
+		allGeneratedPartitionTypes = append(allGeneratedPartitionTypes, "init_boot")
+	}
+	if len(f.properties.Vendor_boot_image) > 0 {
+		allGeneratedPartitionTypes = append(allGeneratedPartitionTypes, "vendor_boot")
+	}
+
+	// https://cs.android.com/android/platform/superproject/main/+/main:build/make/core/Makefile;l=4919;drc=62e20f0d218f60bae563b4ee742d88cca1fc1901
+	for _, partitionType := range android.SortedUniqueStrings(append(avbPartitions, chainedPartitionTypes...)) {
+		if !android.InList(partitionType, allGeneratedPartitionTypes) {
+			// Skip if the partition is not auto generated
 			continue
 		}
-		if strings.Contains(partitionType, "ramdisk") || strings.Contains(partitionType, "boot") {
-			// ramdisk is never signed with avb information
-			// boot partitions just have the avb footer, and don't have a corresponding vbmeta
-			// partition.
-			continue
+		name := partitions.nameForType(partitionType)
+		if name == "" {
+			name = generatedModuleNameForPartition(ctx.Config(), partitionType)
 		}
-		partitionModules = append(partitionModules, generatedModuleNameForPartition(ctx.Config(), partitionType))
+		if includeAsChainedPartitionInVbmeta(partitionType) {
+			chainedPartitionModules = append(chainedPartitionModules, name)
+		} else if includeAsIncludedPartitionInVbmeta(partitionType) {
+			includePartitionModules = append(includePartitionModules, name)
+		}
 	}
 
 	ctx.CreateModuleInDirectory(
@@ -171,8 +255,9 @@ func createVbmetaPartitions(ctx android.LoadHookContext, generatedPartitionTypes
 			Algorithm:          algorithm,
 			Private_key:        key,
 			Rollback_index:     ri,
-			Chained_partitions: chainedPartitions,
-			Partitions:         proptools.NewSimpleConfigurable(partitionModules),
+			Chained_partitions: chainedPartitionModules,
+			Partitions:         proptools.NewSimpleConfigurable(includePartitionModules),
+			Partition_name:     proptools.StringPtr("vbmeta"),
 		}, &struct {
 			Name *string
 		}{

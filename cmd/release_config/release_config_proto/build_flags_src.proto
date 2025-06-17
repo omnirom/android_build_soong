@@ -138,6 +138,11 @@ message ReleaseConfig {
 
   // The ReleaseConfigType of this release config.
   optional ReleaseConfigType release_config_type = 6;
+
+  // Whether to disallow this release config as TARGET_RELEASE.
+  // If true, this release config can only be inherited, it cannot be used
+  // directly in a build.
+  optional bool disallow_lunch_use = 7;
 }
 
 // Any aliases.  These are used for continuous integration builder config.

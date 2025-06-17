@@ -145,7 +145,7 @@ func (cov *coverage) flags(ctx ModuleContext, flags Flags, deps PathDeps) (Flags
 	// Even if we don't have coverage enabled, if any of our object files were compiled
 	// with coverage, then we need to add --coverage to our ldflags.
 	if !cov.linkCoverage {
-		if ctx.static() && !ctx.staticBinary() {
+		if ctx.staticLibrary() {
 			// For static libraries, the only thing that changes our object files
 			// are included whole static libraries, so check to see if any of
 			// those have coverage enabled.
@@ -273,8 +273,6 @@ type Coverage interface {
 
 type coverageTransitionMutator struct{}
 
-var _ android.TransitionMutator = (*coverageTransitionMutator)(nil)
-
 func (c coverageTransitionMutator) Split(ctx android.BaseModuleContext) []string {
 	if c, ok := ctx.Module().(*Module); ok && c.coverage != nil {
 		if c.coverage.Properties.NeedCoverageVariant {
@@ -354,10 +352,10 @@ func (c coverageTransitionMutator) Mutate(ctx android.BottomUpMutatorContext, va
 	}
 }
 
-func parseSymbolFileForAPICoverage(ctx ModuleContext, symbolFile string) android.ModuleOutPath {
+func ParseSymbolFileForAPICoverage(ctx android.ModuleContext, symbolFile string) android.ModuleOutPath {
 	apiLevelsJson := android.GetApiLevelsJson(ctx)
 	symbolFilePath := android.PathForModuleSrc(ctx, symbolFile)
-	outputFile := ctx.baseModuleName() + ".xml"
+	outputFile := ctx.Module().(LinkableInterface).BaseModuleName() + ".xml"
 	parsedApiCoveragePath := android.PathForModuleOut(ctx, outputFile)
 	rule := android.NewRuleBuilder(pctx, ctx)
 	rule.Command().

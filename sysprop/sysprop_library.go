@@ -226,6 +226,9 @@ type syspropLibraryProperties struct {
 	// Make this module available when building for ramdisk
 	Ramdisk_available *bool
 
+	// Make this module available when building for vendor ramdisk
+	Vendor_ramdisk_available *bool
+
 	// Make this module available when building for recovery
 	Recovery_available *bool
 
@@ -346,7 +349,6 @@ func (m *syspropLibrary) GenerateAndroidBuildActions(ctx android.ModuleContext) 
 			ctx.PropertyErrorf("srcs", "srcs contains non-sysprop file %q", syspropFile.String())
 		}
 	}
-	android.SetProvider(ctx, blueprint.SrcsFileProviderKey, blueprint.SrcsFileProviderData{SrcPaths: srcs.Strings()})
 
 	if ctx.Failed() {
 		return
@@ -460,9 +462,8 @@ func (m *syspropLibrary) AndroidMk() android.AndroidMkData {
 var _ android.ApexModule = (*syspropLibrary)(nil)
 
 // Implements android.ApexModule
-func (m *syspropLibrary) ShouldSupportSdkVersion(ctx android.BaseModuleContext,
-	sdkVersion android.ApiLevel) error {
-	return fmt.Errorf("sysprop_library is not supposed to be part of apex modules")
+func (m *syspropLibrary) MinSdkVersionSupported(ctx android.BaseModuleContext) android.ApiLevel {
+	return android.MinApiLevel
 }
 
 // sysprop_library creates schematized APIs from sysprop description files (.sysprop).
@@ -502,17 +503,18 @@ type ccLibraryProperties struct {
 			Static_libs []string
 		}
 	}
-	Required           []string
-	Recovery           *bool
-	Recovery_available *bool
-	Vendor_available   *bool
-	Product_available  *bool
-	Ramdisk_available  *bool
-	Host_supported     *bool
-	Apex_available     []string
-	Min_sdk_version    *string
-	Cflags             []string
-	Ldflags            []string
+	Required                 []string
+	Recovery                 *bool
+	Recovery_available       *bool
+	Vendor_available         *bool
+	Product_available        *bool
+	Ramdisk_available        *bool
+	Vendor_ramdisk_available *bool
+	Host_supported           *bool
+	Apex_available           []string
+	Min_sdk_version          *string
+	Cflags                   []string
+	Ldflags                  []string
 }
 
 type javaLibraryProperties struct {
@@ -605,6 +607,7 @@ func syspropLibraryHook(ctx android.LoadHookContext, m *syspropLibrary) {
 	ccProps.Vendor_available = m.properties.Vendor_available
 	ccProps.Product_available = m.properties.Product_available
 	ccProps.Ramdisk_available = m.properties.Ramdisk_available
+	ccProps.Vendor_ramdisk_available = m.properties.Vendor_ramdisk_available
 	ccProps.Host_supported = m.properties.Host_supported
 	ccProps.Apex_available = m.ApexProperties.Apex_available
 	ccProps.Min_sdk_version = m.properties.Cpp.Min_sdk_version
@@ -680,7 +683,7 @@ func syspropLibraryHook(ctx android.LoadHookContext, m *syspropLibrary) {
 		Sysprop_srcs: m.properties.Srcs,
 		Scope:        scope,
 		Check_api:    proptools.StringPtr(ctx.ModuleName()),
-		Installable:  proptools.BoolPtr(false),
+		Installable:  m.properties.Installable,
 		Crate_name:   m.rustCrateName(),
 		Rustlibs: []string{
 			"liblog_rust",

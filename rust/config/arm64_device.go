@@ -45,6 +45,14 @@ var (
 			"-Z branch-protection=bti,pac-ret",
 			"-Z stack-protector=none",
 		},
+		"armv9-3a": []string{
+			"-Z branch-protection=bti,pac-ret",
+			"-Z stack-protector=none",
+		},
+		"armv9-4a": []string{
+			"-Z branch-protection=bti,pac-ret",
+			"-Z stack-protector=none",
+		},
 	}
 )
 

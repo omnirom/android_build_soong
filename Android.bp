@@ -150,10 +150,11 @@ cc_defaults {
     arch: {
         arm64: {
             cflags: [
-                // Prevent the compiler from optimizing code using SVE, as the
-                // baremetal environment might not have configured the hardware.
-                "-Xclang -target-feature",
-                "-Xclang -sve",
+                // Override the global -march= flag (as set by TARGET_ARCH_VARIANT)
+                // and explicitly use the baseline architecture (ARMv8-A is the first
+                // version with 64-bit support) to avoid emitting potentially
+                // unsupported instructions.
+                "-march=armv8-a",
             ],
         },
     },
@@ -175,12 +176,18 @@ build_prop {
     footer_files: [
         ":applied_backported_fixes",
     ],
+    dist: {
+        targets: [
+            "droidcore-unbundled",
+            "sdk",
+        ],
+    },
     // Currently, only microdroid, Ravenwood, and cf system image can refer to system-build.prop
     visibility: [
-        "//build/make/target/product/generic",
-        "//build/make/target/product/gsi",
+        "//build/soong/fsgen",
         "//packages/modules/Virtualization/build/microdroid",
         "//frameworks/base/ravenwood",
+        "//visibility:any_system_partition",
     ],
 }
 
@@ -190,7 +197,14 @@ build_prop {
     system_ext_specific: true,
     product_config: ":product_config",
     relative_install_path: "etc", // system_ext/etc/build.prop
-    visibility: ["//build/make/target/product/gsi"],
+    dist: {
+        targets: ["droidcore-unbundled"],
+        dest: "build.prop-system_ext",
+    },
+    visibility: [
+        "//build/make/target/product/gsi",
+        "//build/soong/fsgen",
+    ],
 }
 
 build_prop {
@@ -199,7 +213,14 @@ build_prop {
     product_specific: true,
     product_config: ":product_config",
     relative_install_path: "etc", // product/etc/build.prop
-    visibility: ["//build/make/target/product/gsi"],
+    dist: {
+        targets: ["droidcore-unbundled"],
+        dest: "build.prop-product",
+    },
+    visibility: [
+        "//build/make/target/product/gsi",
+        "//build/soong/fsgen",
+    ],
 }
 
 build_prop {
@@ -208,7 +229,11 @@ build_prop {
     device_specific: true,
     product_config: ":product_config",
     relative_install_path: "etc", // odm/etc/build.prop
-    visibility: ["//visibility:private"],
+    dist: {
+        targets: ["droidcore-unbundled"],
+        dest: "build.prop-odm",
+    },
+    visibility: ["//build/soong/fsgen"],
 }
 
 build_prop {
@@ -244,5 +269,17 @@ build_prop {
     ramdisk: true,
     product_config: ":product_config",
     relative_install_path: "etc/ramdisk", // ramdisk/system/etc/ramdisk/build.prop
+    dist: {
+        targets: ["droidcore-unbundled"],
+        dest: "build.prop-ramdisk",
+    },
     visibility: ["//visibility:private"],
+}
+
+all_apex_certs {
+    name: "all_apex_certs",
+    visibility: [
+        "//cts/tests/tests/security",
+        "//cts/hostsidetests/appsecurity",
+    ],
 }

@@ -22,6 +22,9 @@ var PrepareForTestWithApexBuildComponents = android.GroupFixturePreparers(
 	android.FixtureRegisterWithContext(registerApexBuildComponents),
 	android.FixtureRegisterWithContext(registerApexKeyBuildComponents),
 	android.FixtureRegisterWithContext(registerApexDepsInfoComponents),
+	android.FixtureAddTextFile("all_apex_certs/Android.bp", `
+		all_apex_certs { name: "all_apex_certs" }
+	`),
 	// Additional files needed in tests that disallow non-existent source files.
 	// This includes files that are needed by all, or at least most, instances of an apex module type.
 	android.MockFS{
@@ -30,6 +33,8 @@ var PrepareForTestWithApexBuildComponents = android.GroupFixturePreparers(
 		"build/soong/scripts/gen_ndk_backedby_apex.sh":         nil,
 		// Needed by prebuilt_apex.
 		"build/soong/scripts/unpack-prebuilt-apex.sh": nil,
+		// Needed by all_apex_certs
+		"build/make/target/product/security/testkey.x509.pem": nil,
 	}.AddToFixture(),
 	android.PrepareForTestWithBuildFlag("RELEASE_DEFAULT_UPDATABLE_MODULE_VERSION", testDefaultUpdatableModuleVersion),
 )

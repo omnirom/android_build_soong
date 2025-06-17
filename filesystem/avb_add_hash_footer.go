@@ -46,7 +46,7 @@ type avbProp struct {
 
 type avbAddHashFooterProperties struct {
 	// Source file of this image. Can reference a genrule type module with the ":module" syntax.
-	Src *string `android:"path,arch_variant"`
+	Src proptools.Configurable[string] `android:"path,arch_variant,replace_instead_of_append"`
 
 	// Set the name of the output. Defaults to <module_name>.img.
 	Filename *string
@@ -70,7 +70,7 @@ type avbAddHashFooterProperties struct {
 	Props []avbProp
 
 	// The index used to prevent rollback of the image on device.
-	Rollback_index *int64
+	Rollback_index proptools.Configurable[int64] `android:"replace_instead_of_append"`
 
 	// Include descriptors from images
 	Include_descriptors_from_images []string `android:"path,arch_variant"`
@@ -91,12 +91,13 @@ func (a *avbAddHashFooter) installFileName() string {
 
 func (a *avbAddHashFooter) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	builder := android.NewRuleBuilder(pctx, ctx)
+	src := a.properties.Src.GetOrDefault(ctx, "")
 
-	if a.properties.Src == nil {
+	if src == "" {
 		ctx.PropertyErrorf("src", "missing source file")
 		return
 	}
-	input := android.PathForModuleSrc(ctx, proptools.String(a.properties.Src))
+	input := android.PathForModuleSrc(ctx, src)
 	output := android.PathForModuleOut(ctx, a.installFileName())
 	builder.Command().Text("cp").Input(input).Output(output)
 
@@ -133,8 +134,9 @@ func (a *avbAddHashFooter) GenerateAndroidBuildActions(ctx android.ModuleContext
 		addAvbProp(ctx, cmd, prop)
 	}
 
-	if a.properties.Rollback_index != nil {
-		rollbackIndex := proptools.Int(a.properties.Rollback_index)
+	rollbackIndex := a.properties.Rollback_index.Get(ctx)
+	if rollbackIndex.IsPresent() {
+		rollbackIndex := rollbackIndex.Get()
 		if rollbackIndex < 0 {
 			ctx.PropertyErrorf("rollback_index", "Rollback index must be non-negative")
 		}
@@ -148,6 +150,8 @@ func (a *avbAddHashFooter) GenerateAndroidBuildActions(ctx android.ModuleContext
 	a.installDir = android.PathForModuleInstall(ctx, "etc")
 	ctx.InstallFile(a.installDir, a.installFileName(), output)
 	a.output = output
+
+	setCommonFilesystemInfo(ctx, a)
 }
 
 func addAvbProp(ctx android.ModuleContext, cmd *android.RuleBuilderCommand, prop avbProp) {
@@ -207,6 +211,9 @@ var _ android.SourceFileProducer = (*avbAddHashFooter)(nil)
 
 // Implements android.SourceFileProducer
 func (a *avbAddHashFooter) Srcs() android.Paths {
+	if a.output == nil {
+		return nil
+	}
 	return append(android.Paths{}, a.output)
 }
 

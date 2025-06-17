@@ -1,4 +1,4 @@
-// Copyright 2023 Google Inc. All rights reserved.
+// Copyright 2025 Google Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,11 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package genrule
+package android
 
-var (
-	SandboxingDenyModuleList = []string{
-		// go/keep-sorted start
-		// go/keep-sorted end
-	}
-)
+func init() {
+	RegisterParallelSingletonType("nothing_singleton", nothingSingletonFactory)
+}
+
+func nothingSingletonFactory() Singleton {
+	return &nothingSingleton{}
+}
+
+type nothingSingleton struct{}
+
+func (s *nothingSingleton) GenerateBuildActions(ctx SingletonContext) {
+	rule := NewRuleBuilder(pctx, ctx)
+	rule.SetPhonyOutput()
+	rule.Command().
+		Text("echo Successfully read the makefiles.").
+		ImplicitOutput(PathForPhony(ctx, "nothing"))
+	rule.Build("nothing", "nothing")
+}

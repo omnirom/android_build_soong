@@ -101,7 +101,12 @@ do_strip_keep_mini_debug_info_darwin() {
 do_strip_keep_mini_debug_info_linux() {
     rm -f "${outfile}.mini_debuginfo.xz"
     local fail=
-    "${CLANG_BIN}/llvm-strip" --strip-all --keep-section=.ARM.attributes --remove-section=.comment "${infile}" -o "${outfile}.tmp" || fail=true
+    if [ -z "${windows}" ]; then
+        "${CLANG_BIN}/llvm-strip" --strip-all --keep-section=.ARM.attributes --remove-section=.comment "${infile}" -o "${outfile}.tmp" || fail=true
+    else
+        # --keep-section not supported for Windows COFF.
+        fail=true
+    fi
 
     if [ -z $fail ]; then
         # create_minidebuginfo has issues with compressed debug sections. Just

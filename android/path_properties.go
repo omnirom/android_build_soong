@@ -54,12 +54,14 @@ func addPathDepsForProps(ctx BottomUpMutatorContext, props []interface{}) {
 	var pathDeviceFirstPrefer32Properties []string
 	var pathDeviceCommonProperties []string
 	var pathCommonOsProperties []string
+	var pathHostCommonProperties []string
 	for _, ps := range props {
 		pathProperties = append(pathProperties, taggedPropertiesForPropertyStruct(ctx, ps, "path")...)
 		pathDeviceFirstProperties = append(pathDeviceFirstProperties, taggedPropertiesForPropertyStruct(ctx, ps, "path_device_first")...)
 		pathDeviceFirstPrefer32Properties = append(pathDeviceFirstPrefer32Properties, taggedPropertiesForPropertyStruct(ctx, ps, "path_device_first_prefer32")...)
 		pathDeviceCommonProperties = append(pathDeviceCommonProperties, taggedPropertiesForPropertyStruct(ctx, ps, "path_device_common")...)
 		pathCommonOsProperties = append(pathCommonOsProperties, taggedPropertiesForPropertyStruct(ctx, ps, "path_common_os")...)
+		pathHostCommonProperties = append(pathHostCommonProperties, taggedPropertiesForPropertyStruct(ctx, ps, "path_host_common")...)
 	}
 
 	// Remove duplicates to avoid multiple dependencies.
@@ -68,6 +70,7 @@ func addPathDepsForProps(ctx BottomUpMutatorContext, props []interface{}) {
 	pathDeviceFirstPrefer32Properties = FirstUniqueStrings(pathDeviceFirstPrefer32Properties)
 	pathDeviceCommonProperties = FirstUniqueStrings(pathDeviceCommonProperties)
 	pathCommonOsProperties = FirstUniqueStrings(pathCommonOsProperties)
+	pathHostCommonProperties = FirstUniqueStrings(pathHostCommonProperties)
 
 	// Add dependencies to anything that is a module reference.
 	for _, s := range pathProperties {
@@ -106,6 +109,12 @@ func addPathDepsForProps(ctx BottomUpMutatorContext, props []interface{}) {
 	for _, s := range pathDeviceCommonProperties {
 		if m, t := SrcIsModuleWithTag(s); m != "" {
 			ctx.AddVariationDependencies(ctx.Config().AndroidCommonTarget.Variations(), sourceOrOutputDepTag(m, t), m)
+		}
+	}
+	// properties tagged "path_host_common" get the host common variant
+	for _, s := range pathHostCommonProperties {
+		if m, t := SrcIsModuleWithTag(s); m != "" {
+			ctx.AddVariationDependencies(ctx.Config().BuildOSCommonTarget.Variations(), sourceOrOutputDepTag(m, t), m)
 		}
 	}
 	// properties tagged "path_common_os" get the CommonOs variant

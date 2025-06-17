@@ -23,6 +23,7 @@ import (
 )
 
 func TestBootImageConfig(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS != "linux" {
 		t.Skipf("Skipping as boot image config test is only supported on linux not %s", runtime.GOOS)
 	}

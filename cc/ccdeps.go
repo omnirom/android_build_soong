@@ -41,8 +41,6 @@ type ccdepsGeneratorSingleton struct {
 	outputPath android.Path
 }
 
-var _ android.SingletonMakeVarsProvider = (*ccdepsGeneratorSingleton)(nil)
-
 const (
 	ccdepsJsonFileName = "module_bp_cc_deps.json"
 	cClang             = "clang"
@@ -114,13 +112,6 @@ func (c *ccdepsGeneratorSingleton) GenerateBuildActions(ctx android.SingletonCon
 		Rule:   android.Touch,
 		Output: ccfpath,
 	})
-}
-
-func (c *ccdepsGeneratorSingleton) MakeVars(ctx android.MakeVarsContext) {
-	if c.outputPath == nil {
-		return
-	}
-
 	ctx.DistForGoal("general-tests", c.outputPath)
 }
 

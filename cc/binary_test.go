@@ -29,7 +29,7 @@ func TestBinaryLinkerScripts(t *testing.T) {
 			linker_scripts: ["foo.ld", "bar.ld"],
 		}`)
 
-	binFoo := result.ModuleForTests("foo", "android_arm64_armv8-a").Rule("ld")
+	binFoo := result.ModuleForTests(t, "foo", "android_arm64_armv8-a").Rule("ld")
 
 	android.AssertStringListContains(t, "missing dependency on linker_scripts",
 		binFoo.Implicits.Strings(), "foo.ld")

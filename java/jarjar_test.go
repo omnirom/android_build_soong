@@ -22,7 +22,7 @@ import (
 )
 
 func AssertJarJarRename(t *testing.T, result *android.TestResult, libName, original, expectedRename string) {
-	module := result.ModuleForTests(libName, "android_common")
+	module := result.ModuleForTests(t, libName, "android_common")
 
 	provider, found := android.OtherModuleProvider(result.OtherModuleProviderAdaptor(), module.Module(), JarJarProvider)
 	android.AssertBoolEquals(t, fmt.Sprintf("found provider (%s)", libName), true, found)

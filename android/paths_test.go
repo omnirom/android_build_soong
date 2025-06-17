@@ -1269,7 +1269,7 @@ func testPathForModuleSrc(t *testing.T, tests []pathForModuleSrcTestCase) {
 				ExtendWithErrorHandler(errorHandler).
 				RunTest(t)
 
-			m := result.ModuleForTests("foo", "").Module().(*pathForModuleSrcTestModule)
+			m := result.ModuleForTests(t, "foo", "").Module().(*pathForModuleSrcTestModule)
 
 			AssertStringPathsRelativeToTopEquals(t, "srcs", result.Config, test.srcs, m.srcs)
 			AssertStringPathsRelativeToTopEquals(t, "rels", result.Config, test.rels, m.rels)
@@ -1533,13 +1533,13 @@ func TestPathsForModuleSrc_AllowMissingDependencies(t *testing.T) {
 		FixtureWithRootAndroidBp(bp),
 	).RunTest(t)
 
-	foo := result.ModuleForTests("foo", "").Module().(*pathForModuleSrcTestModule)
+	foo := result.ModuleForTests(t, "foo", "").Module().(*pathForModuleSrcTestModule)
 
 	AssertArrayString(t, "foo missing deps", []string{"a", "b", "c"}, foo.missingDeps)
 	AssertArrayString(t, "foo srcs", []string{}, foo.srcs)
 	AssertStringEquals(t, "foo src", "", foo.src)
 
-	bar := result.ModuleForTests("bar", "").Module().(*pathForModuleSrcTestModule)
+	bar := result.ModuleForTests(t, "bar", "").Module().(*pathForModuleSrcTestModule)
 
 	AssertArrayString(t, "bar missing deps", []string{"d", "e"}, bar.missingDeps)
 	AssertArrayString(t, "bar srcs", []string{}, bar.srcs)
@@ -1561,7 +1561,7 @@ func TestPathRelativeToTop(t *testing.T) {
 
 	t.Run("install for soong", func(t *testing.T) {
 		p := PathForModuleInstall(ctx, "install/path")
-		AssertPathRelativeToTopEquals(t, "install path for soong", "out/soong/target/product/test_device/system/install/path", p)
+		AssertPathRelativeToTopEquals(t, "install path for soong", "out/target/product/test_device/system/install/path", p)
 	})
 	t.Run("install for make", func(t *testing.T) {
 		p := PathForModuleInstall(ctx, "install/path")
@@ -1584,7 +1584,7 @@ func TestPathRelativeToTop(t *testing.T) {
 		}
 
 		expected := []string{
-			"out/soong/target/product/test_device/system/install/path",
+			"out/target/product/test_device/system/install/path",
 			"out/soong/output/path",
 			"source/path",
 		}

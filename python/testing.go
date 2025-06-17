@@ -20,5 +20,4 @@ var PrepareForTestWithPythonBuildComponents = android.GroupFixturePreparers(
 	android.FixtureRegisterWithContext(registerPythonBinaryComponents),
 	android.FixtureRegisterWithContext(registerPythonLibraryComponents),
 	android.FixtureRegisterWithContext(registerPythonTestComponents),
-	android.FixtureRegisterWithContext(registerPythonMutators),
 )

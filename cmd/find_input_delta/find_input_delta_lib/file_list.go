@@ -16,10 +16,11 @@ package find_input_delta_lib
 
 import (
 	"fmt"
+	"hash/fnv"
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
+	"strings"
 	"text/template"
 
 	fid_exp "android/soong/cmd/find_input_delta/find_input_delta_proto"
@@ -106,95 +107,75 @@ func (fl *FileList) changeFile(name string, ch *FileList) {
 	fl.ExtCountMap[ext].Changes += 1
 }
 
-func (fl FileList) ToProto() (*fid_exp.FileList, error) {
-	var count uint32
-	return fl.toProto(&count)
-}
-
-func (fl FileList) toProto(count *uint32) (*fid_exp.FileList, error) {
-	ret := &fid_exp.FileList{
-		Name: proto.String(fl.Name),
+// Write a SoongExecutionMetrics FileList proto to `dir`.
+//
+// Path
+// Prune any paths that
+// begin with `pruneDir` (usually ${OUT_DIR}).  The file is only written if any
+// non-pruned changes are present.
+func (fl *FileList) WriteMetrics(dir, pruneDir string) (err error) {
+	if dir == "" {
+		return fmt.Errorf("No directory given")
 	}
+	var needed bool
+
+	if !strings.HasSuffix(pruneDir, "/") {
+		pruneDir += "/"
+	}
+
+	// Hash the dir and `fl.Name` to simplify scanning the metrics
+	// aggregation directory.
+	h := fnv.New128()
+	h.Write([]byte(dir + " " + fl.Name + ".FileList"))
+	path := fmt.Sprintf("%x.pb", h.Sum([]byte{}))
+	path = filepath.Join(dir, path[0:2], path[2:])
+
+	var msg = &fid_exp.FileList{Name: proto.String(fl.Name)}
 	for _, a := range fl.Additions {
-		if *count >= MaxFilesRecorded {
-			break
+		if strings.HasPrefix(a, pruneDir) {
+			continue
 		}
-		ret.Additions = append(ret.Additions, a)
-		*count += 1
+		msg.Additions = append(msg.Additions, a)
+		needed = true
 	}
 	for _, ch := range fl.Changes {
-		if *count >= MaxFilesRecorded {
-			break
-		} else {
-			// Pre-increment to limit what the call adds.
-			*count += 1
-			change, err := ch.toProto(count)
-			if err != nil {
-				return nil, err
-			}
-			ret.Changes = append(ret.Changes, change)
+		if strings.HasPrefix(ch.Name, pruneDir) {
+			continue
 		}
+		msg.Changes = append(msg.Changes, ch.Name)
+		needed = true
 	}
 	for _, d := range fl.Deletions {
-		if *count >= MaxFilesRecorded {
-			break
+		if strings.HasPrefix(d, pruneDir) {
+			continue
 		}
-		ret.Deletions = append(ret.Deletions, d)
+		msg.Deletions = append(msg.Deletions, d)
+		needed = true
 	}
-	ret.TotalDelta = proto.Uint32(*count)
-	exts := []string{}
-	for k := range fl.ExtCountMap {
-		exts = append(exts, k)
+	if !needed {
+		return nil
 	}
-	slices.Sort(exts)
-	for _, k := range exts {
-		v := fl.ExtCountMap[k]
-		ret.Counts = append(ret.Counts, &fid_exp.FileCount{
-			Extension:     proto.String(k),
-			Additions:     proto.Uint32(v.Additions),
-			Deletions:     proto.Uint32(v.Deletions),
-			Modifications: proto.Uint32(v.Changes),
-		})
-	}
-	return ret, nil
-}
-
-func (fl FileList) SendMetrics(path string) error {
-	if path == "" {
-		return fmt.Errorf("No path given")
-	}
-	message, err := fl.ToProto()
-	if err != nil {
-		return err
-	}
-
-	// Marshal the message wrapped in SoongCombinedMetrics.
 	data := protowire.AppendVarint(
 		[]byte{},
 		protowire.EncodeTag(
 			protowire.Number(fid_exp.FieldNumbers_FIELD_NUMBERS_FILE_LIST),
 			protowire.BytesType))
-	size := uint64(proto.Size(message))
+	size := uint64(proto.Size(msg))
 	data = protowire.AppendVarint(data, size)
-	data, err = proto.MarshalOptions{UseCachedSize: true}.MarshalAppend(data, message)
+	data, err = proto.MarshalOptions{UseCachedSize: true}.MarshalAppend(data, msg)
 	if err != nil {
 		return err
 	}
 
-	out, err := os.Create(path)
+	err = os.MkdirAll(filepath.Dir(path), 0777)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if err := out.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to close %s: %v\n", path, err)
-		}
-	}()
-	_, err = out.Write(data)
-	return err
+
+	return os.WriteFile(path, data, 0644)
 }
 
-func (fl FileList) Format(wr io.Writer, format string) error {
+func (fl *FileList) Format(wr io.Writer, format string) error {
 	tmpl, err := template.New("filelist").Parse(format)
 	if err != nil {
 		return err

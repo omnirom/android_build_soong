@@ -114,10 +114,10 @@ func (p *prebuiltLibraryLinker) link(ctx ModuleContext,
 
 	// TODO(ccross): verify shared library dependencies
 	srcs := p.prebuiltSrcs(ctx)
-	stubInfo := addStubDependencyProviders(ctx)
+	stubInfo := AddStubDependencyProviders(ctx)
 
 	// Stub variants will create a stub .so file from stub .c files
-	if p.buildStubs() && objs.objFiles != nil {
+	if p.BuildStubs() && objs.objFiles != nil {
 		// TODO (b/275273834): Make objs.objFiles == nil a hard error when the symbol files have been added to module sdk.
 		return p.linkShared(ctx, flags, deps, objs)
 	}
@@ -204,7 +204,7 @@ func (p *prebuiltLibraryLinker) link(ctx ModuleContext,
 				Target:        ctx.Target(),
 
 				TableOfContents: p.tocFile,
-				IsStubs:         p.buildStubs(),
+				IsStubs:         p.BuildStubs(),
 			})
 
 			return outputFile
@@ -268,7 +268,7 @@ func (p *prebuiltLibraryLinker) disablePrebuilt() {
 }
 
 // Implements versionedInterface
-func (p *prebuiltLibraryLinker) implementationModuleName(name string) string {
+func (p *prebuiltLibraryLinker) ImplementationModuleName(name string) string {
 	return android.RemoveOptionalPrebuiltPrefix(name)
 }
 
@@ -298,7 +298,7 @@ func NewPrebuiltLibrary(hod android.HostOrDeviceSupported, srcsProperty string) 
 }
 
 func (p *prebuiltLibraryLinker) compile(ctx ModuleContext, flags Flags, deps PathDeps) Objects {
-	if p.buildStubs() && p.stubsVersion() != "" {
+	if p.BuildStubs() && p.StubsVersion() != "" {
 		return p.compileModuleLibApiStubs(ctx, flags, deps)
 	}
 	return Objects{}

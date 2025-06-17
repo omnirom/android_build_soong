@@ -30,6 +30,8 @@ type PrebuiltProperties struct {
 	Srcs []string `android:"path,arch_variant"`
 	// directories containing associated rlib dependencies
 	Link_dirs []string `android:"path,arch_variant"`
+
+	Force_use_prebuilt *bool `android:"arch_variant"`
 }
 
 type prebuiltLibraryDecorator struct {
@@ -158,7 +160,7 @@ func (prebuilt *prebuiltLibraryDecorator) compilerProps() []interface{} {
 
 func (prebuilt *prebuiltLibraryDecorator) compile(ctx ModuleContext, flags Flags, deps PathDeps) buildOutput {
 	prebuilt.flagExporter.exportLinkDirs(android.PathsForModuleSrc(ctx, prebuilt.Properties.Link_dirs).Strings()...)
-	prebuilt.flagExporter.setProvider(ctx)
+	prebuilt.flagExporter.setRustProvider(ctx)
 	srcPath := prebuiltPath(ctx, prebuilt)
 	prebuilt.baseCompiler.unstrippedOutputFile = srcPath
 	return buildOutput{outputFile: srcPath}
@@ -211,7 +213,7 @@ func (prebuilt *prebuiltProcMacroDecorator) compilerProps() []interface{} {
 
 func (prebuilt *prebuiltProcMacroDecorator) compile(ctx ModuleContext, flags Flags, deps PathDeps) buildOutput {
 	prebuilt.flagExporter.exportLinkDirs(android.PathsForModuleSrc(ctx, prebuilt.Properties.Link_dirs).Strings()...)
-	prebuilt.flagExporter.setProvider(ctx)
+	prebuilt.flagExporter.setRustProvider(ctx)
 	srcPath := prebuiltPath(ctx, prebuilt)
 	prebuilt.baseCompiler.unstrippedOutputFile = srcPath
 	return buildOutput{outputFile: srcPath}

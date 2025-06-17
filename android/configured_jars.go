@@ -264,7 +264,7 @@ func (l *ConfiguredJarList) DevicePaths(cfg Config, ostype OsType) []string {
 			subdir = filepath.Join("apex", apex, "javalib")
 		}
 
-		if ostype.Class == Host {
+		if ostype.Class == Host || cfg.IsEnvTrue("ART_USE_SIMULATOR") {
 			paths[i] = filepath.Join(cfg.Getenv("OUT_DIR"), "host", cfg.PrebuiltOS(), subdir, name)
 		} else {
 			paths[i] = filepath.Join("/", subdir, name)

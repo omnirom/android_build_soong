@@ -89,7 +89,6 @@ var singletons sortableComponents
 type mutator struct {
 	name              string
 	bottomUpMutator   blueprint.BottomUpMutator
-	topDownMutator    blueprint.TopDownMutator
 	transitionMutator blueprint.TransitionMutator
 
 	usesRename              bool
@@ -192,6 +191,11 @@ func (ctx *Context) registerSingletonMakeVarsProvider(makevars SingletonMakeVars
 func collateGloballyRegisteredSingletons() sortableComponents {
 	allSingletons := append(sortableComponents(nil), singletons...)
 	allSingletons = append(allSingletons,
+		// Soong only androidmk is registered later than other singletons in order to collect
+		// dist contributions from other singletons. This singleton is registered just before
+		// phony so that its phony rules can be collected by the phony singleton.
+		singleton{parallel: false, name: "soongonlyandroidmk", factory: soongOnlyAndroidMkSingletonFactory},
+
 		// Register phony just before makevars so it can write out its phony rules as Make rules
 		singleton{parallel: false, name: "phony", factory: phonySingletonFactory},
 

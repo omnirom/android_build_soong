@@ -67,6 +67,10 @@ type prebuiltKernelModulesProperties struct {
 
 	// Whether this module is directly installable to one of the partitions. Default is true
 	Installable *bool
+
+	// Whether debug symbols should be stripped from the *.ko files.
+	// Defaults to true.
+	Strip_debug_symbols *bool
 }
 
 // prebuilt_kernel_modules installs a set of prebuilt kernel module files to the correct directory.
@@ -100,7 +104,9 @@ func (pkm *prebuiltKernelModules) GenerateAndroidBuildActions(ctx android.Module
 	systemModules := android.PathsForModuleSrc(ctx, pkm.properties.System_deps)
 
 	depmodOut := pkm.runDepmod(ctx, modules, systemModules)
-	strippedModules := stripDebugSymbols(ctx, modules)
+	if proptools.BoolDefault(pkm.properties.Strip_debug_symbols, true) {
+		modules = stripDebugSymbols(ctx, modules)
+	}
 
 	installDir := android.PathForModuleInstall(ctx, "lib", "modules")
 	// Kernel module is installed to vendor_ramdisk/lib/modules regardless of product
@@ -114,7 +120,7 @@ func (pkm *prebuiltKernelModules) GenerateAndroidBuildActions(ctx android.Module
 		installDir = installDir.Join(ctx, pkm.KernelVersion())
 	}
 
-	for _, m := range strippedModules {
+	for _, m := range modules {
 		ctx.InstallFile(installDir, filepath.Base(m.String()), m)
 	}
 	ctx.InstallFile(installDir, "modules.load", depmodOut.modulesLoad)
@@ -165,9 +171,9 @@ var (
 		}, "stripCmd")
 )
 
-func stripDebugSymbols(ctx android.ModuleContext, modules android.Paths) android.OutputPaths {
+func stripDebugSymbols(ctx android.ModuleContext, modules android.Paths) android.Paths {
 	dir := android.PathForModuleOut(ctx, "stripped").OutputPath
-	var outputs android.OutputPaths
+	var outputs android.Paths
 
 	for _, m := range modules {
 		stripped := dir.Join(ctx, filepath.Base(m.String()))
@@ -241,6 +247,8 @@ func modulesDirForAndroidDlkm(ctx android.ModuleContext, modulesDir android.Outp
 		return modulesDir.Join(ctx, "vendor", "lib", "modules")
 	} else if ctx.InstallInOdmDlkm() {
 		return modulesDir.Join(ctx, "odm", "lib", "modules")
+	} else if ctx.InstallInVendorRamdisk() {
+		return modulesDir.Join(ctx, "lib", "modules")
 	} else {
 		// not an android dlkm module.
 		return modulesDir
@@ -303,9 +311,9 @@ func (pkm *prebuiltKernelModules) runDepmod(ctx android.ModuleContext, modules a
 	builder.Build("depmod", fmt.Sprintf("depmod %s", ctx.ModuleName()))
 
 	finalModulesDep := modulesDep
-	// Add a leading slash to paths in modules.dep of android dlkm
-	if ctx.InstallInSystemDlkm() || ctx.InstallInVendorDlkm() || ctx.InstallInOdmDlkm() {
-		finalModulesDep := modulesDep.ReplaceExtension(ctx, "intermediates")
+	// Add a leading slash to paths in modules.dep of android dlkm and vendor ramdisk
+	if ctx.InstallInSystemDlkm() || ctx.InstallInVendorDlkm() || ctx.InstallInOdmDlkm() || ctx.InstallInVendorRamdisk() {
+		finalModulesDep = modulesDep.ReplaceExtension(ctx, "intermediates")
 		ctx.Build(pctx, android.BuildParams{
 			Rule:   addLeadingSlashToPaths,
 			Input:  modulesDep,

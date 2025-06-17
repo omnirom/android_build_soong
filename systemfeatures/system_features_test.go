@@ -36,7 +36,7 @@ java_system_features_srcs {
 		android.PrepareForTestWithBuildFlag("RELEASE_NOT_SYSTEM_FEATURE_FOO", "BAR"),
 	).RunTestWithBp(t, bp)
 
-	module := res.ModuleForTests("system-features-srcs", "")
+	module := res.ModuleForTests(t, "system-features-srcs", "")
 	cmd := module.Rule("system-features-srcs").RuleParams.Command
 	android.AssertStringDoesContain(t, "Expected fully class name", cmd, " com.android.test.RoSystemFeatures ")
 	android.AssertStringDoesContain(t, "Expected readonly flag", cmd, "--readonly=true")

@@ -16,6 +16,7 @@ package fsgen
 
 import (
 	"android/soong/android"
+	"android/soong/filesystem"
 	"fmt"
 	"strconv"
 	"strings"
@@ -57,4 +58,22 @@ func getDpi(ctx android.LoadHookContext) string {
 	}
 
 	return recoveryDensity
+}
+
+// Returns the name of the appropriate prebuilt module for installing font.png file.
+// https://cs.android.com/android/platform/superproject/main/+/main:build/make/core/Makefile;l=2536;drc=a6af369e71ded123734523ea640b97b70a557cb9
+func getRecoveryFontModuleName(ctx android.LoadHookContext) string {
+	if android.InList(getDpi(ctx), []string{"xxxhdpi", "xxhdpi", "xhdpi"}) {
+		return "recovery-fonts-18"
+	}
+	return "recovery-fonts-12"
+}
+
+// Returns a new list of symlinks with prefix added to the dest directory for all symlinks
+func symlinksWithNamePrefix(symlinks []filesystem.SymlinkDefinition, prefix string) []filesystem.SymlinkDefinition {
+	ret := make([]filesystem.SymlinkDefinition, len(symlinks))
+	for i, symlink := range symlinks {
+		ret[i] = symlink.CopyWithNamePrefix(prefix)
+	}
+	return ret
 }

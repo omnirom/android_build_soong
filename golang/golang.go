@@ -97,17 +97,16 @@ func (g *GoBinary) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	outputFile := android.PathForArbitraryOutput(ctx, android.Rel(ctx, ctx.Config().OutDir(), g.IntermediateFile())).WithoutRel()
 	g.outputFile = outputFile
 
-	// Don't create install rules for modules used by bootstrap, the install command line will differ from
-	// what was used during bootstrap, which will cause ninja to rebuild the module on the next run,
-	// triggering reanalysis.
-	if !usedByBootstrap(ctx.ModuleName()) {
-		installPath := ctx.InstallFile(android.PathForModuleInstall(ctx, "bin"), ctx.ModuleName(), outputFile)
+	installPath := ctx.InstallFile(android.PathForModuleInstall(ctx, "bin"), ctx.ModuleName(), outputFile)
 
-		// Modules in an unexported namespace have no install rule, only add modules in the exported namespaces
-		// to the blueprint_tools phony rules.
-		if !ctx.Config().KatiEnabled() || g.ExportedToMake() {
-			ctx.Phony("blueprint_tools", installPath)
-		}
+	// Modules in an unexported namespace have no install rule, only add modules in the exported namespaces
+	// to the blueprint_tools phony rules.
+	if g.ExportedToMake() && !usedByBootstrap(ctx.ModuleName()) {
+		// Don't add the installed file of bootstrap tools to the deps of `blueprint_tools`.
+		// The install command line will differ from what was used during bootstrap,
+		// which will cause ninja to rebuild the module on the next run,
+		// triggering reanalysis.
+		ctx.Phony("blueprint_tools", installPath)
 	}
 
 	ctx.SetOutputFiles(android.Paths{outputFile}, "")

@@ -666,6 +666,81 @@ func TestSelects(t *testing.T) {
 			},
 		},
 		{
+			name: "Select on integer soong config variable",
+			bp: `
+			my_module_type {
+				name: "foo",
+				my_string: select(soong_config_variable("my_namespace", "my_variable"), {
+					34: "34",
+					default: "other",
+				}),
+			}
+			`,
+			vendorVars: map[string]map[string]string{
+				"my_namespace": {
+					"my_variable": "34",
+				},
+			},
+			vendorVarTypes: map[string]map[string]string{
+				"my_namespace": {
+					"my_variable": "int",
+				},
+			},
+			provider: selectsTestProvider{
+				my_string: proptools.StringPtr("34"),
+			},
+		},
+		{
+			name: "Select on integer soong config variable default",
+			bp: `
+			my_module_type {
+				name: "foo",
+				my_string: select(soong_config_variable("my_namespace", "my_variable"), {
+					34: "34",
+					default: "other",
+				}),
+			}
+			`,
+			vendorVars: map[string]map[string]string{
+				"my_namespace": {
+					"my_variable": "5",
+				},
+			},
+			vendorVarTypes: map[string]map[string]string{
+				"my_namespace": {
+					"my_variable": "int",
+				},
+			},
+			provider: selectsTestProvider{
+				my_string: proptools.StringPtr("other"),
+			},
+		},
+		{
+			name: "Assign to integer property",
+			bp: `
+			my_module_type {
+				name: "foo",
+				my_int64: select(soong_config_variable("my_namespace", "my_variable"), {
+					any @ val: val,
+					default: "other",
+				}),
+			}
+			`,
+			vendorVars: map[string]map[string]string{
+				"my_namespace": {
+					"my_variable": "5",
+				},
+			},
+			vendorVarTypes: map[string]map[string]string{
+				"my_namespace": {
+					"my_variable": "int",
+				},
+			},
+			provider: selectsTestProvider{
+				my_int64: proptools.Int64Ptr(5),
+			},
+		},
+		{
 			name: "Mismatched condition types",
 			bp: `
 			my_module_type {
@@ -1118,7 +1193,7 @@ my_module_type {
 
 				for moduleName := range tc.providers {
 					expected := tc.providers[moduleName]
-					m := result.ModuleForTests(moduleName, "android_arm64_armv8-a")
+					m := result.ModuleForTests(t, moduleName, "android_arm64_armv8-a")
 					p, _ := OtherModuleProvider(result.testContext.OtherModuleProviderAdaptor(), m.Module(), selectsTestProviderKey)
 					if !reflect.DeepEqual(p, expected) {
 						t.Errorf("Expected:\n  %q\ngot:\n  %q", expected.String(), p.String())
@@ -1132,6 +1207,7 @@ my_module_type {
 type selectsTestProvider struct {
 	my_bool                        *bool
 	my_string                      *string
+	my_int64                       *int64
 	my_string_list                 *[]string
 	my_paths                       *[]string
 	replacing_string_list          *[]string
@@ -1181,6 +1257,7 @@ var selectsTestProviderKey = blueprint.NewProvider[selectsTestProvider]()
 
 type selectsMockModuleProperties struct {
 	My_bool                        proptools.Configurable[bool]
+	My_int64                       proptools.Configurable[int64]
 	My_string                      proptools.Configurable[string]
 	My_string_list                 proptools.Configurable[[]string]
 	My_paths                       proptools.Configurable[[]string] `android:"path"`
@@ -1213,6 +1290,7 @@ func (p *selectsMockModule) GenerateAndroidBuildActions(ctx ModuleContext) {
 	SetProvider(ctx, selectsTestProviderKey, selectsTestProvider{
 		my_bool:                        optionalToPtr(p.properties.My_bool.Get(ctx)),
 		my_string:                      optionalToPtr(p.properties.My_string.Get(ctx)),
+		my_int64:                       optionalToPtr(p.properties.My_int64.Get(ctx)),
 		my_string_list:                 optionalToPtr(p.properties.My_string_list.Get(ctx)),
 		my_paths:                       optionalToPtr(p.properties.My_paths.Get(ctx)),
 		replacing_string_list:          optionalToPtr(p.properties.Replacing_string_list.Get(ctx)),

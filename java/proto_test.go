@@ -28,6 +28,7 @@ java_library_static {
 `
 
 func TestProtoStream(t *testing.T) {
+	t.Parallel()
 	bp := `
 		java_library {
 			name: "java-stream-protos",
@@ -45,7 +46,7 @@ func TestProtoStream(t *testing.T) {
 		PrepareForIntegrationTestWithJava,
 	).RunTestWithBp(t, protoModules+bp)
 
-	proto0 := ctx.ModuleForTests("java-stream-protos", "android_common").Output("proto/proto0.srcjar")
+	proto0 := ctx.ModuleForTests(t, "java-stream-protos", "android_common").Output("proto/proto0.srcjar")
 
 	if cmd := proto0.RuleParams.Command; !strings.Contains(cmd, "--javastream_out=") {
 		t.Errorf("expected '--javastream_out' in %q", cmd)

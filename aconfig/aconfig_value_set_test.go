@@ -37,7 +37,7 @@ func TestAconfigValueSet(t *testing.T) {
 			`
 	result := runTest(t, android.FixtureExpectsNoErrors, bp)
 
-	module := result.ModuleForTests("module_name", "").Module().(*ValueSetModule)
+	module := result.ModuleForTests(t, "module_name", "").Module().(*ValueSetModule)
 
 	// Check that the provider has the right contents
 	depData, _ := android.OtherModuleProvider(result, module, valueSetProviderKey)
@@ -88,7 +88,7 @@ func TestAconfigValueSetBpGlob(t *testing.T) {
 
 	checkModuleHasDependency := func(name, variant, dep string) bool {
 		t.Helper()
-		module := result.ModuleForTests(name, variant).Module()
+		module := result.ModuleForTests(t, name, variant).Module()
 		depFound := false
 		result.VisitDirectDeps(module, func(m blueprint.Module) {
 			if m.Name() == dep {

@@ -29,6 +29,7 @@ var checkContainerMatch = func(t *testing.T, name string, container string, expe
 
 func TestApexDepsContainers(t *testing.T) {
 	t.Parallel()
+	t.Skip("TODO(b/394955484): this probably has to be moved to a check by the apex")
 	result := android.GroupFixturePreparers(
 		prepareForApexTest,
 		java.PrepareForTestWithJavaSdkLibraryFiles,
@@ -156,7 +157,7 @@ func TestApexDepsContainers(t *testing.T) {
 	}
 
 	for _, c := range testcases {
-		m := result.ModuleForTests(c.moduleName, c.variant)
+		m := result.ModuleForTests(t, c.moduleName, c.variant)
 		containers, _ := android.OtherModuleProvider(result.TestContext.OtherModuleProviderAdaptor(), m.Module(), android.ContainersInfoProvider)
 		belongingContainers := containers.BelongingContainers()
 		checkContainerMatch(t, c.moduleName, "system", c.isSystemContainer, android.InList(android.SystemContainer, belongingContainers))
@@ -166,6 +167,7 @@ func TestApexDepsContainers(t *testing.T) {
 
 func TestNonUpdatableApexDepsContainers(t *testing.T) {
 	t.Parallel()
+	t.Skip("TODO(b/394955484): this probably has to be moved to a check by the apex")
 	result := android.GroupFixturePreparers(
 		prepareForApexTest,
 		java.PrepareForTestWithJavaSdkLibraryFiles,
@@ -271,7 +273,7 @@ func TestNonUpdatableApexDepsContainers(t *testing.T) {
 	}
 
 	for _, c := range testcases {
-		m := result.ModuleForTests(c.moduleName, c.variant)
+		m := result.ModuleForTests(t, c.moduleName, c.variant)
 		containers, _ := android.OtherModuleProvider(result.TestContext.OtherModuleProviderAdaptor(), m.Module(), android.ContainersInfoProvider)
 		belongingContainers := containers.BelongingContainers()
 		checkContainerMatch(t, c.moduleName, "system", c.isSystemContainer, android.InList(android.SystemContainer, belongingContainers))
@@ -281,6 +283,7 @@ func TestNonUpdatableApexDepsContainers(t *testing.T) {
 
 func TestUpdatableAndNonUpdatableApexesIdenticalMinSdkVersion(t *testing.T) {
 	t.Parallel()
+	t.Skip("TODO(b/394955484): this probably has to be moved to a check by the apex")
 	result := android.GroupFixturePreparers(
 		prepareForApexTest,
 		java.PrepareForTestWithJavaSdkLibraryFiles,
@@ -334,7 +337,7 @@ func TestUpdatableAndNonUpdatableApexesIdenticalMinSdkVersion(t *testing.T) {
 		}
 	`)
 
-	fooApexVariant := result.ModuleForTests("foo", "android_common_apex30")
+	fooApexVariant := result.ModuleForTests(t, "foo", "android_common_apex30")
 	containers, _ := android.OtherModuleProvider(result.TestContext.OtherModuleProviderAdaptor(), fooApexVariant.Module(), android.ContainersInfoProvider)
 	belongingContainers := containers.BelongingContainers()
 	checkContainerMatch(t, "foo", "system", true, android.InList(android.SystemContainer, belongingContainers))

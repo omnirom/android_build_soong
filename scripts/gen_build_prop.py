@@ -134,7 +134,7 @@ def parse_args():
 
 def generate_common_build_props(args):
   print("####################################")
-  print("# from generate_common_build_props")
+  print("# from generate-common-build-props")
   print("# These properties identify this partition image.")
   print("####################################")
 
@@ -191,7 +191,7 @@ def generate_common_build_props(args):
   print(f"ro.{partition}.build.version.release={config['Platform_version_last_stable']}")
   print(f"ro.{partition}.build.version.release_or_codename={config['Platform_version_name']}")
   print(f"ro.{partition}.build.version.sdk={config['Platform_sdk_version']}")
-  print(f"ro.{partition}.build.version.sdk_minor={build_flags['RELEASE_PLATFORM_SDK_MINOR_VERSION']}")
+  print(f"ro.{partition}.build.version.sdk_full={config['Platform_sdk_version_full']}")
 
 def generate_build_info(args):
   print()
@@ -227,7 +227,7 @@ def generate_build_info(args):
     print(f"ro.build.display.id?={config['BuildDesc']}")
   print(f"ro.build.version.incremental={config['BuildNumber']}")
   print(f"ro.build.version.sdk={config['Platform_sdk_version']}")
-  print(f"ro.build.version.sdk_minor={build_flags['RELEASE_PLATFORM_SDK_MINOR_VERSION']}")
+  print(f"ro.build.version.sdk_full={config['Platform_sdk_version_full']}")
   print(f"ro.build.version.preview_sdk={config['Platform_preview_sdk_version']}")
   print(f"ro.build.version.preview_sdk_fingerprint={config['PlatformPreviewSdkFingerprint']}")
   print(f"ro.build.version.codename={config['Platform_sdk_codename']}")
@@ -277,9 +277,15 @@ def generate_build_info(args):
   print(f"# end build properties")
 
 def write_properties_from_file(file):
+  # Make and Soong use different intermediate files to build vendor/build.prop.
+  # Although the sysprop contents are same, the absolute paths of these
+  # intermediate files are different.
+  # Print the filename for the intermediate files (files in OUT_DIR).
+  # This helps with validating mk->soong migration of android partitions.
+  filename = os.path.basename(file.name) if file.name.startswith(os.environ.get("OUT_DIR")) else file.name
   print()
   print("####################################")
-  print(f"# from {file.name}")
+  print(f"# from {filename}")
   print("####################################")
   print(file.read(), end="")
 
@@ -336,7 +342,15 @@ def append_additional_system_props(args):
     props.append(f"ro.sanitize.{sanitize_target}=true")
 
   # Sets the default value of ro.postinstall.fstab.prefix to /system.
-  # Device board config should override the value to /product when needed by:
+  #
+  # Device board configs can override this to /product to use a
+  # product-specific fstab.postinstall file (installed to
+  # /product/etc/fstab.postinstall). If not overridden, the
+  # system/extras/cppreopts/fstab.postinstall file (installed to
+  # /system/etc/fstab.postinstall) will be used.
+  # Note: The default fstab.postinstall is generic and may be slower
+  # because it tries different mount options line by line to ensure
+  # compatibility across various devices.
   #
   #     PRODUCT_PRODUCT_PROPERTIES += ro.postinstall.fstab.prefix=/product
   #
@@ -389,9 +403,6 @@ def append_additional_system_props(args):
       props = list(filter(lambda x: not x.startswith("ro.setupwizard.mode="), props))
       props.append("ro.setupwizard.mode=OPTIONAL")
 
-    if not config["SdkBuild"]:
-      # To speedup startup of non-preopted builds, don't verify or compile the boot image.
-      props.append("dalvik.vm.image-dex2oat-filter=extract")
     # b/323566535
     props.append("init.svc_debug.no_fatal.zygote=true")
 
@@ -484,7 +495,7 @@ def append_additional_vendor_props(args):
   props.append(f"ro.vendor.build.security_patch={config['VendorSecurityPatch']}")
   props.append(f"ro.product.board={config['BootloaderBoardName']}")
   props.append(f"ro.board.platform={config['BoardPlatform']}")
-  props.append(f"ro.hwui.use_vulkan={'true' if config['UsesVulkan'] else 'false'}")
+  props.append(f"ro.hwui.use_vulkan={config['UsesVulkan']}")
 
   if config["ScreenDensity"]:
     props.append(f"ro.sf.lcd_density={config['ScreenDensity']}")

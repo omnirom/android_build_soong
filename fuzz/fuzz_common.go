@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/google/blueprint"
 	"github.com/google/blueprint/proptools"
 
 	"android/soong/android"
@@ -309,14 +310,14 @@ func (automatically_route_to AutomaticallyRouteTo) isValidAutomaticallyRouteTo()
 	return false
 }
 
-func IsValidConfig(fuzzModule FuzzPackagedModule, moduleName string) bool {
-	var config = fuzzModule.FuzzProperties.Fuzz_config
+func IsValidConfig(fuzzModule *FuzzPackagedModuleInfo, moduleName string) bool {
+	var config = fuzzModule.FuzzConfig
 	if config != nil {
 		if !config.Vector.isValidVector() {
 			panic(fmt.Errorf("Invalid vector in fuzz config in %s", moduleName))
 		}
 
-		if !config.Service_privilege.isValidServicePrivilege() {
+		if !config.ServicePrivilege.isValidServicePrivilege() {
 			panic(fmt.Errorf("Invalid service_privilege in fuzz config in %s", moduleName))
 		}
 
@@ -324,15 +325,15 @@ func IsValidConfig(fuzzModule FuzzPackagedModule, moduleName string) bool {
 			panic(fmt.Errorf("Invalid users (user_data) in fuzz config in %s", moduleName))
 		}
 
-		if !config.Fuzzed_code_usage.isValidFuzzedCodeUsage() {
+		if !config.FuzzedCodeUsage.isValidFuzzedCodeUsage() {
 			panic(fmt.Errorf("Invalid fuzzed_code_usage in fuzz config in %s", moduleName))
 		}
 
-		if !config.Automatically_route_to.isValidAutomaticallyRouteTo() {
+		if !config.AutomaticallyRouteTo.isValidAutomaticallyRouteTo() {
 			panic(fmt.Errorf("Invalid automatically_route_to in fuzz config in %s", moduleName))
 		}
 
-		if !config.Use_platform_libs.isValidUsePlatformLibs() {
+		if !config.UsePlatformLibs.isValidUsePlatformLibs() {
 			panic(fmt.Errorf("Invalid use_platform_libs in fuzz config in %s", moduleName))
 		}
 	}
@@ -419,6 +420,20 @@ type FuzzProperties struct {
 	// Optional list of data files to be installed to the fuzz target's output
 	// directory. Directory structure relative to the module is preserved.
 	Data []string `android:"path"`
+	// Same as data, but adds dependencies on modules using the device's os variant, and common
+	// architecture's variant. Can be useful to add device-built apps to the data of a host
+	// test.
+	Device_common_data []string `android:"path_device_common"`
+	// Same as data, but adds dependencies on modules using the device's os variant, and the
+	// device's first architecture's variant. Can be useful to add device-built apps to the data
+	// of a host test.
+	Device_first_data []string `android:"path_device_first"`
+
+	// Same as data, but will add dependencies on modules using the host's os variation and
+	// the common arch variation. Useful for a device test that wants to depend on a host
+	// module, for example to include a custom Tradefed test runner.
+	Host_common_data []string `android:"path_host_common"`
+
 	// Optional dictionary to be installed to the fuzz target's output directory.
 	Dictionary *string `android:"path"`
 	// Define the fuzzing frameworks this fuzz target can be built for. If
@@ -435,6 +450,62 @@ type FuzzPackagedModule struct {
 	Corpus         android.Paths
 	Config         android.Path
 	Data           android.Paths
+}
+
+type FuzzConfigInfo struct {
+	Vector Vector
+	// How privileged the service being fuzzed is.
+	ServicePrivilege ServicePrivilege
+	// Whether the service being fuzzed handles data from multiple users or only
+	// a single one.
+	Users UserData
+	// Specifies the use state of the code being fuzzed. This state factors into
+	// how an issue is handled.
+	FuzzedCodeUsage FuzzedCodeUsage
+	// Which team to route this to, if it should be routed automatically.
+	AutomaticallyRouteTo AutomaticallyRouteTo
+	// Specifies libs used to initialize ART (java only, 'use_none' for no initialization)
+	UsePlatformLibs UsePlatformLibs
+	// Specify whether to enable continuous fuzzing on devices. Defaults to true.
+	FuzzOnHaikuDevice bool
+	// Specify whether to enable continuous fuzzing on host. Defaults to true.
+	FuzzOnHaikuHost bool
+	// Specifies whether fuzz target should check presubmitted code changes for crashes.
+	// Defaults to false.
+	UseForPresubmit bool
+}
+type FuzzPackagedModuleInfo struct {
+	FuzzConfig *FuzzConfigInfo
+	Dictionary android.Path
+	Corpus     android.Paths
+	Config     android.Path
+	Data       android.Paths
+}
+
+var FuzzPackagedModuleInfoProvider = blueprint.NewProvider[FuzzPackagedModuleInfo]()
+
+func SetFuzzPackagedModuleInfo(ctx android.ModuleContext, fm *FuzzPackagedModule) {
+	info := FuzzPackagedModuleInfo{
+		Dictionary: fm.Dictionary,
+		Config:     fm.Config,
+		Corpus:     fm.Corpus,
+		Data:       fm.Data,
+	}
+	if fm.FuzzProperties.Fuzz_config != nil {
+		info.FuzzConfig = &FuzzConfigInfo{
+			Vector:               fm.FuzzProperties.Fuzz_config.Vector,
+			ServicePrivilege:     fm.FuzzProperties.Fuzz_config.Service_privilege,
+			Users:                fm.FuzzProperties.Fuzz_config.Users,
+			FuzzedCodeUsage:      fm.FuzzProperties.Fuzz_config.Fuzzed_code_usage,
+			AutomaticallyRouteTo: fm.FuzzProperties.Fuzz_config.Automatically_route_to,
+			FuzzOnHaikuDevice:    BoolDefault(fm.FuzzProperties.Fuzz_config.Fuzz_on_haiku_device, true),
+			FuzzOnHaikuHost:      BoolDefault(fm.FuzzProperties.Fuzz_config.Fuzz_on_haiku_host, true),
+			UsePlatformLibs:      fm.FuzzProperties.Fuzz_config.Use_platform_libs,
+			UseForPresubmit:      BoolDefault(fm.FuzzProperties.Fuzz_config.Use_for_presubmit, false),
+		}
+	}
+
+	android.SetProvider(ctx, FuzzPackagedModuleInfoProvider, info)
 }
 
 func GetFramework(ctx android.LoadHookContext, lang Lang) Framework {
@@ -495,7 +566,9 @@ func IsValid(ctx android.ConfigurableEvaluatorContext, fuzzModule FuzzModule) bo
 	return true
 }
 
-func (s *FuzzPackager) PackageArtifacts(ctx android.SingletonContext, module android.Module, fuzzModule FuzzPackagedModule, archDir android.OutputPath, builder *android.RuleBuilder) []FileToZip {
+// TODO(b/397766191): Change the signature to take ModuleProxy
+// Please only access the module's internal data through providers.
+func (s *FuzzPackager) PackageArtifacts(ctx android.SingletonContext, module android.Module, fuzzModule *FuzzPackagedModuleInfo, archDir android.OutputPath, builder *android.RuleBuilder) []FileToZip {
 	// Package the corpora into a zipfile.
 	var files []FileToZip
 	if fuzzModule.Corpus != nil {
@@ -534,7 +607,9 @@ func (s *FuzzPackager) PackageArtifacts(ctx android.SingletonContext, module and
 	return files
 }
 
-func (s *FuzzPackager) BuildZipFile(ctx android.SingletonContext, module android.Module, fuzzModule FuzzPackagedModule, files []FileToZip, builder *android.RuleBuilder, archDir android.OutputPath, archString string, hostOrTargetString string, archOs ArchOs, archDirs map[ArchOs][]FileToZip) ([]FileToZip, bool) {
+// TODO(b/397766191): Change the signature to take ModuleProxy
+// Please only access the module's internal data through providers.
+func (s *FuzzPackager) BuildZipFile(ctx android.SingletonContext, module android.Module, fuzzModule *FuzzPackagedModuleInfo, files []FileToZip, builder *android.RuleBuilder, archDir android.OutputPath, archString string, hostOrTargetString string, archOs ArchOs, archDirs map[ArchOs][]FileToZip) ([]FileToZip, bool) {
 	fuzzZip := archDir.Join(ctx, module.Name()+".zip")
 
 	command := builder.Command().BuiltTool("soong_zip").
@@ -556,10 +631,10 @@ func (s *FuzzPackager) BuildZipFile(ctx android.SingletonContext, module android
 	builder.Build("create-"+fuzzZip.String(),
 		"Package "+module.Name()+" for "+archString+"-"+hostOrTargetString)
 
-	if config := fuzzModule.FuzzProperties.Fuzz_config; config != nil {
-		if strings.Contains(hostOrTargetString, "host") && !BoolDefault(config.Fuzz_on_haiku_host, true) {
+	if config := fuzzModule.FuzzConfig; config != nil {
+		if strings.Contains(hostOrTargetString, "host") && !config.FuzzOnHaikuHost {
 			return archDirs[archOs], false
-		} else if !strings.Contains(hostOrTargetString, "host") && !BoolDefault(config.Fuzz_on_haiku_device, true) {
+		} else if !strings.Contains(hostOrTargetString, "host") && !config.FuzzOnHaikuDevice {
 			return archDirs[archOs], false
 		}
 	}

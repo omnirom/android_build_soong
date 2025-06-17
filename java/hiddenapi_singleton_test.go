@@ -44,6 +44,7 @@ var hiddenApiFixtureFactory = android.GroupFixturePreparers(
 )
 
 func TestHiddenAPISingleton(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		hiddenApiFixtureFactory,
 		FixtureConfigureBootJars("platform:foo"),
@@ -56,13 +57,14 @@ func TestHiddenAPISingleton(t *testing.T) {
 		}
 	`)
 
-	hiddenAPI := result.ModuleForTests("platform-bootclasspath", "android_common")
+	hiddenAPI := result.ModuleForTests(t, "platform-bootclasspath", "android_common")
 	hiddenapiRule := hiddenAPI.Rule("platform-bootclasspath-monolithic-hiddenapi-stub-flags")
 	want := "--boot-dex=out/soong/.intermediates/foo/android_common/aligned/foo.jar"
 	android.AssertStringDoesContain(t, "hiddenapi command", hiddenapiRule.RuleParams.Command, want)
 }
 
 func TestHiddenAPISingletonWithSourceAndPrebuiltPreferredButNoDex(t *testing.T) {
+	t.Parallel()
 	expectedErrorMessage := "module prebuilt_foo{os:android,arch:common} does not provide a dex jar"
 
 	android.GroupFixturePreparers(
@@ -86,6 +88,7 @@ func TestHiddenAPISingletonWithSourceAndPrebuiltPreferredButNoDex(t *testing.T) 
 }
 
 func TestHiddenAPISingletonWithPrebuilt(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		hiddenApiFixtureFactory,
 		FixtureConfigureBootJars("platform:foo"),
@@ -98,13 +101,14 @@ func TestHiddenAPISingletonWithPrebuilt(t *testing.T) {
 	}
 	`)
 
-	hiddenAPI := result.ModuleForTests("platform-bootclasspath", "android_common")
+	hiddenAPI := result.ModuleForTests(t, "platform-bootclasspath", "android_common")
 	hiddenapiRule := hiddenAPI.Rule("platform-bootclasspath-monolithic-hiddenapi-stub-flags")
 	want := "--boot-dex=out/soong/.intermediates/foo/android_common/aligned/foo.jar"
 	android.AssertStringDoesContain(t, "hiddenapi command", hiddenapiRule.RuleParams.Command, want)
 }
 
 func TestHiddenAPISingletonWithPrebuiltUseSource(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		hiddenApiFixtureFactory,
 		FixtureConfigureBootJars("platform:foo"),
@@ -124,7 +128,7 @@ func TestHiddenAPISingletonWithPrebuiltUseSource(t *testing.T) {
 		}
 	`)
 
-	hiddenAPI := result.ModuleForTests("platform-bootclasspath", "android_common")
+	hiddenAPI := result.ModuleForTests(t, "platform-bootclasspath", "android_common")
 	hiddenapiRule := hiddenAPI.Rule("platform-bootclasspath-monolithic-hiddenapi-stub-flags")
 	fromSourceJarArg := "--boot-dex=out/soong/.intermediates/foo/android_common/aligned/foo.jar"
 	android.AssertStringDoesContain(t, "hiddenapi command", hiddenapiRule.RuleParams.Command, fromSourceJarArg)
@@ -134,6 +138,7 @@ func TestHiddenAPISingletonWithPrebuiltUseSource(t *testing.T) {
 }
 
 func TestHiddenAPISingletonWithPrebuiltOverrideSource(t *testing.T) {
+	t.Parallel()
 	result := android.GroupFixturePreparers(
 		hiddenApiFixtureFactory,
 		FixtureConfigureBootJars("platform:foo"),
@@ -153,7 +158,7 @@ func TestHiddenAPISingletonWithPrebuiltOverrideSource(t *testing.T) {
 		}
 	`)
 
-	hiddenAPI := result.ModuleForTests("platform-bootclasspath", "android_common")
+	hiddenAPI := result.ModuleForTests(t, "platform-bootclasspath", "android_common")
 	hiddenapiRule := hiddenAPI.Rule("platform-bootclasspath-monolithic-hiddenapi-stub-flags")
 	prebuiltJarArg := "--boot-dex=out/soong/.intermediates/prebuilt_foo/android_common/dex/foo.jar"
 	android.AssertStringDoesContain(t, "hiddenapi command", hiddenapiRule.RuleParams.Command, prebuiltJarArg)
@@ -163,6 +168,7 @@ func TestHiddenAPISingletonWithPrebuiltOverrideSource(t *testing.T) {
 }
 
 func TestHiddenAPISingletonSdks(t *testing.T) {
+	t.Parallel()
 	testCases := []struct {
 		name             string
 		unbundledBuild   bool
@@ -213,7 +219,7 @@ func TestHiddenAPISingletonSdks(t *testing.T) {
 		}
 		`)
 
-			hiddenAPI := result.ModuleForTests("platform-bootclasspath", "android_common")
+			hiddenAPI := result.ModuleForTests(t, "platform-bootclasspath", "android_common")
 			hiddenapiRule := hiddenAPI.Rule("platform-bootclasspath-monolithic-hiddenapi-stub-flags")
 			wantPublicStubs := "--public-stub-classpath=" + generateSdkDexPath(tc.publicStub, tc.unbundledBuild)
 			android.AssertStringDoesContain(t, "hiddenapi command", hiddenapiRule.RuleParams.Command, wantPublicStubs)
@@ -246,6 +252,7 @@ func generateSdkDexPath(module string, unbundled bool) string {
 }
 
 func TestHiddenAPISingletonWithPrebuiltCsvFile(t *testing.T) {
+	t.Parallel()
 
 	// The idea behind this test is to ensure that when the build is
 	// confugured with a PrebuiltHiddenApiDir that the rules for the
@@ -272,9 +279,9 @@ func TestHiddenAPISingletonWithPrebuiltCsvFile(t *testing.T) {
 	expectedCpOutput := "out/soong/hiddenapi/hiddenapi-flags.csv"
 	expectedFlagsCsv := "out/soong/hiddenapi/hiddenapi-flags.csv"
 
-	foo := result.ModuleForTests("foo", "android_common")
+	foo := result.ModuleForTests(t, "foo", "android_common")
 
-	hiddenAPI := result.SingletonForTests("hiddenapi")
+	hiddenAPI := result.SingletonForTests(t, "hiddenapi")
 	cpRule := hiddenAPI.Rule("Cp")
 	actualCpInput := cpRule.BuildParams.Input
 	actualCpOutput := cpRule.BuildParams.Output
@@ -289,6 +296,7 @@ func TestHiddenAPISingletonWithPrebuiltCsvFile(t *testing.T) {
 }
 
 func TestHiddenAPIEncoding_JavaSdkLibrary(t *testing.T) {
+	t.Parallel()
 
 	result := android.GroupFixturePreparers(
 		hiddenApiFixtureFactory,
@@ -310,7 +318,7 @@ func TestHiddenAPIEncoding_JavaSdkLibrary(t *testing.T) {
 	`)
 
 	checkDexEncoded := func(t *testing.T, name, unencodedDexJar, encodedDexJar string) {
-		moduleForTests := result.ModuleForTests(name+".impl", "android_common")
+		moduleForTests := result.ModuleForTests(t, name+".impl", "android_common")
 
 		encodeDexRule := moduleForTests.Rule("hiddenAPIEncodeDex")
 		actualUnencodedDexJar := encodeDexRule.Input
@@ -324,10 +332,7 @@ func TestHiddenAPIEncoding_JavaSdkLibrary(t *testing.T) {
 		android.AssertPathRelativeToTopEquals(t, "encode embedded java_library", encodedDexJar, exportedDexJar)
 	}
 
-	// The java_library embedded with the java_sdk_library must be dex encoded.
-	t.Run("foo", func(t *testing.T) {
-		expectedUnencodedDexJar := "out/soong/.intermediates/foo.impl/android_common/aligned/foo.jar"
-		expectedEncodedDexJar := "out/soong/.intermediates/foo.impl/android_common/hiddenapi/foo.jar"
-		checkDexEncoded(t, "foo", expectedUnencodedDexJar, expectedEncodedDexJar)
-	})
+	expectedUnencodedDexJar := "out/soong/.intermediates/foo.impl/android_common/aligned/foo.jar"
+	expectedEncodedDexJar := "out/soong/.intermediates/foo.impl/android_common/hiddenapi/foo.jar"
+	checkDexEncoded(t, "foo", expectedUnencodedDexJar, expectedEncodedDexJar)
 }

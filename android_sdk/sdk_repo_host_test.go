@@ -44,7 +44,7 @@ func TestSdkRepoHostDeps(t *testing.T) {
 	`)
 
 	// produces "sdk-repo-{OS}-platform-tools.zip"
-	result.ModuleForTests("platform-tools", "linux_glibc_common").Output("sdk-repo-linux-platform-tools.zip")
+	result.ModuleForTests(t, "platform-tools", "linux_glibc_common").Output("sdk-repo-linux-platform-tools.zip")
 }
 
 func TestRemapPackageSpecs(t *testing.T) {

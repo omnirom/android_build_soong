@@ -55,6 +55,7 @@ var (
 	defaultClippyLints = []string{
 		// Let people hack in peace. ;)
 		"-A clippy::disallowed_names",
+		"-A clippy::empty_line_after_doc_comments",
 		"-A clippy::type-complexity",
 		"-A clippy::unnecessary_fallible_conversions",
 		"-A clippy::unnecessary-wraps",

@@ -27,6 +27,7 @@ import (
 )
 
 func TestDroidstubs(t *testing.T) {
+	t.Parallel()
 	ctx, _ := testJavaWithFS(t, `
 		droiddoc_exported_dir {
 			name: "droiddoc-templates-sdk",
@@ -82,13 +83,13 @@ func TestDroidstubs(t *testing.T) {
 		},
 	}
 	for _, c := range testcases {
-		m := ctx.ModuleForTests(c.moduleName, "android_common")
+		m := ctx.ModuleForTests(t, c.moduleName, "android_common")
 		manifest := m.Output("metalava.sbox.textproto")
 		sboxProto := android.RuleBuilderSboxProtoForTests(t, ctx, manifest)
 		cmdline := String(sboxProto.Commands[0].Command)
 		android.AssertStringContainsEquals(t, "api-versions generation flag", cmdline, "--generate-api-levels", c.generate_xml)
 		if c.expectedJarFilename != "" {
-			expected := "--android-jar-pattern ./%/public/" + c.expectedJarFilename
+			expected := "--android-jar-pattern ./{version:major.minor?}/public/" + c.expectedJarFilename
 			if !strings.Contains(cmdline, expected) {
 				t.Errorf("For %q, expected metalava argument %q, but was not found %q", c.moduleName, expected, cmdline)
 			}
@@ -131,7 +132,7 @@ func getAndroidJarPatternsForDroidstubs(t *testing.T, sdkType string) []string {
 			"foo-doc/a.java": nil,
 		})
 
-	m := ctx.ModuleForTests("foo-stubs", "android_common")
+	m := ctx.ModuleForTests(t, "foo-stubs", "android_common")
 	manifest := m.Output("metalava.sbox.textproto")
 	cmd := String(android.RuleBuilderSboxProtoForTests(t, ctx, manifest).Commands[0].Command)
 	r := regexp.MustCompile(`--android-jar-pattern [^ ]+/android.jar`)
@@ -139,35 +140,38 @@ func getAndroidJarPatternsForDroidstubs(t *testing.T, sdkType string) []string {
 }
 
 func TestPublicDroidstubs(t *testing.T) {
+	t.Parallel()
 	patterns := getAndroidJarPatternsForDroidstubs(t, "public")
 
 	android.AssertArrayString(t, "order of patterns", []string{
-		"--android-jar-pattern somedir/%/public/android.jar",
-		"--android-jar-pattern someotherdir/%/public/android.jar",
+		"--android-jar-pattern somedir/{version:major.minor?}/public/android.jar",
+		"--android-jar-pattern someotherdir/{version:major.minor?}/public/android.jar",
 	}, patterns)
 }
 
 func TestSystemDroidstubs(t *testing.T) {
+	t.Parallel()
 	patterns := getAndroidJarPatternsForDroidstubs(t, "system")
 
 	android.AssertArrayString(t, "order of patterns", []string{
-		"--android-jar-pattern somedir/%/system/android.jar",
-		"--android-jar-pattern someotherdir/%/system/android.jar",
-		"--android-jar-pattern somedir/%/public/android.jar",
-		"--android-jar-pattern someotherdir/%/public/android.jar",
+		"--android-jar-pattern somedir/{version:major.minor?}/system/android.jar",
+		"--android-jar-pattern someotherdir/{version:major.minor?}/system/android.jar",
+		"--android-jar-pattern somedir/{version:major.minor?}/public/android.jar",
+		"--android-jar-pattern someotherdir/{version:major.minor?}/public/android.jar",
 	}, patterns)
 }
 
 func TestModuleLibDroidstubs(t *testing.T) {
+	t.Parallel()
 	patterns := getAndroidJarPatternsForDroidstubs(t, "module-lib")
 
 	android.AssertArrayString(t, "order of patterns", []string{
-		"--android-jar-pattern somedir/%/module-lib/android.jar",
-		"--android-jar-pattern someotherdir/%/module-lib/android.jar",
-		"--android-jar-pattern somedir/%/system/android.jar",
-		"--android-jar-pattern someotherdir/%/system/android.jar",
-		"--android-jar-pattern somedir/%/public/android.jar",
-		"--android-jar-pattern someotherdir/%/public/android.jar",
+		"--android-jar-pattern somedir/{version:major.minor?}/module-lib/android.jar",
+		"--android-jar-pattern someotherdir/{version:major.minor?}/module-lib/android.jar",
+		"--android-jar-pattern somedir/{version:major.minor?}/system/android.jar",
+		"--android-jar-pattern someotherdir/{version:major.minor?}/system/android.jar",
+		"--android-jar-pattern somedir/{version:major.minor?}/public/android.jar",
+		"--android-jar-pattern someotherdir/{version:major.minor?}/public/android.jar",
 	}, patterns)
 }
 
@@ -175,14 +179,14 @@ func TestSystemServerDroidstubs(t *testing.T) {
 	patterns := getAndroidJarPatternsForDroidstubs(t, "system-server")
 
 	android.AssertArrayString(t, "order of patterns", []string{
-		"--android-jar-pattern somedir/%/system-server/android.jar",
-		"--android-jar-pattern someotherdir/%/system-server/android.jar",
-		"--android-jar-pattern somedir/%/module-lib/android.jar",
-		"--android-jar-pattern someotherdir/%/module-lib/android.jar",
-		"--android-jar-pattern somedir/%/system/android.jar",
-		"--android-jar-pattern someotherdir/%/system/android.jar",
-		"--android-jar-pattern somedir/%/public/android.jar",
-		"--android-jar-pattern someotherdir/%/public/android.jar",
+		"--android-jar-pattern somedir/{version:major.minor?}/system-server/android.jar",
+		"--android-jar-pattern someotherdir/{version:major.minor?}/system-server/android.jar",
+		"--android-jar-pattern somedir/{version:major.minor?}/module-lib/android.jar",
+		"--android-jar-pattern someotherdir/{version:major.minor?}/module-lib/android.jar",
+		"--android-jar-pattern somedir/{version:major.minor?}/system/android.jar",
+		"--android-jar-pattern someotherdir/{version:major.minor?}/system/android.jar",
+		"--android-jar-pattern somedir/{version:major.minor?}/public/android.jar",
+		"--android-jar-pattern someotherdir/{version:major.minor?}/public/android.jar",
 	}, patterns)
 }
 
@@ -206,7 +210,7 @@ func TestDroidstubsSandbox(t *testing.T) {
 			"bar-doc/a.java": nil,
 		})
 
-	m := ctx.ModuleForTests("bar-stubs", "android_common")
+	m := ctx.ModuleForTests(t, "bar-stubs", "android_common")
 	metalava := m.Rule("metalava")
 	if g, w := metalava.Inputs.Strings(), []string{"bar-doc/a.java"}; !reflect.DeepEqual(w, g) {
 		t.Errorf("Expected inputs %q, got %q", w, g)
@@ -267,7 +271,7 @@ func TestDroidstubsWithSystemModules(t *testing.T) {
 }
 
 func checkSystemModulesUseByDroidstubs(t *testing.T, ctx *android.TestContext, moduleName string, systemJar string) {
-	metalavaRule := ctx.ModuleForTests(moduleName, "android_common").Rule("metalava")
+	metalavaRule := ctx.ModuleForTests(t, moduleName, "android_common").Rule("metalava")
 	var systemJars []string
 	for _, i := range metalavaRule.Implicits {
 		systemJars = append(systemJars, i.Base())
@@ -300,10 +304,10 @@ func TestDroidstubsWithSdkExtensions(t *testing.T) {
 			"sdk/extensions/1/public/some-mainline-module-stubs.jar": nil,
 			"sdk/extensions/info.txt":                                nil,
 		})
-	m := ctx.ModuleForTests("baz-stubs", "android_common")
+	m := ctx.ModuleForTests(t, "baz-stubs", "android_common")
 	manifest := m.Output("metalava.sbox.textproto")
 	cmdline := String(android.RuleBuilderSboxProtoForTests(t, ctx, manifest).Commands[0].Command)
-	android.AssertStringDoesContain(t, "sdk-extensions-root present", cmdline, "--sdk-extensions-root sdk/extensions")
+	android.AssertStringDoesContain(t, "android-jar-pattern present", cmdline, "--android-jar-pattern sdk/extensions/{version:extension}/public/{module}.jar")
 	android.AssertStringDoesContain(t, "sdk-extensions-info present", cmdline, "--sdk-extensions-info sdk/extensions/info.txt")
 }
 
@@ -328,7 +332,7 @@ func TestDroidStubsApiContributionGeneration(t *testing.T) {
 		},
 	)
 
-	ctx.ModuleForTests("foo.api.contribution", "")
+	ctx.ModuleForTests(t, "foo.api.contribution", "")
 }
 
 func TestGeneratedApiContributionVisibilityTest(t *testing.T) {
@@ -362,7 +366,7 @@ func TestGeneratedApiContributionVisibilityTest(t *testing.T) {
 		},
 	)
 
-	ctx.ModuleForTests("bar", "android_common")
+	ctx.ModuleForTests(t, "bar", "android_common")
 }
 
 func TestAconfigDeclarations(t *testing.T) {
@@ -404,14 +408,14 @@ func TestAconfigDeclarations(t *testing.T) {
 	android.AssertBoolEquals(t, "foo expected to depend on bar",
 		CheckModuleHasDependency(t, result.TestContext, "foo", "android_common", "bar"), true)
 
-	m := result.ModuleForTests("foo", "android_common")
+	m := result.ModuleForTests(t, "foo", "android_common")
 	android.AssertStringDoesContain(t, "foo generates revert annotations file",
-		strings.Join(m.AllOutputs(), ""), "revert-annotations-exportable.txt")
+		strings.Join(m.AllOutputs(), ""), "flags-config-exportable.xml")
 
 	// revert-annotations.txt passed to exportable stubs generation metalava command
 	manifest := m.Output("metalava_exportable.sbox.textproto")
 	cmdline := String(android.RuleBuilderSboxProtoForTests(t, result.TestContext, manifest).Commands[0].Command)
-	android.AssertStringDoesContain(t, "flagged api hide command not included", cmdline, "revert-annotations-exportable.txt")
+	android.AssertStringDoesContain(t, "flagged api hide command not included", cmdline, "flags-config-exportable.xml")
 
 	android.AssertStringDoesContain(t, "foo generates exportable stubs jar",
 		strings.Join(m.AllOutputs(), ""), "exportable/foo-stubs.srcjar")
@@ -454,9 +458,9 @@ func TestReleaseExportRuntimeApis(t *testing.T) {
 	}
 	`)
 
-	m := result.ModuleForTests("foo", "android_common")
+	m := result.ModuleForTests(t, "foo", "android_common")
 
-	rule := m.Output("released-flagged-apis-exportable.txt")
+	rule := m.Output("released-flags-exportable.pb")
 	exposeWritableApisFilter := "--filter='state:ENABLED+permission:READ_ONLY' --filter='permission:READ_WRITE'"
 	android.AssertStringEquals(t, "Filter argument expected to contain READ_WRITE permissions", exposeWritableApisFilter, rule.Args["filter_args"])
 }

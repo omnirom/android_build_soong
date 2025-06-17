@@ -97,7 +97,7 @@ func (h *hiddenAPI) initHiddenAPI(ctx android.ModuleContext, dexJar OptionalDexJ
 	// Save the classes jars even if this is not active as they may be used by modular hidden API
 	// processing.
 	classesJars := android.Paths{classesJar}
-	ctx.VisitDirectDepsWithTag(hiddenApiAnnotationsTag, func(dep android.Module) {
+	ctx.VisitDirectDepsProxyWithTag(hiddenApiAnnotationsTag, func(dep android.ModuleProxy) {
 		if javaInfo, ok := android.OtherModuleProvider(ctx, dep, JavaInfoProvider); ok {
 			classesJars = append(classesJars, javaInfo.ImplementationJars...)
 		}

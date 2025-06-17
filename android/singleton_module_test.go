@@ -61,7 +61,7 @@ func TestSingletonModule(t *testing.T) {
 		FixtureWithRootAndroidBp(bp),
 	).RunTest(t)
 
-	ops := result.ModuleForTests("test_singleton_module", "").Module().(*testSingletonModule).ops
+	ops := result.ModuleForTests(t, "test_singleton_module", "").Module().(*testSingletonModule).ops
 	wantOps := []string{"GenerateAndroidBuildActions", "GenerateSingletonBuildActions", "MakeVars"}
 	AssertDeepEquals(t, "operations", wantOps, ops)
 }
@@ -88,7 +88,7 @@ func TestUnusedSingletonModule(t *testing.T) {
 		prepareForSingletonModuleTest,
 	).RunTest(t)
 
-	singleton := result.SingletonForTests("test_singleton_module").Singleton()
+	singleton := result.SingletonForTests(t, "test_singleton_module").Singleton()
 	sm := singleton.(*singletonModuleSingletonAdaptor).sm
 	ops := sm.(*testSingletonModule).ops
 	if ops != nil {

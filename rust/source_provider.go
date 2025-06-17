@@ -43,6 +43,7 @@ type SourceProvider interface {
 	SourceProviderProps() []interface{}
 	SourceProviderDeps(ctx DepsContext, deps Deps) Deps
 	setSubName(subName string)
+	getSubName() string
 	setOutputFiles(outputFiles android.Paths)
 }
 
@@ -98,6 +99,10 @@ func (sp *BaseSourceProvider) SourceProviderDeps(ctx DepsContext, deps Deps) Dep
 
 func (sp *BaseSourceProvider) setSubName(subName string) {
 	sp.subName = subName
+}
+
+func (sp *BaseSourceProvider) getSubName() string {
+	return sp.subName
 }
 
 func (sp *BaseSourceProvider) setOutputFiles(outputFiles android.Paths) {

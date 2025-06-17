@@ -314,6 +314,9 @@ func (configs *ReleaseConfigs) LoadReleaseConfigMap(path string, ConfigDirIndex 
 				}
 			}
 		}
+		if flagDeclaration.Namespace == nil {
+			return fmt.Errorf("Flag declaration %s has no namespace.", path)
+		}
 
 		m.FlagDeclarations = append(m.FlagDeclarations, *flagDeclaration)
 		name := *flagDeclaration.Name
@@ -378,6 +381,7 @@ func (configs *ReleaseConfigs) LoadReleaseConfigMap(path string, ConfigDirIndex 
 			return fmt.Errorf("%s mismatching ReleaseConfigType value %s", path, *releaseConfigType)
 		}
 		config.FilesUsedMap[path] = true
+		config.DisallowLunchUse = config.DisallowLunchUse || releaseConfigContribution.proto.GetDisallowLunchUse()
 		inheritNames := make(map[string]bool)
 		for _, inh := range config.InheritNames {
 			inheritNames[inh] = true

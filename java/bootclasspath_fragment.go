@@ -41,6 +41,10 @@ func registerBootclasspathFragmentBuildComponents(ctx android.RegistrationContex
 	ctx.RegisterModuleType("prebuilt_bootclasspath_fragment", prebuiltBootclasspathFragmentFactory)
 }
 
+type BootclasspathFragmentInfo struct{}
+
+var BootclasspathFragmentInfoProvider = blueprint.NewProvider[BootclasspathFragmentInfo]()
+
 // BootclasspathFragmentSdkMemberType is the member type used to add bootclasspath_fragments to
 // the SDK snapshot. It is exported for use by apex.
 var BootclasspathFragmentSdkMemberType = &bootclasspathFragmentMemberType{
@@ -88,6 +92,19 @@ func (b bootclasspathFragmentContentDependencyTag) RequiresFilesFromPrebuiltApex
 
 // The tag used for the dependency between the bootclasspath_fragment module and its contents.
 var bootclasspathFragmentContentDepTag = bootclasspathFragmentContentDependencyTag{}
+
+type moduleInFragmentDependencyTag struct {
+	blueprint.DependencyTag
+}
+
+func (m moduleInFragmentDependencyTag) ExcludeFromVisibilityEnforcement() {
+}
+
+// moduleInFragmentDepTag is added alongside bootclasspathFragmentContentDependencyTag,
+// but doesn't set ReplaceSourceWithPrebuilt.  It is used to find modules in the fragment
+// by traversing from the apex to the fragment to the module, which prevents having to
+// construct a dependency on the apex variant of the fragment directly.
+var moduleInFragmentDepTag = moduleInFragmentDependencyTag{}
 
 var _ android.ExcludeFromVisibilityEnforcementTag = bootclasspathFragmentContentDepTag
 var _ android.ReplaceSourceWithPrebuilt = bootclasspathFragmentContentDepTag
@@ -239,6 +256,8 @@ type BootclasspathFragmentModule struct {
 	profilePathErr error
 }
 
+var _ android.ApexModule = (*BootclasspathFragmentModule)(nil)
+
 // commonBootclasspathFragment defines the methods that are implemented by both source and prebuilt
 // bootclasspath fragment modules.
 type commonBootclasspathFragment interface {
@@ -288,6 +307,10 @@ func testBootclasspathFragmentFactory() android.Module {
 	m := bootclasspathFragmentFactory().(*BootclasspathFragmentModule)
 	m.testFragment = true
 	return m
+}
+
+func (m *BootclasspathFragmentModule) UniqueApexVariations() bool {
+	return true
 }
 
 func (m *BootclasspathFragmentModule) bootclasspathFragmentPropertyCheck(ctx android.ModuleContext) {
@@ -393,11 +416,17 @@ func (i BootclasspathFragmentApexContentInfo) ProfileInstallPathInApex() string 
 	return i.profileInstallPathInApex
 }
 
-func (b *BootclasspathFragmentModule) DepIsInSameApex(ctx android.BaseModuleContext, dep android.Module) bool {
-	tag := ctx.OtherModuleDependencyTag(dep)
+func (m *BootclasspathFragmentModule) GetDepInSameApexChecker() android.DepInSameApexChecker {
+	return BootclasspathFragmentDepInSameApexChecker{}
+}
 
+type BootclasspathFragmentDepInSameApexChecker struct {
+	android.BaseDepInSameApexChecker
+}
+
+func (b BootclasspathFragmentDepInSameApexChecker) OutgoingDepIsInSameApex(tag blueprint.DependencyTag) bool {
 	// If the module is a default module, do not check the tag
-	if _, ok := dep.(*Defaults); ok {
+	if tag == android.DefaultsDepTag {
 		return true
 	}
 	if IsBootclasspathFragmentContentDepTag(tag) {
@@ -408,17 +437,31 @@ func (b *BootclasspathFragmentModule) DepIsInSameApex(ctx android.BaseModuleCont
 		// Cross-cutting metadata dependencies are metadata.
 		return false
 	}
+	if tag == moduleInFragmentDepTag {
+		return true
+	}
 	// Dependency to the bootclasspath fragment of another apex
 	// e.g. concsrypt-bootclasspath-fragment --> art-bootclasspath-fragment
-	if tag == bootclasspathFragmentDepTag {
+	if bcpTag, ok := tag.(bootclasspathDependencyTag); ok && bcpTag.typ == fragment {
 		return false
-
 	}
-	panic(fmt.Errorf("boot_image module %q should not have a dependency on %q via tag %s", b, dep, android.PrettyPrintTag(tag)))
+	if tag == moduleInFragmentDepTag {
+		return false
+	}
+	if tag == dexpreopt.Dex2oatDepTag {
+		return false
+	}
+	if tag == android.PrebuiltDepTag {
+		return false
+	}
+	if _, ok := tag.(hiddenAPIStubsDependencyTag); ok {
+		return false
+	}
+	panic(fmt.Errorf("boot_image module should not have a dependency tag %s", android.PrettyPrintTag(tag)))
 }
 
-func (b *BootclasspathFragmentModule) ShouldSupportSdkVersion(ctx android.BaseModuleContext, sdkVersion android.ApiLevel) error {
-	return nil
+func (m *BootclasspathFragmentModule) MinSdkVersionSupported(ctx android.BaseModuleContext) android.ApiLevel {
+	return android.MinApiLevel
 }
 
 // ComponentDepsMutator adds dependencies onto modules before any prebuilt modules without a
@@ -456,24 +499,24 @@ func (b *BootclasspathFragmentModule) DepsMutator(ctx android.BottomUpMutatorCon
 		}
 	}
 
-	if !dexpreopt.IsDex2oatNeeded(ctx) {
-		return
+	if dexpreopt.IsDex2oatNeeded(ctx) {
+		// Add a dependency onto the dex2oat tool which is needed for creating the boot image. The
+		// path is retrieved from the dependency by GetGlobalSoongConfig(ctx).
+		dexpreopt.RegisterToolDeps(ctx)
 	}
-
-	// Add a dependency onto the dex2oat tool which is needed for creating the boot image. The
-	// path is retrieved from the dependency by GetGlobalSoongConfig(ctx).
-	dexpreopt.RegisterToolDeps(ctx)
 
 	// Add a dependency to `all_apex_contributions` to determine if prebuilts are active.
 	// If prebuilts are active, `contents` validation on the source bootclasspath fragment should be disabled.
 	if _, isPrebuiltModule := ctx.Module().(*PrebuiltBootclasspathFragmentModule); !isPrebuiltModule {
 		ctx.AddDependency(b, android.AcDepTag, "all_apex_contributions")
 	}
-}
 
-func (b *BootclasspathFragmentModule) BootclasspathDepsMutator(ctx android.BottomUpMutatorContext) {
 	// Add dependencies on all the fragments.
 	b.properties.BootclasspathFragmentsDepsProperties.addDependenciesOntoFragments(ctx)
+
+	for _, name := range b.properties.Contents.GetOrDefault(ctx, nil) {
+		ctx.AddDependency(ctx.Module(), moduleInFragmentDepTag, name)
+	}
 }
 
 func (b *BootclasspathFragmentModule) GenerateAndroidBuildActions(ctx android.ModuleContext) {
@@ -496,7 +539,7 @@ func (b *BootclasspathFragmentModule) GenerateAndroidBuildActions(ctx android.Mo
 		}
 	})
 
-	fragments := gatherApexModulePairDepsWithTag(ctx, bootclasspathFragmentDepTag)
+	fragments, _ := gatherFragments(ctx)
 
 	// Perform hidden API processing.
 	hiddenAPIOutput := b.generateHiddenAPIBuildActions(ctx, contents, fragments)
@@ -518,6 +561,8 @@ func (b *BootclasspathFragmentModule) GenerateAndroidBuildActions(ctx android.Mo
 	if !ctx.IsFinalModule(ctx.Module()) {
 		b.HideFromMake()
 	}
+
+	android.SetProvider(ctx, BootclasspathFragmentInfoProvider, BootclasspathFragmentInfo{})
 }
 
 // getProfileProviderApex returns the name of the apex that provides a boot image profile, or an
@@ -529,19 +574,18 @@ func (b *BootclasspathFragmentModule) getProfileProviderApex(ctx android.BaseMod
 	}
 
 	// Bootclasspath fragment modules that are for the platform do not produce boot related files.
-	apexInfos, _ := android.ModuleProvider(ctx, android.AllApexInfoProvider)
-	if apexInfos == nil {
+	apexInfo, _ := android.ModuleProvider(ctx, android.ApexInfoProvider)
+	if apexInfo.IsForPlatform() {
 		return ""
 	}
 
-	for _, apexInfo := range apexInfos.ApexInfos {
-		for _, apex := range apexInfo.InApexVariants {
-			if isProfileProviderApex(ctx, apex) {
-				return apex
+	for _, config := range genBootImageConfigs(ctx) {
+		if config.profileProviderModule == b.BaseModuleName() {
+			if len(config.profileImports) > 0 {
+				return config.profileImports[0]
 			}
 		}
 	}
-
 	return ""
 }
 
@@ -605,7 +649,7 @@ func (b *BootclasspathFragmentModule) configuredJars(ctx android.ModuleContext) 
 			if android.IsModulePrebuilt(ctx.Module()) {
 				// prebuilt bcpf. the validation of this will be done at the top-level apex
 				providerClasspathFragmentValidationInfoProvider(ctx, unknown)
-			} else if !disableSourceApexVariant(ctx) {
+			} else if !disableSourceApexVariant(ctx) && android.IsModulePreferred(ctx.Module()) {
 				// source bcpf, and prebuilt apex are not selected.
 				ctx.ModuleErrorf("%s in contents must also be declared in PRODUCT_APEX_BOOT_JARS", unknown)
 			}
@@ -1141,6 +1185,13 @@ func prebuiltBootclasspathFragmentFactory() android.Module {
 	android.InitPrebuiltModule(m, &[]string{"placeholder"})
 	android.InitApexModule(m)
 	android.InitAndroidArchModule(m, android.HostAndDeviceSupported, android.MultilibCommon)
+	android.InitDefaultableModule(m)
+
+	m.SetDefaultableHook(func(mctx android.DefaultableHookContext) {
+		if mctx.Config().AlwaysUsePrebuiltSdks() {
+			m.prebuilt.ForcePrefer()
+		}
+	})
 
 	return m
 }

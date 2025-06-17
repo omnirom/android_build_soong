@@ -55,11 +55,6 @@ type prebuiltApisProperties struct {
 
 	// If set to true, compile dex for java_import modules. Defaults to false.
 	Imports_compile_dex *bool
-
-	// If set to true, allow incremental platform API of the form MM.m where MM is the major release
-	// version corresponding to the API level/SDK_INT and m is an incremental release version
-	// (e.g. API changes associated with QPR). Defaults to false.
-	Allow_incremental_platform_api *bool
 }
 
 type prebuiltApis struct {
@@ -97,28 +92,28 @@ func parsePrebuiltPath(ctx android.LoadHookContext, p string) (module string, ve
 }
 
 // parseFinalizedPrebuiltPath is like parsePrebuiltPath, but verifies the version is numeric (a finalized version).
-func parseFinalizedPrebuiltPath(ctx android.LoadHookContext, p string, allowIncremental bool) (module string, version int, release int, scope string) {
+func parseFinalizedPrebuiltPath(ctx android.LoadHookContext, p string) (module string, version int, release int, scope string) {
 	module, v, scope := parsePrebuiltPath(ctx, p)
-	if allowIncremental {
-		parts := strings.Split(v, ".")
-		if len(parts) != 2 {
-			ctx.ModuleErrorf("Found unexpected version '%v' for incremental prebuilts - expect MM.m format for incremental API with both major (MM) an minor (m) revision.", v)
-			return
-		}
+
+	// assume a major.minor version code
+	parts := strings.Split(v, ".")
+	if len(parts) == 2 {
 		sdk, sdk_err := strconv.Atoi(parts[0])
 		qpr, qpr_err := strconv.Atoi(parts[1])
 		if sdk_err != nil || qpr_err != nil {
-			ctx.ModuleErrorf("Unable to read version number for incremental prebuilt api '%v'", v)
+			ctx.ModuleErrorf("Unable to read major.minor version for prebuilt api '%v'", v)
 			return
 		}
 		version = sdk
 		release = qpr
 		return
 	}
+
+	// assume a legacy integer only api level
 	release = 0
 	version, err := strconv.Atoi(v)
 	if err != nil {
-		ctx.ModuleErrorf("Found finalized API files in non-numeric dir '%v'", v)
+		ctx.ModuleErrorf("Unable to read API level for prebuilt api '%v'", v)
 		return
 	}
 	return
@@ -279,12 +274,11 @@ func prebuiltApiFiles(mctx android.LoadHookContext, p *prebuiltApis) {
 	}
 
 	// Create modules for all (<module>, <scope, <version>) triplets,
-	allowIncremental := proptools.BoolDefault(p.properties.Allow_incremental_platform_api, false)
 	for _, f := range apiLevelFiles {
-		module, version, release, scope := parseFinalizedPrebuiltPath(mctx, f, allowIncremental)
-		if allowIncremental {
-			incrementalVersion := strconv.Itoa(version) + "." + strconv.Itoa(release)
-			createApiModule(mctx, PrebuiltApiModuleName(module, scope, incrementalVersion), f)
+		module, version, release, scope := parseFinalizedPrebuiltPath(mctx, f)
+		if release != 0 {
+			majorDotMinorVersion := strconv.Itoa(version) + "." + strconv.Itoa(release)
+			createApiModule(mctx, PrebuiltApiModuleName(module, scope, majorDotMinorVersion), f)
 		} else {
 			createApiModule(mctx, PrebuiltApiModuleName(module, scope, strconv.Itoa(version)), f)
 		}
@@ -300,7 +294,7 @@ func prebuiltApiFiles(mctx android.LoadHookContext, p *prebuiltApis) {
 	getLatest := func(files []string, isExtensionApiFile bool) map[string]latestApiInfo {
 		m := make(map[string]latestApiInfo)
 		for _, f := range files {
-			module, version, release, scope := parseFinalizedPrebuiltPath(mctx, f, allowIncremental)
+			module, version, release, scope := parseFinalizedPrebuiltPath(mctx, f)
 			if strings.HasSuffix(module, "incompatibilities") {
 				continue
 			}

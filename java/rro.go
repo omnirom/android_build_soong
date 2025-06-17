@@ -34,6 +34,15 @@ func RegisterRuntimeResourceOverlayBuildComponents(ctx android.RegistrationConte
 	ctx.RegisterModuleType("override_runtime_resource_overlay", OverrideRuntimeResourceOverlayModuleFactory)
 }
 
+type RuntimeResourceOverlayInfo struct {
+	OutputFile                    android.Path
+	Certificate                   Certificate
+	Theme                         string
+	OverriddenManifestPackageName string
+}
+
+var RuntimeResourceOverlayInfoProvider = blueprint.NewProvider[RuntimeResourceOverlayInfo]()
+
 type RuntimeResourceOverlay struct {
 	android.ModuleBase
 	android.DefaultableModuleBase
@@ -90,15 +99,6 @@ type RuntimeResourceOverlayProperties struct {
 	Overrides []string
 }
 
-// RuntimeResourceOverlayModule interface is used by the apex package to gather information from
-// a RuntimeResourceOverlay module.
-type RuntimeResourceOverlayModule interface {
-	android.Module
-	OutputFile() android.Path
-	Certificate() Certificate
-	Theme() string
-}
-
 // RRO's partition logic is different from the partition logic of other modules defined in soong/android/paths.go
 // The default partition for RRO is "/product" and not "/system"
 func rroPartition(ctx android.ModuleContext) string {
@@ -139,6 +139,25 @@ func (r *RuntimeResourceOverlay) GenerateAndroidBuildActions(ctx android.ModuleC
 	r.aapt.hasNoCode = true
 	// Do not remove resources without default values nor dedupe resource configurations with the same value
 	aaptLinkFlags := []string{"--no-resource-deduping", "--no-resource-removal"}
+
+	// Add TARGET_AAPT_CHARACTERISTICS values to AAPT link flags if they exist and --product flags were not provided.
+	hasProduct := android.PrefixInList(r.aaptProperties.Aaptflags, "--product")
+	if !hasProduct && len(ctx.Config().ProductAAPTCharacteristics()) > 0 {
+		aaptLinkFlags = append(aaptLinkFlags, "--product", ctx.Config().ProductAAPTCharacteristics())
+	}
+
+	if !Bool(r.aaptProperties.Aapt_include_all_resources) {
+		// Product AAPT config
+		for _, aaptConfig := range ctx.Config().ProductAAPTConfig() {
+			aaptLinkFlags = append(aaptLinkFlags, "-c", aaptConfig)
+		}
+
+		// Product AAPT preferred config
+		if len(ctx.Config().ProductAAPTPreferredConfig()) > 0 {
+			aaptLinkFlags = append(aaptLinkFlags, "--preferred-density", ctx.Config().ProductAAPTPreferredConfig())
+		}
+	}
+
 	// Allow the override of "package name" and "overlay target package name"
 	manifestPackageName, overridden := ctx.DeviceConfig().OverrideManifestPackageNameFor(ctx.ModuleName())
 	if overridden || r.overridableProperties.Package_name != nil {
@@ -187,6 +206,16 @@ func (r *RuntimeResourceOverlay) GenerateAndroidBuildActions(ctx android.ModuleC
 	android.SetProvider(ctx, FlagsPackagesProvider, FlagsPackages{
 		AconfigTextFiles: aconfigTextFilePaths,
 	})
+
+	android.SetProvider(ctx, RuntimeResourceOverlayInfoProvider, RuntimeResourceOverlayInfo{
+		OutputFile:  r.outputFile,
+		Certificate: r.Certificate(),
+		Theme:       r.Theme(),
+	})
+
+	ctx.SetOutputFiles([]android.Path{r.outputFile}, "")
+
+	buildComplianceMetadata(ctx)
 }
 
 func (r *RuntimeResourceOverlay) SdkVersion(ctx android.EarlyModuleContext) android.SdkSpec {
@@ -214,10 +243,6 @@ func (r *RuntimeResourceOverlay) TargetSdkVersion(ctx android.EarlyModuleContext
 
 func (r *RuntimeResourceOverlay) Certificate() Certificate {
 	return r.certificate
-}
-
-func (r *RuntimeResourceOverlay) OutputFile() android.Path {
-	return r.outputFile
 }
 
 func (r *RuntimeResourceOverlay) Theme() string {
@@ -370,10 +395,11 @@ func (a *AutogenRuntimeResourceOverlay) GenerateAndroidBuildActions(ctx android.
 
 	a.aapt.buildActions(ctx,
 		aaptBuildActionOptions{
-			sdkContext:      a,
-			extraLinkFlags:  aaptLinkFlags,
-			rroDirs:         &rroDirs,
-			manifestForAapt: genManifest,
+			sdkContext:       a,
+			extraLinkFlags:   aaptLinkFlags,
+			rroDirs:          &rroDirs,
+			manifestForAapt:  genManifest,
+			aconfigTextFiles: getAconfigFilePaths(ctx),
 		},
 	)
 
@@ -390,6 +416,11 @@ func (a *AutogenRuntimeResourceOverlay) GenerateAndroidBuildActions(ctx android.
 	// Install the signed apk
 	installDir := android.PathForModuleInstall(ctx, "overlay")
 	ctx.InstallFile(installDir, signed.Base(), signed)
+
+	android.SetProvider(ctx, RuntimeResourceOverlayInfoProvider, RuntimeResourceOverlayInfo{
+		OutputFile:  signed,
+		Certificate: a.certificate,
+	})
 }
 
 func (a *AutogenRuntimeResourceOverlay) SdkVersion(ctx android.EarlyModuleContext) android.SdkSpec {

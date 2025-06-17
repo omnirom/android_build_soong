@@ -21,6 +21,7 @@ import (
 )
 
 func TestManifestMerger(t *testing.T) {
+	t.Parallel()
 	bp := `
 		android_app {
 			name: "app",
@@ -80,7 +81,7 @@ func TestManifestMerger(t *testing.T) {
 
 	result := PrepareForTestWithJavaDefaultModules.RunTestWithBp(t, bp)
 
-	manifestMergerRule := result.ModuleForTests("app", "android_common").Rule("manifestMerger")
+	manifestMergerRule := result.ModuleForTests(t, "app", "android_common").Rule("manifestMerger")
 	android.AssertPathRelativeToTopEquals(t, "main manifest",
 		"out/soong/.intermediates/app/android_common/manifest_fixer/AndroidManifest.xml",
 		manifestMergerRule.Input)
@@ -100,6 +101,7 @@ func TestManifestMerger(t *testing.T) {
 }
 
 func TestManifestValuesApplicationIdSetsPackageName(t *testing.T) {
+	t.Parallel()
 	bp := `
 		android_test {
 			name: "test",
@@ -127,7 +129,7 @@ func TestManifestValuesApplicationIdSetsPackageName(t *testing.T) {
 
 	result := PrepareForTestWithJavaDefaultModules.RunTestWithBp(t, bp)
 
-	manifestMergerRule := result.ModuleForTests("test", "android_common").Rule("manifestMerger")
+	manifestMergerRule := result.ModuleForTests(t, "test", "android_common").Rule("manifestMerger")
 	android.AssertStringMatches(t,
 		"manifest merger args",
 		manifestMergerRule.Args["args"],

@@ -27,6 +27,7 @@ import (
 
 	"android/soong/shared"
 	"android/soong/ui/build"
+	"android/soong/ui/execution_metrics"
 	"android/soong/ui/logger"
 	"android/soong/ui/metrics"
 	"android/soong/ui/signal"
@@ -170,14 +171,16 @@ func main() {
 		stat.Finish()
 	})
 	criticalPath := status.NewCriticalPath()
+	emet := execution_metrics.NewExecutionMetrics(log)
 	buildCtx := build.Context{ContextImpl: &build.ContextImpl{
-		Context:      ctx,
-		Logger:       log,
-		Metrics:      met,
-		Tracer:       trace,
-		Writer:       output,
-		Status:       stat,
-		CriticalPath: criticalPath,
+		Context:          ctx,
+		Logger:           log,
+		Metrics:          met,
+		ExecutionMetrics: emet,
+		Tracer:           trace,
+		Writer:           output,
+		Status:           stat,
+		CriticalPath:     criticalPath,
 	}}
 
 	freshConfig := func() build.Config {
@@ -194,6 +197,7 @@ func main() {
 	rbeMetricsFile := filepath.Join(logsDir, c.logsPrefix+"rbe_metrics.pb")
 	soongBuildMetricsFile := filepath.Join(logsDir, c.logsPrefix+"soong_build_metrics.pb")
 	buildTraceFile := filepath.Join(logsDir, c.logsPrefix+"build.trace.gz")
+	executionMetricsFile := filepath.Join(logsDir, c.logsPrefix+"execution_metrics.pb")
 
 	metricsFiles := []string{
 		buildErrorFile,        // build error strings
@@ -204,9 +208,15 @@ func main() {
 	}
 
 	defer func() {
+		emet.Finish(buildCtx)
 		stat.Finish()
 		criticalPath.WriteToMetrics(met)
 		met.Dump(soongMetricsFile)
+		emet.Dump(executionMetricsFile, args)
+		// If there are execution metrics, upload them.
+		if _, err := os.Stat(executionMetricsFile); err == nil {
+			metricsFiles = append(metricsFiles, executionMetricsFile)
+		}
 		if !config.SkipMetricsUpload() {
 			build.UploadMetrics(buildCtx, config, c.simpleOutput, buildStarted, metricsFiles...)
 		}
@@ -323,12 +333,12 @@ func dumpVar(ctx build.Context, config build.Config, args []string) {
 
 	varName := flags.Arg(0)
 	if varName == "report_config" {
-		varData, err := build.DumpMakeVars(ctx, config, nil, build.BannerVars)
+		varData, err := build.DumpMakeVars(ctx, config, nil, append(build.BannerVars, "PRODUCT_SOONG_ONLY"))
 		if err != nil {
 			ctx.Fatal(err)
 		}
 
-		fmt.Println(build.Banner(varData))
+		fmt.Println(build.Banner(config, varData))
 	} else {
 		varData, err := build.DumpMakeVars(ctx, config, nil, []string{varName})
 		if err != nil {
@@ -390,7 +400,7 @@ func dumpVars(ctx build.Context, config build.Config, args []string) {
 
 	if i := indexList("report_config", allVars); i != -1 {
 		allVars = append(allVars[:i], allVars[i+1:]...)
-		allVars = append(allVars, build.BannerVars...)
+		allVars = append(allVars, append(build.BannerVars, "PRODUCT_SOONG_ONLY")...)
 	}
 
 	if len(allVars) == 0 {
@@ -404,7 +414,7 @@ func dumpVars(ctx build.Context, config build.Config, args []string) {
 
 	for _, name := range vars {
 		if name == "report_config" {
-			fmt.Printf("%sreport_config='%s'\n", *varPrefix, build.Banner(varData))
+			fmt.Printf("%sreport_config='%s'\n", *varPrefix, build.Banner(config, varData))
 		} else {
 			fmt.Printf("%s%s='%s'\n", *varPrefix, name, varData[name])
 		}
@@ -460,20 +470,6 @@ func buildActionConfig(ctx build.Context, args ...string) build.Config {
 		name:        "all-modules",
 		description: "Build action: build from the top of the source tree.",
 		action:      build.BUILD_MODULES,
-	}, {
-		// This is redirecting to mma build command behaviour. Once it has soaked for a
-		// while, the build command is deleted from here once it has been removed from the
-		// envsetup.sh.
-		name:        "modules-in-a-dir-no-deps",
-		description: "Build action: builds all of the modules in the current directory without their dependencies.",
-		action:      build.BUILD_MODULES_IN_A_DIRECTORY,
-	}, {
-		// This is redirecting to mmma build command behaviour. Once it has soaked for a
-		// while, the build command is deleted from here once it has been removed from the
-		// envsetup.sh.
-		name:        "modules-in-dirs-no-deps",
-		description: "Build action: builds all of the modules in the supplied directories without their dependencies.",
-		action:      build.BUILD_MODULES_IN_DIRECTORIES,
 	}, {
 		name:        "modules-in-a-dir",
 		description: "Build action: builds all of the modules in the current directory and their dependencies.",

@@ -88,6 +88,8 @@ func (r *rawBinary) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 
 	ctx.SetOutputFiles([]android.Path{outputFile}, "")
 	r.output = outputFile
+
+	setCommonFilesystemInfo(ctx, r)
 }
 
 var _ android.AndroidMkEntriesProvider = (*rawBinary)(nil)

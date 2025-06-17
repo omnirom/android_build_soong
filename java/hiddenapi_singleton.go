@@ -171,11 +171,11 @@ func isModuleInConfiguredList(ctx android.BaseModuleContext, module android.Modu
 	// Now match the apex part of the boot image configuration.
 	requiredApex := configuredBootJars.Apex(index)
 	if android.IsConfiguredJarForPlatform(requiredApex) {
-		if len(apexInfo.InApexVariants) != 0 {
+		if apexInfo.ApexVariationName != "" {
 			// A platform variant is required but this is for an apex so ignore it.
 			return false
 		}
-	} else if !apexInfo.InApexVariant(requiredApex) {
+	} else if apexInfo.BaseApexName != requiredApex {
 		// An apex variant for a specific apex is required but this is the wrong apex.
 		return false
 	}

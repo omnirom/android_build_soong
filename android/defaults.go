@@ -178,6 +178,7 @@ func InitDefaultsModule(module DefaultsModule) {
 	module.AddProperties(
 		&hostAndDeviceProperties{},
 		commonProperties,
+		&baseProperties{},
 		&ApexProperties{},
 		&distProperties{})
 

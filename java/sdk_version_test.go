@@ -25,6 +25,7 @@ func stringPtr(v string) *string {
 }
 
 func TestSystemSdkFromVendor(t *testing.T) {
+	t.Parallel()
 	fixtures := android.GroupFixturePreparers(
 		PrepareForTestWithJavaDefaultModules,
 		android.FixtureModifyProductVariables(func(variables android.FixtureProductVariables) {
@@ -57,7 +58,7 @@ func TestSystemSdkFromVendor(t *testing.T) {
 			vendor: true,
 			sdk_version: "system_current",
 		}`)
-	fooModule := result.ModuleForTests("foo", "android_common")
+	fooModule := result.ModuleForTests(t, "foo", "android_common")
 	fooClasspath := fooModule.Rule("javac").Args["classpath"]
 
 	android.AssertStringDoesContain(t, "foo classpath", fooClasspath, "prebuilts/sdk/34/system/android.jar")

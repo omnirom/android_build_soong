@@ -70,24 +70,24 @@ func TestThinLtoDeps(t *testing.T) {
 
 	result := LTOPreparer.RunTestWithBp(t, bp)
 
-	libLto := result.ModuleForTests("lto_enabled", "android_arm64_armv8-a_shared").Module()
+	libLto := result.ModuleForTests(t, "lto_enabled", "android_arm64_armv8-a_shared").Module()
 
-	libFoo := result.ModuleForTests("foo", "android_arm64_armv8-a_static").Module()
+	libFoo := result.ModuleForTests(t, "foo", "android_arm64_armv8-a_static").Module()
 	if !hasDep(result, libLto, libFoo) {
 		t.Errorf("'lto_enabled' missing dependency on the default variant of 'foo'")
 	}
 
-	libBaz := result.ModuleForTests("baz", "android_arm64_armv8-a_static").Module()
+	libBaz := result.ModuleForTests(t, "baz", "android_arm64_armv8-a_static").Module()
 	if !hasDep(result, libFoo, libBaz) {
 		t.Errorf("'foo' missing dependency on the default variant of transitive dep 'baz'")
 	}
 
-	libNeverLto := result.ModuleForTests("lib_never_lto", "android_arm64_armv8-a_static").Module()
+	libNeverLto := result.ModuleForTests(t, "lib_never_lto", "android_arm64_armv8-a_static").Module()
 	if !hasDep(result, libLto, libNeverLto) {
 		t.Errorf("'lto_enabled' missing dependency on the default variant of 'lib_never_lto'")
 	}
 
-	libBar := result.ModuleForTests("bar", "android_arm64_armv8-a_shared").Module()
+	libBar := result.ModuleForTests(t, "bar", "android_arm64_armv8-a_shared").Module()
 	if !hasDep(result, libLto, libBar) {
 		t.Errorf("'lto_enabled' missing dependency on the default variant of 'bar'")
 	}
@@ -138,15 +138,15 @@ func TestThinLtoOnlyOnStaticDep(t *testing.T) {
 
 	result := LTOPreparer.RunTestWithBp(t, bp)
 
-	libRoot := result.ModuleForTests("root", "android_arm64_armv8-a_shared").Module()
-	libRootLtoNever := result.ModuleForTests("root_no_lto", "android_arm64_armv8-a_shared").Module()
+	libRoot := result.ModuleForTests(t, "root", "android_arm64_armv8-a_shared").Module()
+	libRootLtoNever := result.ModuleForTests(t, "root_no_lto", "android_arm64_armv8-a_shared").Module()
 
-	libFoo := result.ModuleForTests("foo", "android_arm64_armv8-a_static")
+	libFoo := result.ModuleForTests(t, "foo", "android_arm64_armv8-a_static")
 	if !hasDep(result, libRoot, libFoo.Module()) {
 		t.Errorf("'root' missing dependency on the default variant of 'foo'")
 	}
 
-	libFooNoLto := result.ModuleForTests("foo", "android_arm64_armv8-a_static_lto-none")
+	libFooNoLto := result.ModuleForTests(t, "foo", "android_arm64_armv8-a_static_lto-none")
 	if !hasDep(result, libRootLtoNever, libFooNoLto.Module()) {
 		t.Errorf("'root_no_lto' missing dependency on the lto_none variant of 'foo'")
 	}
@@ -156,7 +156,7 @@ func TestThinLtoOnlyOnStaticDep(t *testing.T) {
 		t.Errorf("'foo' expected to have flags %q, but got %q", w, libFooCFlags)
 	}
 
-	libBaz := result.ModuleForTests("baz", "android_arm64_armv8-a_static")
+	libBaz := result.ModuleForTests(t, "baz", "android_arm64_armv8-a_static")
 	if !hasDep(result, libFoo.Module(), libBaz.Module()) {
 		t.Errorf("'foo' missing dependency on the default variant of transitive dep 'baz'")
 	}
@@ -187,8 +187,8 @@ func TestLtoDisabledButEnabledForArch(t *testing.T) {
 	}`
 	result := LTOPreparer.RunTestWithBp(t, bp)
 
-	libFooWithLto := result.ModuleForTests("libfoo", "android_arm_armv7-a-neon_shared").Rule("ld")
-	libFooWithoutLto := result.ModuleForTests("libfoo", "android_arm64_armv8-a_shared").Rule("ld")
+	libFooWithLto := result.ModuleForTests(t, "libfoo", "android_arm_armv7-a-neon_shared").Rule("ld")
+	libFooWithoutLto := result.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_shared").Rule("ld")
 
 	android.AssertStringDoesContain(t, "missing flag for LTO in variant that expects it",
 		libFooWithLto.Args["ldFlags"], "-flto=thin")
@@ -215,8 +215,8 @@ func TestLtoDoesNotPropagateToRuntimeLibs(t *testing.T) {
 
 	result := LTOPreparer.RunTestWithBp(t, bp)
 
-	libFoo := result.ModuleForTests("libfoo", "android_arm_armv7-a-neon_shared").Rule("ld")
-	libBar := result.ModuleForTests("runtime_libbar", "android_arm_armv7-a-neon_shared").Rule("ld")
+	libFoo := result.ModuleForTests(t, "libfoo", "android_arm_armv7-a-neon_shared").Rule("ld")
+	libBar := result.ModuleForTests(t, "runtime_libbar", "android_arm_armv7-a-neon_shared").Rule("ld")
 
 	android.AssertStringDoesContain(t, "missing flag for LTO in LTO enabled library",
 		libFoo.Args["ldFlags"], "-flto=thin")

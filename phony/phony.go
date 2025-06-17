@@ -38,9 +38,11 @@ var PrepareForTestWithPhony = android.FixtureRegisterWithContext(registerPhonyMo
 
 type phony struct {
 	android.ModuleBase
+
 	requiredModuleNames       []string
 	hostRequiredModuleNames   []string
 	targetRequiredModuleNames []string
+	outputDeps                android.Paths
 }
 
 func PhonyFactory() android.Module {
@@ -54,6 +56,14 @@ func (p *phony) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	p.requiredModuleNames = ctx.RequiredModuleNames(ctx)
 	p.hostRequiredModuleNames = ctx.HostRequiredModuleNames()
 	p.targetRequiredModuleNames = ctx.TargetRequiredModuleNames()
+
+	ctx.VisitDirectDepsWithTag(android.RequiredDepTag, func(dep android.Module) {
+		if o, ok := android.OtherModuleProvider(ctx, dep, android.OutputFilesProvider); ok {
+			p.outputDeps = append(p.outputDeps, o.DefaultOutputFiles...)
+		}
+	})
+
+	ctx.Phony(p.Name(), p.outputDeps...)
 }
 
 func (p *phony) AndroidMk() android.AndroidMkData {
@@ -77,6 +87,10 @@ func (p *phony) AndroidMk() android.AndroidMkData {
 				fmt.Fprintln(w, "LOCAL_TARGET_REQUIRED_MODULES :=",
 					strings.Join(p.targetRequiredModuleNames, " "))
 			}
+			if len(p.outputDeps) > 0 {
+				fmt.Fprintln(w, "LOCAL_ADDITIONAL_DEPENDENCIES :=",
+					strings.Join(p.outputDeps.Strings(), " "))
+			}
 			// AconfigUpdateAndroidMkData may have added elements to Extra.  Process them here.
 			for _, extra := range data.Extra {
 				extra(w, nil)
@@ -90,8 +104,7 @@ type PhonyRule struct {
 	android.ModuleBase
 	android.DefaultableModuleBase
 
-	phonyDepsModuleNames []string
-	properties           PhonyProperties
+	properties PhonyProperties
 }
 
 type PhonyProperties struct {
@@ -112,18 +125,8 @@ func PhonyRuleFactory() android.Module {
 }
 
 func (p *PhonyRule) GenerateAndroidBuildActions(ctx android.ModuleContext) {
-	p.phonyDepsModuleNames = p.properties.Phony_deps.GetOrDefault(ctx, nil)
-}
-
-func (p *PhonyRule) AndroidMk() android.AndroidMkData {
-	return android.AndroidMkData{
-		Custom: func(w io.Writer, name, prefix, moduleDir string, data android.AndroidMkData) {
-			if len(p.phonyDepsModuleNames) > 0 {
-				depModulesStr := strings.Join(p.phonyDepsModuleNames, " ")
-				fmt.Fprintln(w, ".PHONY:", name)
-				fmt.Fprintln(w, name, ":", depModulesStr)
-			}
-		},
+	for _, dep := range p.properties.Phony_deps.GetOrDefault(ctx, nil) {
+		ctx.Phony(ctx.ModuleName(), android.PathForPhony(ctx, dep))
 	}
 }
 

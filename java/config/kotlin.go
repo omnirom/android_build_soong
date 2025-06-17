@@ -21,6 +21,7 @@ var (
 	KotlincIllegalFlags = []string{
 		"-no-jdk",
 		"-no-stdlib",
+		"-language-version",
 	}
 )
 
@@ -56,5 +57,5 @@ func init() {
 	// platform that are not fully compatible with the kotlinc used in g3 kythe indexers.
 	// e.g. uninitialized variables are a warning in 1.*, but an error in 2.*
 	// https://github.com/JetBrains/kotlin/blob/master/compiler/fir/checkers/gen/org/jetbrains/kotlin/fir/analysis/diagnostics/FirErrors.kt#L748
-	pctx.StaticVariable("KotlincKytheGlobalFlags", strings.Join([]string{"-language-version 1.9"}, " "))
+	pctx.StaticVariable("KotlincKytheGlobalFlags", strings.Join([]string{}, " "))
 }

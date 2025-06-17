@@ -30,8 +30,6 @@ import (
 	smpb "android/soong/ui/metrics/metrics_proto"
 	"android/soong/ui/status"
 
-	"google.golang.org/protobuf/encoding/prototext"
-
 	"google.golang.org/protobuf/proto"
 )
 
@@ -1006,6 +1004,12 @@ func TestGetConfigArgsBuildModulesInDirectories(t *testing.T) {
 	}
 }
 
+func assertEquals[T ~bool | ~int32](t *testing.T, name string, expected, actual T) {
+	if expected != actual {
+		t.Errorf("Expected %s: %#v\nActual %s: %#v", name, expected, name, actual)
+	}
+}
+
 func TestBuildConfig(t *testing.T) {
 	tests := []struct {
 		name                string
@@ -1063,12 +1067,11 @@ func TestBuildConfig(t *testing.T) {
 				arguments: tc.arguments,
 			}
 			config := Config{c}
-			actualBuildConfig := buildConfig(config)
-			if expected := tc.expectedBuildConfig; !proto.Equal(expected, actualBuildConfig) {
-				t.Errorf("Build config mismatch.\n"+
-					"Expected build config: %#v\n"+
-					"Actual build config: %#v", prototext.Format(expected), prototext.Format(actualBuildConfig))
-			}
+			actual := buildConfig(config)
+			assertEquals(t, "ForceUseGoma", *tc.expectedBuildConfig.ForceUseGoma, *actual.ForceUseGoma)
+			assertEquals(t, "UseGoma", *tc.expectedBuildConfig.UseGoma, *actual.UseGoma)
+			assertEquals(t, "UseRbe", *tc.expectedBuildConfig.UseRbe, *actual.UseRbe)
+			assertEquals(t, "NinjaWeightListSource", *tc.expectedBuildConfig.NinjaWeightListSource, *actual.NinjaWeightListSource)
 		})
 	}
 }

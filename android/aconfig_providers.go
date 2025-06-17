@@ -92,11 +92,11 @@ func VerifyAconfigBuildMode(ctx ModuleContext, container string, module blueprin
 				if asError {
 					ctx.ModuleErrorf(msg)
 				} else {
-					fmt.Printf("WARNING: " + msg)
+					fmt.Print("WARNING: " + msg)
 				}
 			} else {
 				if !asError {
-					fmt.Printf("PASSED: " + msg)
+					fmt.Print("PASSED: " + msg)
 				}
 			}
 		}
@@ -136,7 +136,7 @@ func aconfigUpdateAndroidBuildActions(ctx ModuleContext) {
 			AconfigFiles: mergedAconfigFiles,
 			ModeInfos:    mergedModeInfos,
 		})
-		ctx.setAconfigPaths(getAconfigFilePaths(ctx.Module().base(), mergedAconfigFiles))
+		ctx.setAconfigPaths(getAconfigFilePaths(getContainer(ctx.Module()), mergedAconfigFiles))
 	}
 }
 
@@ -147,7 +147,8 @@ func aconfigUpdateAndroidMkData(ctx fillInEntriesContext, mod Module, data *Andr
 		return
 	}
 	data.Extra = append(data.Extra, func(w io.Writer, outputFile Path) {
-		AndroidMkEmitAssignList(w, "LOCAL_ACONFIG_FILES", getAconfigFilePaths(mod.base(), info.AconfigFiles).Strings())
+		AndroidMkEmitAssignList(w, "LOCAL_ACONFIG_FILES", getAconfigFilePaths(
+			getContainerUsingProviders(ctx, mod), info.AconfigFiles).Strings())
 	})
 	// If there is a Custom writer, it needs to support this provider.
 	if data.Custom != nil {
@@ -179,24 +180,29 @@ func aconfigUpdateAndroidMkEntries(ctx fillInEntriesContext, mod Module, entries
 	// All of the files in the module potentially depend on the aconfig flag values.
 	for idx, _ := range *entries {
 		(*entries)[idx].ExtraEntries = append((*entries)[idx].ExtraEntries,
-			func(ctx AndroidMkExtraEntriesContext, entries *AndroidMkEntries) {
-				entries.AddPaths("LOCAL_ACONFIG_FILES", getAconfigFilePaths(mod.base(), info.AconfigFiles))
+			func(_ AndroidMkExtraEntriesContext, entries *AndroidMkEntries) {
+				entries.AddPaths("LOCAL_ACONFIG_FILES", getAconfigFilePaths(
+					getContainerUsingProviders(ctx, mod), info.AconfigFiles))
 			},
 		)
 
 	}
 }
 
+// TODO(b/397766191): Change the signature to take ModuleProxy
+// Please only access the module's internal data through providers.
 func aconfigUpdateAndroidMkInfos(ctx fillInEntriesContext, mod Module, infos *AndroidMkProviderInfo) {
 	info, ok := OtherModuleProvider(ctx, mod, AconfigPropagatingProviderKey)
 	if !ok || len(info.AconfigFiles) == 0 {
 		return
 	}
 	// All of the files in the module potentially depend on the aconfig flag values.
-	infos.PrimaryInfo.AddPaths("LOCAL_ACONFIG_FILES", getAconfigFilePaths(mod.base(), info.AconfigFiles))
+	infos.PrimaryInfo.AddPaths("LOCAL_ACONFIG_FILES", getAconfigFilePaths(
+		getContainerUsingProviders(ctx, mod), info.AconfigFiles))
 	if len(infos.ExtraInfo) > 0 {
 		for _, ei := range (*infos).ExtraInfo {
-			ei.AddPaths("LOCAL_ACONFIG_FILES", getAconfigFilePaths(mod.base(), info.AconfigFiles))
+			ei.AddPaths("LOCAL_ACONFIG_FILES", getAconfigFilePaths(
+				getContainerUsingProviders(ctx, mod), info.AconfigFiles))
 		}
 	}
 }
@@ -224,19 +230,37 @@ func mergeAconfigFiles(ctx ModuleContext, container string, inputs Paths, genera
 	return Paths{output}
 }
 
-func getAconfigFilePaths(m *ModuleBase, aconfigFiles map[string]Paths) (paths Paths) {
-	// TODO(b/311155208): The default container here should be system.
+func getContainer(m Module) string {
 	container := "system"
-
-	if m.SocSpecific() {
+	base := m.base()
+	if base.SocSpecific() {
 		container = "vendor"
-	} else if m.ProductSpecific() {
+	} else if base.ProductSpecific() {
 		container = "product"
-	} else if m.SystemExtSpecific() {
-		// system_ext and system partitions should be treated as one container
-		container = "system"
+	} else if base.SystemExtSpecific() {
+		container = "system_ext"
 	}
 
+	return container
+}
+
+// TODO(b/397766191): Change the signature to take ModuleProxy
+// Please only access the module's internal data through providers.
+func getContainerUsingProviders(ctx OtherModuleProviderContext, m Module) string {
+	container := "system"
+	commonInfo := OtherModulePointerProviderOrDefault(ctx, m, CommonModuleInfoProvider)
+	if commonInfo.Vendor || commonInfo.Proprietary || commonInfo.SocSpecific {
+		container = "vendor"
+	} else if commonInfo.ProductSpecific {
+		container = "product"
+	} else if commonInfo.SystemExtSpecific {
+		container = "system_ext"
+	}
+
+	return container
+}
+
+func getAconfigFilePaths(container string, aconfigFiles map[string]Paths) (paths Paths) {
 	paths = append(paths, aconfigFiles[container]...)
 	if container == "system" {
 		// TODO(b/311155208): Once the default container is system, we can drop this.

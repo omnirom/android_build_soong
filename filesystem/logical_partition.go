@@ -198,6 +198,8 @@ func (l *logicalPartition) GenerateAndroidBuildActions(ctx android.ModuleContext
 
 	ctx.SetOutputFiles([]android.Path{output}, "")
 	l.output = output
+
+	setCommonFilesystemInfo(ctx, l)
 }
 
 // Add a rule that converts the filesystem for the given partition to the given rule builder. The

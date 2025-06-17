@@ -59,9 +59,9 @@ var (
 
 	// Diff two given lists while ignoring comments in the allowed deps file.
 	diffAllowedApexDepsInfoRule = pctx.AndroidStaticRule("diffAllowedApexDepsInfoRule", blueprint.RuleParams{
-		Description: "Diff ${allowed_deps_list} and ${new_allowed_deps}",
+		Description: "Diff ${allowed_deps} and ${new_allowed_deps}",
 		Command: `
-			if grep -v -h '^#' ${allowed_deps_list} | sort -u -f| diff -B -u - ${new_allowed_deps}; then
+			if grep -v '^#' ${allowed_deps} | diff -B - ${new_allowed_deps}; then
 			   touch ${out};
 			else
 				echo;
@@ -85,62 +85,54 @@ var (
 				exit 1;
 			fi;
 		`,
-	}, "allowed_deps_list", "new_allowed_deps")
+	}, "allowed_deps", "new_allowed_deps")
 )
 
 func (s *apexDepsInfoSingleton) GenerateBuildActions(ctx android.SingletonContext) {
-	allowedDepsSources := []android.OptionalPath{android.ExistentPathForSource(ctx, "packages/modules/common/build/allowed_deps.txt")}
-	extraAllowedDepsPath := ctx.Config().ExtraAllowedDepsTxt()
-	if extraAllowedDepsPath != "" {
-		allowedDepsSources = append(allowedDepsSources, android.ExistentPathForSource(ctx, extraAllowedDepsPath))
-	}
 	updatableFlatLists := android.Paths{}
-	ctx.VisitAllModules(func(module android.Module) {
-		if binaryInfo, ok := module.(android.ApexBundleDepsInfoIntf); ok {
+	ctx.VisitAllModuleProxies(func(module android.ModuleProxy) {
+		if binaryInfo, ok := android.OtherModuleProvider(ctx, module, android.ApexBundleDepsDataProvider); ok {
 			apexInfo, _ := android.OtherModuleProvider(ctx, module, android.ApexInfoProvider)
-			if path := binaryInfo.FlatListPath(); path != nil {
-				if binaryInfo.Updatable() || apexInfo.Updatable {
-					updatableFlatLists = append(updatableFlatLists, path)
+			if path := binaryInfo.FlatListPath; path != nil {
+				if binaryInfo.Updatable || apexInfo.Updatable {
+					if strings.HasPrefix(module.String(), "com.android.") {
+						updatableFlatLists = append(updatableFlatLists, path)
+					}
 				}
 			}
 		}
 	})
+
+	allowedDepsSource := android.ExistentPathForSource(ctx, "packages/modules/common/build/allowed_deps.txt")
 	newAllowedDeps := android.PathForOutput(ctx, "apex", "depsinfo", "new-allowed-deps.txt")
 	s.allowedApexDepsInfoCheckResult = android.PathForOutput(ctx, newAllowedDeps.Rel()+".check")
-	hasOneValidDepsPath := false
-	for _, allowedDepsSource := range allowedDepsSources {
-		if allowedDepsSource.Valid() {
-			hasOneValidDepsPath = true
-			updatableFlatLists = append(updatableFlatLists, allowedDepsSource.Path())
-		}
-	}
-	allowedDepsStrList := make([]string, len(allowedDepsSources))
-	for _, value := range allowedDepsSources {
-		allowedDepsStrList = append(allowedDepsStrList, value.String())
-	}
-	allowedDepsListString := strings.Join(allowedDepsStrList, " ")
-	if !hasOneValidDepsPath {
+
+	if !allowedDepsSource.Valid() {
 		// Unbundled projects may not have packages/modules/common/ checked out; ignore those.
 		ctx.Build(pctx, android.BuildParams{
 			Rule:   android.Touch,
 			Output: s.allowedApexDepsInfoCheckResult,
 		})
 	} else {
+		allowedDeps := allowedDepsSource.Path()
+
 		ctx.Build(pctx, android.BuildParams{
 			Rule:   generateApexDepsInfoFilesRule,
-			Inputs: updatableFlatLists,
+			Inputs: append(updatableFlatLists, allowedDeps),
 			Output: newAllowedDeps,
 		})
+
 		ctx.Build(pctx, android.BuildParams{
 			Rule:   diffAllowedApexDepsInfoRule,
 			Input:  newAllowedDeps,
 			Output: s.allowedApexDepsInfoCheckResult,
 			Args: map[string]string{
-				"allowed_deps_list": allowedDepsListString,
-				"new_allowed_deps":  newAllowedDeps.String(),
+				"allowed_deps":     allowedDeps.String(),
+				"new_allowed_deps": newAllowedDeps.String(),
 			},
 		})
 	}
+
 	ctx.Phony("apex-allowed-deps-check", s.allowedApexDepsInfoCheckResult)
 }
 
@@ -168,11 +160,11 @@ type apexPrebuiltInfo struct {
 func (a *apexPrebuiltInfo) GenerateBuildActions(ctx android.SingletonContext) {
 	prebuiltInfos := []android.PrebuiltInfo{}
 
-	ctx.VisitAllModules(func(m android.Module) {
+	ctx.VisitAllModuleProxies(func(m android.ModuleProxy) {
 		prebuiltInfo, exists := android.OtherModuleProvider(ctx, m, android.PrebuiltInfoProvider)
 		// Use prebuiltInfoProvider to filter out non apex soong modules.
 		// Use HideFromMake to filter out the unselected variants of a specific apex.
-		if exists && !m.IsHideFromMake() {
+		if exists && !android.OtherModulePointerProviderOrDefault(ctx, m, android.CommonModuleInfoProvider).HideFromMake {
 			prebuiltInfos = append(prebuiltInfos, prebuiltInfo)
 		}
 	})
@@ -183,8 +175,5 @@ func (a *apexPrebuiltInfo) GenerateBuildActions(ctx android.SingletonContext) {
 	}
 	a.out = android.PathForOutput(ctx, "prebuilt_info.json")
 	android.WriteFileRule(ctx, a.out, string(j))
-}
-
-func (a *apexPrebuiltInfo) MakeVars(ctx android.MakeVarsContext) {
 	ctx.DistForGoal("droidcore", a.out)
 }

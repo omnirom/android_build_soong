@@ -39,15 +39,15 @@ type ndkAbiDumpSingleton struct{}
 
 func (n *ndkAbiDumpSingleton) GenerateBuildActions(ctx android.SingletonContext) {
 	var depPaths android.Paths
-	ctx.VisitAllModules(func(module android.Module) {
-		if !module.Enabled(ctx) {
+	ctx.VisitAllModuleProxies(func(module android.ModuleProxy) {
+		if !android.OtherModulePointerProviderOrDefault(ctx, module, android.CommonModuleInfoProvider).Enabled {
 			return
 		}
 
-		if m, ok := module.(*Module); ok {
-			if installer, ok := m.installer.(*stubDecorator); ok {
-				if installer.hasAbiDump {
-					depPaths = append(depPaths, installer.abiDumpPath)
+		if ccInfo, ok := android.OtherModuleProvider(ctx, module, CcInfoProvider); ok {
+			if ccInfo.InstallerInfo != nil && ccInfo.InstallerInfo.StubDecoratorInfo != nil {
+				if ccInfo.InstallerInfo.StubDecoratorInfo.HasAbiDump {
+					depPaths = append(depPaths, ccInfo.InstallerInfo.StubDecoratorInfo.AbiDumpPath)
 				}
 			}
 		}
@@ -77,14 +77,14 @@ type ndkAbiDiffSingleton struct{}
 
 func (n *ndkAbiDiffSingleton) GenerateBuildActions(ctx android.SingletonContext) {
 	var depPaths android.Paths
-	ctx.VisitAllModules(func(module android.Module) {
-		if m, ok := module.(android.Module); ok && !m.Enabled(ctx) {
+	ctx.VisitAllModuleProxies(func(module android.ModuleProxy) {
+		if !android.OtherModulePointerProviderOrDefault(ctx, module, android.CommonModuleInfoProvider).Enabled {
 			return
 		}
 
-		if m, ok := module.(*Module); ok {
-			if installer, ok := m.installer.(*stubDecorator); ok {
-				depPaths = append(depPaths, installer.abiDiffPaths...)
+		if ccInfo, ok := android.OtherModuleProvider(ctx, module, CcInfoProvider); ok {
+			if ccInfo.InstallerInfo != nil && ccInfo.InstallerInfo.StubDecoratorInfo != nil {
+				depPaths = append(depPaths, ccInfo.InstallerInfo.StubDecoratorInfo.AbiDiffPaths...)
 			}
 		}
 	})

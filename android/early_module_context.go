@@ -146,6 +146,13 @@ func (e *earlyModuleContext) Module() Module {
 }
 
 func (e *earlyModuleContext) Config() Config {
+	// Only the system image may use the generic config.
+	// If a module builds multiple image variations, provide the generic config only for the core
+	// variant which is installed in the system partition. Other image variant may still read the
+	// original configurations.
+	if e.Module().base().UseGenericConfig() && e.Module().base().commonProperties.ImageVariation == "" {
+		return e.EarlyModuleContext.Config().(Config).genericConfig()
+	}
 	return e.EarlyModuleContext.Config().(Config)
 }
 
@@ -182,7 +189,7 @@ func (e *earlyModuleContext) Namespace() *Namespace {
 }
 
 func (e *earlyModuleContext) OtherModulePropertyErrorf(module Module, property string, fmt string, args ...interface{}) {
-	e.EarlyModuleContext.OtherModulePropertyErrorf(module, property, fmt, args...)
+	e.EarlyModuleContext.OtherModulePropertyErrorf(getWrappedModule(module), property, fmt, args...)
 }
 
 func (e *earlyModuleContext) HasMutatorFinished(mutatorName string) bool {

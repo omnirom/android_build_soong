@@ -193,7 +193,7 @@ func generateCompdbProject(compiledModule CompiledInterface, ctx android.Singlet
 			}
 			builds[src.String()] = compDbEntry{
 				Directory: android.AbsSrcDirForExistingUseCases(),
-				Arguments: getArguments(src, ctx, ccModule, ccPath, cxxPath),
+				Arguments: args,
 				File:      src.String(),
 			}
 		}

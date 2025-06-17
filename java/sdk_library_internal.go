@@ -15,11 +15,12 @@
 package java
 
 import (
-	"android/soong/android"
-	"android/soong/etc"
 	"fmt"
 	"path"
 	"strings"
+
+	"android/soong/android"
+	"android/soong/etc"
 
 	"github.com/google/blueprint/proptools"
 )
@@ -173,6 +174,20 @@ func (module *SdkLibrary) createImplLibrary(mctx android.DefaultableHookContext)
 	mctx.CreateModule(LibraryFactory, properties...)
 }
 
+// getApiSurfaceForScope returns the api surface name to use for the apiScope. If one is specified
+// in the corresponding ApiScopeProperties.Api_surface property that is used, otherwise the name of
+// the apiScope is used.
+func (module *SdkLibrary) getApiSurfaceForScope(apiScope *apiScope) *string {
+	scopeProperties := module.scopeToProperties[apiScope]
+
+	apiSurface := scopeProperties.Api_surface
+	if apiSurface == nil {
+		apiSurface = &apiScope.name
+	}
+
+	return apiSurface
+}
+
 // Creates the [Droidstubs] module with ".stubs.source.<[apiScope.name]>" that creates stubs
 // source files from the given full source files and also updates and checks the API
 // specification files (i.e. "*-current.txt", "*-removed.txt" files).
@@ -226,7 +241,7 @@ func (module *SdkLibrary) createDroidstubs(mctx android.DefaultableHookContext, 
 	props.Srcs = append(props.Srcs, module.properties.Srcs...)
 	props.Srcs = append(props.Srcs, module.sdkLibraryProperties.Api_srcs...)
 	props.Sdk_version = module.deviceProperties.Sdk_version
-	props.Api_surface = &apiScope.name
+	props.Api_surface = module.getApiSurfaceForScope(apiScope)
 	props.System_modules = module.deviceProperties.System_modules
 	props.Installable = proptools.BoolPtr(false)
 	// A droiddoc module has only one Libs property and doesn't distinguish between
@@ -778,7 +793,11 @@ var _ etc.PrebuiltEtcModule = (*sdkLibraryXml)(nil)
 
 // from android.ApexModule
 func (module *sdkLibraryXml) AvailableFor(what string) bool {
-	return true
+	return android.CheckAvailableForApex(what, module.ApexAvailableFor())
+}
+
+func (module *sdkLibraryXml) ApexAvailableFor() []string {
+	return []string{android.AvailableToPlatform, android.AvailableToAnyApex}
 }
 
 func (module *sdkLibraryXml) DepsMutator(ctx android.BottomUpMutatorContext) {
@@ -788,10 +807,8 @@ func (module *sdkLibraryXml) DepsMutator(ctx android.BottomUpMutatorContext) {
 var _ android.ApexModule = (*sdkLibraryXml)(nil)
 
 // Implements android.ApexModule
-func (module *sdkLibraryXml) ShouldSupportSdkVersion(ctx android.BaseModuleContext,
-	sdkVersion android.ApiLevel) error {
-	// sdkLibraryXml doesn't need to be checked separately because java_sdk_library is checked
-	return nil
+func (m *sdkLibraryXml) MinSdkVersionSupported(ctx android.BaseModuleContext) android.ApiLevel {
+	return android.MinApiLevel
 }
 
 // File path to the runtime implementation library
@@ -919,6 +936,8 @@ func (module *sdkLibraryXml) GenerateAndroidBuildActions(ctx android.ModuleConte
 	ctx.PackageFile(module.installDirPath, libName+".xml", module.outputFilePath)
 
 	ctx.SetOutputFiles(android.OutputPaths{module.outputFilePath}.Paths(), "")
+
+	etc.SetCommonPrebuiltEtcInfo(ctx, module)
 }
 
 func (module *sdkLibraryXml) AndroidMkEntries() []android.AndroidMkEntries {

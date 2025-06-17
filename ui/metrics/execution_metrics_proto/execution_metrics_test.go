@@ -1,4 +1,4 @@
-package metrics_proto
+package execution_metrics_proto
 
 import (
 	"testing"
@@ -6,7 +6,7 @@ import (
 	find_input_delta_proto "android/soong/cmd/find_input_delta/find_input_delta_proto"
 )
 
-func TestCombinedMetricsMessageNums(t *testing.T) {
+func TestExecutionMetricsMessageNums(t *testing.T) {
 	testCases := []struct {
 		Name         string
 		FieldNumbers map[string]int32

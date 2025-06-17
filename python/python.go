@@ -20,26 +20,28 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
+	"android/soong/cc"
+
 	"github.com/google/blueprint"
+	"github.com/google/blueprint/depset"
 	"github.com/google/blueprint/proptools"
 
 	"android/soong/android"
 )
 
-func init() {
-	registerPythonMutators(android.InitRegistrationContext)
+type PythonLibraryInfo struct {
+	SrcsPathMappings   []pathMapping
+	DataPathMappings   []pathMapping
+	SrcsZip            android.Path
+	PrecompiledSrcsZip android.Path
+	PkgPath            string
+	BundleSharedLibs   android.Paths
 }
 
-func registerPythonMutators(ctx android.RegistrationContext) {
-	ctx.PreDepsMutators(RegisterPythonPreDepsMutators)
-}
-
-// Exported to support other packages using Python modules in tests.
-func RegisterPythonPreDepsMutators(ctx android.RegisterMutatorsContext) {
-	ctx.Transition("python_version", &versionSplitTransitionMutator{})
-}
+var PythonLibraryInfoProvider = blueprint.NewProvider[PythonLibraryInfo]()
 
 // the version-specific properties that apply to python modules.
 type VersionProperties struct {
@@ -95,11 +97,20 @@ type BaseProperties struct {
 	// device.
 	Device_common_data []string `android:"path_device_common"`
 
+	// Same as data, but will add dependencies on modules via a device os variation and the
+	// device's first supported arch's variation. Useful for a host test that wants to embed a
+	// module built for device.
+	Device_first_data []string `android:"path_device_first"`
+
 	// list of java modules that provide data that should be installed alongside the test.
 	Java_data []string
 
 	// list of the Python libraries compatible both with Python2 and Python3.
 	Libs []string `android:"arch_variant"`
+
+	// TODO: b/403060602 - add unit tests for this property and related code
+	// list of shared libraries that should be packaged with the python code for this module.
+	Shared_libs []string `android:"arch_variant"`
 
 	Version struct {
 		// Python2-specific properties, including whether Python2 is supported for this module
@@ -111,18 +122,14 @@ type BaseProperties struct {
 		Py3 VersionProperties `android:"arch_variant"`
 	} `android:"arch_variant"`
 
-	// the actual version each module uses after variations created.
-	// this property name is hidden from users' perspectives, and soong will populate it during
-	// runtime.
-	Actual_version string `blueprint:"mutated"`
-
-	// whether the module is required to be built with actual_version.
-	// this is set by the python version mutator based on version-specific properties
+	// This enabled property is to accept the collapsed enabled property from the VersionProperties.
+	// It is unused now, as all builds should be python3.
 	Enabled *bool `blueprint:"mutated"`
 
-	// whether the binary is required to be built with embedded launcher for this actual_version.
-	// this is set by the python version mutator based on version-specific properties
-	Embedded_launcher *bool `blueprint:"mutated"`
+	// whether the binary is required to be built with an embedded python interpreter, defaults to
+	// true. This allows taking the resulting binary outside of the build and running it on machines
+	// that don't have python installed or may have an older version of python.
+	Embedded_launcher *bool
 }
 
 // Used to store files of current module after expanding dependencies
@@ -158,6 +165,10 @@ type PythonLibraryModule struct {
 	precompiledSrcsZip android.Path
 
 	sourceProperties android.SourceProperties
+
+	// The shared libraries that should be bundled with the python code for
+	// any standalone python binaries that depend on this module.
+	bundleSharedLibs android.Paths
 }
 
 // newModule generates new Python base module
@@ -166,16 +177,6 @@ func newModule(hod android.HostOrDeviceSupported, multilib android.Multilib) *Py
 		hod:      hod,
 		multilib: multilib,
 	}
-}
-
-// interface implemented by Python modules to provide source and data mappings and zip to python
-// modules that depend on it
-type pythonDependency interface {
-	getSrcsPathMappings() []pathMapping
-	getDataPathMappings() []pathMapping
-	getSrcsZip() android.Path
-	getPrecompiledSrcsZip() android.Path
-	getPkgPath() string
 }
 
 // getSrcsPathMappings gets this module's path mapping of src source path : runfiles destination
@@ -207,7 +208,9 @@ func (p *PythonLibraryModule) getBaseProperties() *BaseProperties {
 	return &p.properties
 }
 
-var _ pythonDependency = (*PythonLibraryModule)(nil)
+func (p *PythonLibraryModule) getBundleSharedLibs() android.Paths {
+	return p.bundleSharedLibs
+}
 
 func (p *PythonLibraryModule) init() android.Module {
 	p.AddProperties(&p.properties, &p.protoProperties, &p.sourceProperties)
@@ -236,6 +239,7 @@ type installDependencyTag struct {
 var (
 	pythonLibTag = dependencyTag{name: "pythonLib"}
 	javaDataTag  = dependencyTag{name: "javaData"}
+	sharedLibTag = dependencyTag{name: "sharedLib"}
 	// The python interpreter, with soong module name "py3-launcher" or "py3-launcher-autorun".
 	launcherTag          = dependencyTag{name: "launcher"}
 	launcherSharedLibTag = installDependencyTag{name: "launcherSharedLib"}
@@ -248,78 +252,11 @@ var (
 	pathComponentRegexp      = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_-]*$`)
 	pyExt                    = ".py"
 	protoExt                 = ".proto"
-	pyVersion2               = "PY2"
-	pyVersion3               = "PY3"
 	internalPath             = "internal"
 )
 
 type basePropertiesProvider interface {
 	getBaseProperties() *BaseProperties
-}
-
-type versionSplitTransitionMutator struct{}
-
-func (versionSplitTransitionMutator) Split(ctx android.BaseModuleContext) []string {
-	if base, ok := ctx.Module().(basePropertiesProvider); ok {
-		props := base.getBaseProperties()
-		var variants []string
-		// PY3 is first so that we alias the PY3 variant rather than PY2 if both
-		// are available
-		if proptools.BoolDefault(props.Version.Py3.Enabled, true) {
-			variants = append(variants, pyVersion3)
-		}
-		if proptools.BoolDefault(props.Version.Py2.Enabled, false) {
-			if ctx.ModuleName() != "py2-cmd" &&
-				ctx.ModuleName() != "py2-stdlib" {
-				ctx.PropertyErrorf("version.py2.enabled", "Python 2 is no longer supported, please convert to python 3.")
-			}
-			variants = append(variants, pyVersion2)
-		}
-		return variants
-	}
-	return []string{""}
-}
-
-func (versionSplitTransitionMutator) OutgoingTransition(ctx android.OutgoingTransitionContext, sourceVariation string) string {
-	return ""
-}
-
-func (versionSplitTransitionMutator) IncomingTransition(ctx android.IncomingTransitionContext, incomingVariation string) string {
-	if incomingVariation != "" {
-		return incomingVariation
-	}
-	if base, ok := ctx.Module().(basePropertiesProvider); ok {
-		props := base.getBaseProperties()
-		if proptools.BoolDefault(props.Version.Py3.Enabled, true) {
-			return pyVersion3
-		} else {
-			return pyVersion2
-		}
-	}
-
-	return ""
-}
-
-func (versionSplitTransitionMutator) Mutate(ctx android.BottomUpMutatorContext, variation string) {
-	if variation == "" {
-		return
-	}
-	if base, ok := ctx.Module().(basePropertiesProvider); ok {
-		props := base.getBaseProperties()
-		props.Actual_version = variation
-
-		var versionProps *VersionProperties
-		if variation == pyVersion3 {
-			versionProps = &props.Version.Py3
-		} else if variation == pyVersion2 {
-			versionProps = &props.Version.Py2
-		}
-
-		err := proptools.AppendMatchingProperties([]interface{}{props}, versionProps, nil)
-		if err != nil {
-			panic(err)
-		}
-	}
 }
 
 func anyHasExt(paths []string, ext string) bool {
@@ -341,24 +278,37 @@ func (p *PythonLibraryModule) anySrcHasExt(ctx android.BottomUpMutatorContext, e
 //   - if required, specifies launcher and adds launcher dependencies,
 //   - applies python version mutations to Python dependencies
 func (p *PythonLibraryModule) DepsMutator(ctx android.BottomUpMutatorContext) {
-	android.ProtoDeps(ctx, &p.protoProperties)
+	// Flatten the version.py3 props down into the main property struct. Leftover from when
+	// there was both python2 and 3 in the build, and properties could be different between them.
+	if base, ok := ctx.Module().(basePropertiesProvider); ok {
+		props := base.getBaseProperties()
 
-	versionVariation := []blueprint.Variation{
-		{"python_version", p.properties.Actual_version},
+		err := proptools.AppendMatchingProperties([]interface{}{props}, &props.Version.Py3, nil)
+		if err != nil {
+			panic(err)
+		}
 	}
+
+	android.ProtoDeps(ctx, &p.protoProperties)
 
 	// If sources contain a proto file, add dependency on libprotobuf-python
 	if p.anySrcHasExt(ctx, protoExt) && p.Name() != "libprotobuf-python" {
-		ctx.AddVariationDependencies(versionVariation, pythonLibTag, "libprotobuf-python")
+		ctx.AddDependency(ctx.Module(), pythonLibTag, "libprotobuf-python")
 	}
 
 	// Add python library dependencies for this python version variation
-	ctx.AddVariationDependencies(versionVariation, pythonLibTag, android.LastUniqueStrings(p.properties.Libs)...)
+	ctx.AddDependency(ctx.Module(), pythonLibTag, android.LastUniqueStrings(p.properties.Libs)...)
 
 	// Emulate the data property for java_data but with the arch variation overridden to "common"
 	// so that it can point to java modules.
 	javaDataVariation := []blueprint.Variation{{"arch", android.Common.String()}}
 	ctx.AddVariationDependencies(javaDataVariation, javaDataTag, p.properties.Java_data...)
+
+	if ctx.Host() {
+		ctx.AddVariationDependencies(ctx.Config().BuildOSTarget.Variations(), sharedLibTag, p.properties.Shared_libs...)
+	} else if len(p.properties.Shared_libs) > 0 {
+		ctx.PropertyErrorf("shared_libs", "shared_libs is not supported for device builds")
+	}
 
 	p.AddDepsOnPythonLauncherAndStdlib(ctx, hostStdLibTag, hostLauncherTag, hostlauncherSharedLibTag, false, ctx.Config().BuildOSTarget)
 }
@@ -390,55 +340,38 @@ func (p *PythonLibraryModule) AddDepsOnPythonLauncherAndStdlib(ctx android.Botto
 		launcherSharedLibDeps = append(launcherSharedLibDeps, "libc_musl")
 	}
 
-	switch p.properties.Actual_version {
-	case pyVersion2:
-		stdLib = "py2-stdlib"
-
-		launcherModule = "py2-launcher"
-		if autorun {
-			launcherModule = "py2-launcher-autorun"
-		}
-
-		launcherSharedLibDeps = append(launcherSharedLibDeps, "libc++")
-	case pyVersion3:
-		var prebuiltStdLib bool
-		if targetForDeps.Os.Bionic() {
-			prebuiltStdLib = false
-		} else if ctx.Config().VendorConfig("cpython3").Bool("force_build_host") {
-			prebuiltStdLib = false
-		} else {
-			prebuiltStdLib = true
-		}
-
-		if prebuiltStdLib {
-			stdLib = "py3-stdlib-prebuilt"
-		} else {
-			stdLib = "py3-stdlib"
-		}
-
-		launcherModule = "py3-launcher"
-		if autorun {
-			launcherModule = "py3-launcher-autorun"
-		}
-		if ctx.Config().HostStaticBinaries() && targetForDeps.Os == android.LinuxMusl {
-			launcherModule += "-static"
-		}
-		if ctx.Device() {
-			launcherSharedLibDeps = append(launcherSharedLibDeps, "liblog")
-		}
-	default:
-		panic(fmt.Errorf("unknown Python Actual_version: %q for module: %q.",
-			p.properties.Actual_version, ctx.ModuleName()))
+	var prebuiltStdLib bool
+	if targetForDeps.Os.Bionic() {
+		prebuiltStdLib = false
+	} else if ctx.Config().VendorConfig("cpython3").Bool("force_build_host") {
+		prebuiltStdLib = false
+	} else {
+		prebuiltStdLib = true
 	}
+
+	if prebuiltStdLib {
+		stdLib = "py3-stdlib-prebuilt"
+	} else {
+		stdLib = "py3-stdlib"
+	}
+
+	launcherModule = "py3-launcher"
+	if autorun {
+		launcherModule = "py3-launcher-autorun"
+	}
+	if ctx.Config().HostStaticBinaries() && targetForDeps.Os == android.LinuxMusl {
+		launcherModule += "-static"
+	}
+	if ctx.Device() {
+		launcherSharedLibDeps = append(launcherSharedLibDeps, "liblog")
+	}
+
 	targetVariations := targetForDeps.Variations()
 	if ctx.ModuleName() != stdLib {
-		stdLibVariations := make([]blueprint.Variation, 0, len(targetVariations)+1)
-		stdLibVariations = append(stdLibVariations, blueprint.Variation{Mutator: "python_version", Variation: p.properties.Actual_version})
-		stdLibVariations = append(stdLibVariations, targetVariations...)
 		// Using AddFarVariationDependencies for all of these because they can be for a different
 		// platform, like if the python module itself was being compiled for device, we may want
 		// the python interpreter built for host so that we can precompile python sources.
-		ctx.AddFarVariationDependencies(stdLibVariations, stdLibTag, stdLib)
+		ctx.AddFarVariationDependencies(targetVariations, stdLibTag, stdLib)
 	}
 	ctx.AddFarVariationDependencies(targetVariations, launcherTag, launcherModule)
 	ctx.AddFarVariationDependencies(targetVariations, launcherSharedLibTag, launcherSharedLibDeps...)
@@ -446,8 +379,10 @@ func (p *PythonLibraryModule) AddDepsOnPythonLauncherAndStdlib(ctx android.Botto
 
 // GenerateAndroidBuildActions performs build actions common to all Python modules
 func (p *PythonLibraryModule) GenerateAndroidBuildActions(ctx android.ModuleContext) {
+	if proptools.BoolDefault(p.properties.Version.Py2.Enabled, false) {
+		ctx.PropertyErrorf("version.py2.enabled", "Python 2 is no longer supported, please convert to python 3.")
+	}
 	expandedSrcs := android.PathsForModuleSrcExcludes(ctx, p.properties.Srcs, p.properties.Exclude_srcs)
-	android.SetProvider(ctx, blueprint.SrcsFileProviderKey, blueprint.SrcsFileProviderData{SrcPaths: expandedSrcs.Strings()})
 	// Keep before any early returns.
 	android.SetProvider(ctx, android.TestOnlyProviderKey, android.TestModuleInformation{
 		TestOnly:       Bool(p.sourceProperties.Test_only),
@@ -457,11 +392,31 @@ func (p *PythonLibraryModule) GenerateAndroidBuildActions(ctx android.ModuleCont
 	// expand data files from "data" property.
 	expandedData := android.PathsForModuleSrc(ctx, p.properties.Data)
 	expandedData = append(expandedData, android.PathsForModuleSrc(ctx, p.properties.Device_common_data)...)
+	expandedData = append(expandedData, android.PathsForModuleSrc(ctx, p.properties.Device_first_data)...)
 
 	// Emulate the data property for java_data dependencies.
-	for _, javaData := range ctx.GetDirectDepsWithTag(javaDataTag) {
+	for _, javaData := range ctx.GetDirectDepsProxyWithTag(javaDataTag) {
 		expandedData = append(expandedData, android.OutputFilesForModule(ctx, javaData, "")...)
 	}
+
+	var directImplementationDeps android.Paths
+	var transitiveImplementationDeps []depset.DepSet[android.Path]
+	ctx.VisitDirectDepsProxyWithTag(sharedLibTag, func(dep android.ModuleProxy) {
+		sharedLibInfo, _ := android.OtherModuleProvider(ctx, dep, cc.SharedLibraryInfoProvider)
+		if sharedLibInfo.SharedLibrary != nil {
+			expandedData = append(expandedData, android.OutputFilesForModule(ctx, dep, "")...)
+			directImplementationDeps = append(directImplementationDeps, android.OutputFilesForModule(ctx, dep, "")...)
+			if info, ok := android.OtherModuleProvider(ctx, dep, cc.ImplementationDepInfoProvider); ok {
+				transitiveImplementationDeps = append(transitiveImplementationDeps, info.ImplementationDeps)
+				p.bundleSharedLibs = append(p.bundleSharedLibs, info.ImplementationDeps.ToList()...)
+			}
+		} else {
+			ctx.PropertyErrorf("shared_libs", "%q of type %q is not supported", dep.Name(), ctx.OtherModuleType(dep))
+		}
+	})
+	android.SetProvider(ctx, cc.ImplementationDepInfoProvider, &cc.ImplementationDepInfo{
+		ImplementationDeps: depset.New(depset.PREORDER, directImplementationDeps, transitiveImplementationDeps),
+	})
 
 	// Validate pkg_path property
 	pkgPath := String(p.properties.Pkg_path)
@@ -487,6 +442,15 @@ func (p *PythonLibraryModule) GenerateAndroidBuildActions(ctx android.ModuleCont
 	// generate the zipfile of all source and data files
 	p.srcsZip = p.createSrcsZip(ctx, pkgPath)
 	p.precompiledSrcsZip = p.precompileSrcs(ctx)
+
+	android.SetProvider(ctx, PythonLibraryInfoProvider, PythonLibraryInfo{
+		SrcsPathMappings:   p.getSrcsPathMappings(),
+		DataPathMappings:   p.getDataPathMappings(),
+		SrcsZip:            p.getSrcsZip(),
+		PkgPath:            p.getPkgPath(),
+		PrecompiledSrcsZip: p.getPrecompiledSrcsZip(),
+		BundleSharedLibs:   p.getBundleSharedLibs(),
+	})
 }
 
 func isValidPythonPath(path string) error {
@@ -652,16 +616,16 @@ func (p *PythonLibraryModule) precompileSrcs(ctx android.ModuleContext) android.
 		stdLib = p.srcsZip
 		stdLibPkg = p.getPkgPath()
 	} else {
-		ctx.VisitDirectDepsWithTag(hostStdLibTag, func(module android.Module) {
-			if dep, ok := module.(pythonDependency); ok {
-				stdLib = dep.getPrecompiledSrcsZip()
-				stdLibPkg = dep.getPkgPath()
+		ctx.VisitDirectDepsProxyWithTag(hostStdLibTag, func(module android.ModuleProxy) {
+			if dep, ok := android.OtherModuleProvider(ctx, module, PythonLibraryInfoProvider); ok {
+				stdLib = dep.PrecompiledSrcsZip
+				stdLibPkg = dep.PkgPath
 			}
 		})
 	}
-	ctx.VisitDirectDepsWithTag(hostLauncherTag, func(module android.Module) {
-		if dep, ok := module.(IntermPathProvider); ok {
-			optionalLauncher := dep.IntermPathForModuleOut()
+	ctx.VisitDirectDepsProxyWithTag(hostLauncherTag, func(module android.ModuleProxy) {
+		if dep, ok := android.OtherModuleProvider(ctx, module, cc.LinkableInfoProvider); ok {
+			optionalLauncher := dep.OutputFile
 			if optionalLauncher.Valid() {
 				launcher = optionalLauncher.Path()
 			}
@@ -669,9 +633,9 @@ func (p *PythonLibraryModule) precompileSrcs(ctx android.ModuleContext) android.
 	})
 	var launcherSharedLibs android.Paths
 	var ldLibraryPath []string
-	ctx.VisitDirectDepsWithTag(hostlauncherSharedLibTag, func(module android.Module) {
-		if dep, ok := module.(IntermPathProvider); ok {
-			optionalPath := dep.IntermPathForModuleOut()
+	ctx.VisitDirectDepsProxyWithTag(hostlauncherSharedLibTag, func(module android.ModuleProxy) {
+		if dep, ok := android.OtherModuleProvider(ctx, module, cc.LinkableInfoProvider); ok {
+			optionalPath := dep.OutputFile
 			if optionalPath.Valid() {
 				launcherSharedLibs = append(launcherSharedLibs, optionalPath.Path())
 				ldLibraryPath = append(ldLibraryPath, filepath.Dir(optionalPath.Path().String()))
@@ -702,16 +666,6 @@ func (p *PythonLibraryModule) precompileSrcs(ctx android.ModuleContext) android.
 	return out
 }
 
-// isPythonLibModule returns whether the given module is a Python library PythonLibraryModule or not
-func isPythonLibModule(module blueprint.Module) bool {
-	if _, ok := module.(*PythonLibraryModule); ok {
-		if _, ok := module.(*PythonBinaryModule); !ok {
-			return true
-		}
-	}
-	return false
-}
-
 // collectPathsFromTransitiveDeps checks for source/data files for duplicate paths
 // for module and its transitive dependencies and collects list of data/source file
 // zips for transitive dependencies.
@@ -732,7 +686,7 @@ func (p *PythonLibraryModule) collectPathsFromTransitiveDeps(ctx android.ModuleC
 	var result android.Paths
 
 	// visit all its dependencies in depth first.
-	ctx.WalkDeps(func(child, parent android.Module) bool {
+	ctx.WalkDepsProxy(func(child, _ android.ModuleProxy) bool {
 		// we only collect dependencies tagged as python library deps
 		if ctx.OtherModuleDependencyTag(child) != pythonLibTag {
 			return false
@@ -742,32 +696,84 @@ func (p *PythonLibraryModule) collectPathsFromTransitiveDeps(ctx android.ModuleC
 		}
 		seen[child] = true
 		// Python modules only can depend on Python libraries.
-		if !isPythonLibModule(child) {
+		dep, isLibrary := android.OtherModuleProvider(ctx, child, PythonLibraryInfoProvider)
+		_, isBinary := android.OtherModuleProvider(ctx, child, PythonBinaryInfoProvider)
+		if !isLibrary || isBinary {
 			ctx.PropertyErrorf("libs",
 				"the dependency %q of module %q is not Python library!",
 				ctx.OtherModuleName(child), ctx.ModuleName())
 		}
 		// collect source and data paths, checking that there are no duplicate output file conflicts
-		if dep, ok := child.(pythonDependency); ok {
-			srcs := dep.getSrcsPathMappings()
+		if isLibrary {
+			srcs := dep.SrcsPathMappings
 			for _, path := range srcs {
 				checkForDuplicateOutputPath(ctx, destToPySrcs,
 					path.dest, path.src.String(), ctx.ModuleName(), ctx.OtherModuleName(child))
 			}
-			data := dep.getDataPathMappings()
+			data := dep.DataPathMappings
 			for _, path := range data {
 				checkForDuplicateOutputPath(ctx, destToPyData,
 					path.dest, path.src.String(), ctx.ModuleName(), ctx.OtherModuleName(child))
 			}
 			if precompiled {
-				result = append(result, dep.getPrecompiledSrcsZip())
+				result = append(result, dep.PrecompiledSrcsZip)
 			} else {
-				result = append(result, dep.getSrcsZip())
+				result = append(result, dep.SrcsZip)
 			}
 		}
 		return true
 	})
 	return result
+}
+
+func (p *PythonLibraryModule) collectSharedLibDeps(ctx android.ModuleContext) android.Paths {
+	seen := make(map[android.Module]bool)
+
+	var result android.Paths
+
+	ctx.WalkDepsProxy(func(child, _ android.ModuleProxy) bool {
+		// we only collect dependencies tagged as python library deps
+		if ctx.OtherModuleDependencyTag(child) != pythonLibTag {
+			return false
+		}
+		if seen[child] {
+			return false
+		}
+		seen[child] = true
+		dep, isLibrary := android.OtherModuleProvider(ctx, child, PythonLibraryInfoProvider)
+		if isLibrary {
+			result = append(result, dep.BundleSharedLibs...)
+		}
+		return true
+	})
+	return result
+}
+
+func (p *PythonLibraryModule) zipSharedLibs(ctx android.ModuleContext, bundleSharedLibs android.Paths) android.Path {
+	// sort the paths to keep the output deterministic
+	sort.Slice(bundleSharedLibs, func(i, j int) bool {
+		return bundleSharedLibs[i].String() < bundleSharedLibs[j].String()
+	})
+
+	parArgs := []string{"-symlinks=false", "-P lib64"}
+	paths := android.Paths{}
+	for _, path := range bundleSharedLibs {
+		// specify relative root of file in following -f arguments
+		parArgs = append(parArgs, `-C `+filepath.Dir(path.String()))
+		parArgs = append(parArgs, `-f `+path.String())
+		paths = append(paths, path)
+	}
+	srcsZip := android.PathForModuleOut(ctx, ctx.ModuleName()+".sharedlibs.srcszip")
+	ctx.Build(pctx, android.BuildParams{
+		Rule:        zip,
+		Description: "bundle shared libraries for python binary",
+		Output:      srcsZip,
+		Implicits:   paths,
+		Args: map[string]string{
+			"args": strings.Join(parArgs, " "),
+		},
+	})
+	return srcsZip
 }
 
 // chckForDuplicateOutputPath checks whether outputPath has already been included in map m, which

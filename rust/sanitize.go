@@ -53,6 +53,9 @@ type SanitizeProperties struct {
 
 	// Used when we need to place libraries in their own directory, such as ASAN.
 	InSanitizerDir bool `blueprint:"mutated"`
+
+	// ForceDisable is set by the version mutator to disable sanitization of stubs variants
+	ForceDisable bool `blueprint:"mutated"`
 }
 
 var fuzzerFlags = []string{
@@ -102,6 +105,10 @@ func (sanitize *sanitize) props() []interface{} {
 
 func (sanitize *sanitize) begin(ctx BaseModuleContext) {
 	s := &sanitize.Properties.Sanitize
+
+	if sanitize.Properties.ForceDisable {
+		return
+	}
 
 	// Disable sanitizers for musl x86 modules, rustc does not support any sanitizers.
 	if ctx.Os() == android.LinuxMusl && ctx.Arch().ArchType == android.X86 {
@@ -221,6 +228,10 @@ type sanitize struct {
 }
 
 func (sanitize *sanitize) flags(ctx ModuleContext, flags Flags, deps PathDeps) (Flags, PathDeps) {
+	if sanitize.Properties.ForceDisable {
+		return flags, deps
+	}
+
 	if !sanitize.Properties.SanitizerEnabled {
 		return flags, deps
 	}
@@ -251,6 +262,9 @@ func (sanitize *sanitize) deps(ctx BaseModuleContext, deps Deps) Deps {
 func rustSanitizerRuntimeMutator(mctx android.BottomUpMutatorContext) {
 	if mod, ok := mctx.Module().(*Module); ok && mod.sanitize != nil {
 		if !mod.Enabled(mctx) {
+			return
+		}
+		if mod.sanitize.Properties.ForceDisable {
 			return
 		}
 
@@ -364,7 +378,7 @@ func (sanitize *sanitize) isSanitizerExplicitlyDisabled(t cc.SanitizerType) bool
 // distinguish between the cases. It isn't needed though - both cases can be
 // treated identically.
 func (sanitize *sanitize) isSanitizerEnabled(t cc.SanitizerType) bool {
-	if sanitize == nil || !sanitize.Properties.SanitizerEnabled {
+	if sanitize == nil || !sanitize.Properties.SanitizerEnabled || sanitize.Properties.ForceDisable {
 		return false
 	}
 
@@ -453,7 +467,7 @@ func (mod *Module) SetInSanitizerDir() {
 }
 
 func (mod *Module) SanitizeNever() bool {
-	return Bool(mod.sanitize.Properties.Sanitize.Never)
+	return Bool(mod.sanitize.Properties.Sanitize.Never) || mod.sanitize.Properties.ForceDisable
 }
 
 var _ cc.PlatformSanitizeable = (*Module)(nil)

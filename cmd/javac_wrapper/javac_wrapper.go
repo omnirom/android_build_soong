@@ -200,6 +200,9 @@ var warningCount = regexp.MustCompile(`^([0-9]+) warning(s)?$`)
 
 var warningFilters = []*regexp.Regexp{
 	regexp.MustCompile(`bootstrap class path not set in conjunction with -source`),
+	regexp.MustCompile(`source value 8 is obsolete and will be removed in a future release`),
+	regexp.MustCompile(`target value 8 is obsolete and will be removed in a future release`),
+	regexp.MustCompile(`To suppress warnings about obsolete options, use -Xlint:-options.`),
 }
 
 var filters = []*regexp.Regexp{

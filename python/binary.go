@@ -22,7 +22,14 @@ import (
 	"strings"
 
 	"android/soong/android"
+	"android/soong/cc"
+
+	"github.com/google/blueprint"
 )
+
+type PythonBinaryInfo struct{}
+
+var PythonBinaryInfoProvider = blueprint.NewProvider[PythonBinaryInfo]()
 
 func init() {
 	registerPythonBinaryComponents(android.InitRegistrationContext)
@@ -103,12 +110,22 @@ func (p *PythonBinaryModule) GenerateAndroidBuildActions(ctx android.ModuleConte
 	p.buildBinary(ctx)
 	p.installedDest = ctx.InstallFile(installDir(ctx, "bin", "", ""),
 		p.installSource.Base(), p.installSource)
+
+	android.SetProvider(ctx, PythonBinaryInfoProvider, PythonBinaryInfo{})
+
 	ctx.SetOutputFiles(android.Paths{p.installSource}, "")
+
+	moduleInfoJSON := ctx.ModuleInfoJSON()
+	moduleInfoJSON.Class = []string{"EXECUTABLES"}
+	moduleInfoJSON.Dependencies = append(moduleInfoJSON.Dependencies, p.androidMkSharedLibs...)
+	moduleInfoJSON.SharedLibs = append(moduleInfoJSON.SharedLibs, p.androidMkSharedLibs...)
+	moduleInfoJSON.SystemSharedLibs = []string{"none"}
 }
 
 func (p *PythonBinaryModule) buildBinary(ctx android.ModuleContext) {
 	embeddedLauncher := p.isEmbeddedLauncherEnabled()
 	depsSrcsZips := p.collectPathsFromTransitiveDeps(ctx, embeddedLauncher)
+	bundleSharedLibs := p.collectSharedLibDeps(ctx)
 	main := ""
 	if p.autorun() {
 		main = p.getPyMainFile(ctx, p.srcsPathMappings)
@@ -116,13 +133,13 @@ func (p *PythonBinaryModule) buildBinary(ctx android.ModuleContext) {
 
 	var launcherPath android.OptionalPath
 	if embeddedLauncher {
-		ctx.VisitDirectDepsWithTag(launcherTag, func(m android.Module) {
-			if provider, ok := m.(IntermPathProvider); ok {
+		ctx.VisitDirectDepsProxyWithTag(launcherTag, func(m android.ModuleProxy) {
+			if provider, ok := android.OtherModuleProvider(ctx, m, cc.LinkableInfoProvider); ok {
 				if launcherPath.Valid() {
 					panic(fmt.Errorf("launcher path was found before: %q",
 						launcherPath))
 				}
-				launcherPath = provider.IntermPathForModuleOut()
+				launcherPath = provider.OutputFile
 			}
 		})
 	}
@@ -133,17 +150,25 @@ func (p *PythonBinaryModule) buildBinary(ctx android.ModuleContext) {
 		srcsZips = append(srcsZips, p.srcsZip)
 	}
 	srcsZips = append(srcsZips, depsSrcsZips...)
+	if ctx.Host() && len(bundleSharedLibs) > 0 {
+		// only bundle shared libs for host binaries
+		sharedLibZip := p.zipSharedLibs(ctx, bundleSharedLibs)
+		srcsZips = append(srcsZips, sharedLibZip)
+	}
 	p.installSource = registerBuildActionForParFile(ctx, embeddedLauncher, launcherPath,
-		p.getHostInterpreterName(ctx, p.properties.Actual_version),
-		main, p.getStem(ctx), srcsZips)
+		"python3", main, p.getStem(ctx), srcsZips)
 
 	var sharedLibs []string
 	// if embedded launcher is enabled, we need to collect the shared library dependencies of the
 	// launcher
-	for _, dep := range ctx.GetDirectDepsWithTag(launcherSharedLibTag) {
+	for _, dep := range ctx.GetDirectDepsProxyWithTag(launcherSharedLibTag) {
 		sharedLibs = append(sharedLibs, ctx.OtherModuleName(dep))
 	}
 	p.androidMkSharedLibs = sharedLibs
+
+	android.SetProvider(ctx, android.TestSuiteInfoProvider, android.TestSuiteInfo{
+		TestSuites: p.binaryProperties.Test_suites,
+	})
 }
 
 func (p *PythonBinaryModule) AndroidMkEntries() []android.AndroidMkEntries {
@@ -194,23 +219,6 @@ func (p *PythonBinaryModule) isEmbeddedLauncherEnabled() bool {
 
 func (b *PythonBinaryModule) autorun() bool {
 	return BoolDefault(b.binaryProperties.Autorun, true)
-}
-
-// get host interpreter name.
-func (p *PythonBinaryModule) getHostInterpreterName(ctx android.ModuleContext,
-	actualVersion string) string {
-	var interp string
-	switch actualVersion {
-	case pyVersion2:
-		interp = "python2.7"
-	case pyVersion3:
-		interp = "python3"
-	default:
-		panic(fmt.Errorf("unknown Python actualVersion: %q for module: %q.",
-			actualVersion, ctx.ModuleName()))
-	}
-
-	return interp
 }
 
 // find main program path within runfiles tree.

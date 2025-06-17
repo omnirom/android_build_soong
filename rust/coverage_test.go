@@ -51,10 +51,10 @@ func TestCoverageFlags(t *testing.T) {
 	}
 
 	// Just test the dylib variants unless the library coverage logic changes to distinguish between the types.
-	libfooCov := ctx.ModuleForTests("libfoo_cov", "android_arm64_armv8-a_dylib_cov").Rule("rustc")
-	libbarNoCov := ctx.ModuleForTests("libbar_nocov", "android_arm64_armv8-a_dylib").Rule("rustc")
-	fizzCov := ctx.ModuleForTests("fizz_cov", "android_arm64_armv8-a_cov").Rule("rustc")
-	buzzNoCov := ctx.ModuleForTests("buzzNoCov", "android_arm64_armv8-a").Rule("rustc")
+	libfooCov := ctx.ModuleForTests(t, "libfoo_cov", "android_arm64_armv8-a_dylib_cov").Rule("rustc")
+	libbarNoCov := ctx.ModuleForTests(t, "libbar_nocov", "android_arm64_armv8-a_dylib").Rule("rustc")
+	fizzCov := ctx.ModuleForTests(t, "fizz_cov", "android_arm64_armv8-a_cov").Rule("rustc")
+	buzzNoCov := ctx.ModuleForTests(t, "buzzNoCov", "android_arm64_armv8-a").Rule("rustc")
 
 	rustcCoverageFlags := []string{"-C instrument-coverage", " -g "}
 	for _, flag := range rustcCoverageFlags {
@@ -103,7 +103,7 @@ func TestCoverageDeps(t *testing.T) {
 			srcs: ["foo.rs"],
 		}`)
 
-	fizz := ctx.ModuleForTests("fizz", "android_arm64_armv8-a_cov").Rule("rustc")
+	fizz := ctx.ModuleForTests(t, "fizz", "android_arm64_armv8-a_cov").Rule("rustc")
 	if !strings.Contains(fizz.Args["linkFlags"], "libprofile-clang-extras.a") {
 		t.Fatalf("missing expected coverage 'libprofile-clang-extras' dependency in linkFlags: %#v", fizz.Args["linkFlags"])
 	}

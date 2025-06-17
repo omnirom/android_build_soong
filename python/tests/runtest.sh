@@ -25,14 +25,8 @@ fi
 
 if [[ ( ! -f $ANDROID_HOST_OUT/nativetest64/par_test/par_test ) ||
       ( ! -f $ANDROID_HOST_OUT/bin/py3-cmd )]]; then
-  echo "Run 'm par_test py2-cmd py3-cmd' first"
+  echo "Run 'm par_test py3-cmd' first"
   exit 1
-fi
-if [ $(uname -s) = Linux ]; then
-  if [[ ! -f $ANDROID_HOST_OUT/bin/py2-cmd ]]; then
-    echo "Run 'm par_test py2-cmd py3-cmd' first"
-    exit 1
-  fi
 fi
 
 export LD_LIBRARY_PATH=$ANDROID_HOST_OUT/lib64
@@ -47,15 +41,7 @@ ARGTEST=true $ANDROID_HOST_OUT/nativetest64/par_test/par_test --arg1 arg2
 
 cd $(dirname ${BASH_SOURCE[0]})
 
-if [ $(uname -s) = Linux ]; then
-  PYTHONPATH=/extra $ANDROID_HOST_OUT/bin/py2-cmd py-cmd_test.py
-fi
 PYTHONPATH=/extra $ANDROID_HOST_OUT/bin/py3-cmd py-cmd_test.py
-
-if [ $(uname -s) = Linux ]; then
-  ARGTEST=true PYTHONPATH=/extra $ANDROID_HOST_OUT/bin/py2-cmd py-cmd_test.py arg1 arg2
-  ARGTEST2=true PYTHONPATH=/extra $ANDROID_HOST_OUT/bin/py2-cmd py-cmd_test.py --arg1 arg2
-fi
 
 ARGTEST=true PYTHONPATH=/extra $ANDROID_HOST_OUT/bin/py3-cmd py-cmd_test.py arg1 arg2
 ARGTEST2=true PYTHONPATH=/extra $ANDROID_HOST_OUT/bin/py3-cmd py-cmd_test.py --arg1 arg2

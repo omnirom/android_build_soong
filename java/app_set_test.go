@@ -24,13 +24,14 @@ import (
 )
 
 func TestAndroidAppSet(t *testing.T) {
+	t.Parallel()
 	result := PrepareForTestWithJavaDefaultModules.RunTestWithBp(t, `
 		android_app_set {
 			name: "foo",
 			set: "prebuilts/apks/app.apks",
 			prerelease: true,
 		}`)
-	module := result.ModuleForTests("foo", "android_common")
+	module := result.ModuleForTests(t, "foo", "android_common")
 	const packedSplitApks = "foo.zip"
 	params := module.Output(packedSplitApks)
 	if params.Rule == nil {
@@ -65,6 +66,7 @@ func TestAndroidAppSet(t *testing.T) {
 }
 
 func TestAndroidAppSet_Variants(t *testing.T) {
+	t.Parallel()
 	bp := `
 		android_app_set {
 			name: "foo",
@@ -113,24 +115,24 @@ func TestAndroidAppSet_Variants(t *testing.T) {
 	}
 
 	for _, test := range testCases {
-		ctx := android.GroupFixturePreparers(
-			PrepareForTestWithJavaDefaultModules,
-			android.FixtureModifyProductVariables(func(variables android.FixtureProductVariables) {
-				variables.AAPTPrebuiltDPI = test.aaptPrebuiltDPI
-				variables.Platform_sdk_version = &test.sdkVersion
-			}),
-			android.FixtureModifyConfig(func(config android.Config) {
-				config.Targets[android.Android] = test.targets
-			}),
-		).RunTestWithBp(t, bp)
+		t.Run(test.name, func(t *testing.T) {
+			ctx := android.GroupFixturePreparers(
+				PrepareForTestWithJavaDefaultModules,
+				android.FixtureModifyProductVariables(func(variables android.FixtureProductVariables) {
+					variables.AAPTPrebuiltDPI = test.aaptPrebuiltDPI
+					variables.Platform_sdk_version = &test.sdkVersion
+				}),
+				android.FixtureModifyConfig(func(config android.Config) {
+					config.Targets[android.Android] = test.targets
+				}),
+			).RunTestWithBp(t, bp)
 
-		module := ctx.ModuleForTests("foo", "android_common")
-		const packedSplitApks = "foo.zip"
-		params := module.Output(packedSplitApks)
-		for k, v := range test.expected {
-			t.Run(test.name, func(t *testing.T) {
+			module := ctx.ModuleForTests(t, "foo", "android_common")
+			const packedSplitApks = "foo.zip"
+			params := module.Output(packedSplitApks)
+			for k, v := range test.expected {
 				android.AssertStringEquals(t, fmt.Sprintf("arg value for `%s`", k), v, params.Args[k])
-			})
-		}
+			}
+		})
 	}
 }

@@ -57,8 +57,8 @@ type soongMetricsSingleton struct{}
 
 func (soongMetricsSingleton) GenerateBuildActions(ctx SingletonContext) {
 	metrics := getSoongMetrics(ctx.Config())
-	ctx.VisitAllModules(func(m Module) {
-		if ctx.PrimaryModule(m) == m {
+	ctx.VisitAllModuleProxies(func(m ModuleProxy) {
+		if ctx.PrimaryModuleProxy(m) == m {
 			metrics.modules++
 		}
 		metrics.variants++

@@ -57,13 +57,13 @@ func TestRustAconfigLibrary(t *testing.T) {
 			}
 		`))
 
-	sourceVariant := result.ModuleForTests("libmy_rust_aconfig_library", "android_arm64_armv8-a_source")
+	sourceVariant := result.ModuleForTests(t, "libmy_rust_aconfig_library", "android_arm64_armv8-a_source")
 	rule := sourceVariant.Rule("rust_aconfig_library")
 	android.AssertStringEquals(t, "rule must contain production mode", rule.Args["mode"], "production")
 
-	dylibVariant := result.ModuleForTests("libmy_rust_aconfig_library", "android_arm64_armv8-a_dylib")
-	rlibRlibStdVariant := result.ModuleForTests("libmy_rust_aconfig_library", "android_arm64_armv8-a_rlib_rlib-std")
-	rlibDylibStdVariant := result.ModuleForTests("libmy_rust_aconfig_library", "android_arm64_armv8-a_rlib_dylib-std")
+	dylibVariant := result.ModuleForTests(t, "libmy_rust_aconfig_library", "android_arm64_armv8-a_dylib")
+	rlibRlibStdVariant := result.ModuleForTests(t, "libmy_rust_aconfig_library", "android_arm64_armv8-a_rlib_rlib-std")
+	rlibDylibStdVariant := result.ModuleForTests(t, "libmy_rust_aconfig_library", "android_arm64_armv8-a_rlib_dylib-std")
 
 	variants := []android.TestingModule{
 		dylibVariant,
@@ -143,7 +143,7 @@ func testRustCodegenModeHelper(t *testing.T, bpMode string, ruleMode string) {
 			}
 		`, bpMode))
 
-	module := result.ModuleForTests("libmy_rust_aconfig_library", "android_arm64_armv8-a_source")
+	module := result.ModuleForTests(t, "libmy_rust_aconfig_library", "android_arm64_armv8-a_source")
 	rule := module.Rule("rust_aconfig_library")
 	android.AssertStringEquals(t, "rule must contain test mode", rule.Args["mode"], ruleMode)
 }

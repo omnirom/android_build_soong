@@ -65,24 +65,6 @@ type BaseMakeVarsContext interface {
 	// dependencies to be added to it.  Phony can be called on the same name multiple
 	// times to add additional dependencies.
 	Phony(names string, deps ...Path)
-
-	// DistForGoal creates a rule to copy one or more Paths to the artifacts
-	// directory on the build server when the specified goal is built.
-	DistForGoal(goal string, paths ...Path)
-
-	// DistForGoalWithFilename creates a rule to copy a Path to the artifacts
-	// directory on the build server with the given filename when the specified
-	// goal is built.
-	DistForGoalWithFilename(goal string, path Path, filename string)
-
-	// DistForGoals creates a rule to copy one or more Paths to the artifacts
-	// directory on the build server when any of the specified goals are built.
-	DistForGoals(goals []string, paths ...Path)
-
-	// DistForGoalsWithFilename creates a rule to copy a Path to the artifacts
-	// directory on the build server with the given filename when any of the
-	// specified goals are built.
-	DistForGoalsWithFilename(goals []string, path Path, filename string)
 }
 
 // MakeVarsContext contains the set of functions available for MakeVarsProvider
@@ -102,6 +84,7 @@ type MakeVarsContext interface {
 	Errorf(format string, args ...interface{})
 
 	VisitAllModules(visit func(Module))
+	VisitAllModuleProxies(visit func(proxy ModuleProxy))
 	VisitAllModulesIf(pred func(Module) bool, visit func(Module))
 
 	// Verify the make variable matches the Soong version, fail the build
@@ -126,7 +109,7 @@ type MakeVarsContext interface {
 // MakeVarsModuleContext contains the set of functions available for modules
 // implementing the ModuleMakeVarsProvider interface.
 type MakeVarsModuleContext interface {
-	BaseMakeVarsContext
+	Config() Config
 }
 
 var _ PathContext = MakeVarsContext(nil)
@@ -168,13 +151,20 @@ func singletonMakeVarsProviderAdapter(singleton SingletonMakeVarsProvider) MakeV
 	return func(ctx MakeVarsContext) { singleton.MakeVars(ctx) }
 }
 
+type ModuleMakeVarsValue struct {
+	// Make variable name.
+	Name string
+	// Make variable value.
+	Value string
+}
+
 // ModuleMakeVarsProvider is a Module with an extra method to provide extra values to be exported to Make.
 type ModuleMakeVarsProvider interface {
-	Module
-
 	// MakeVars uses a MakeVarsModuleContext to provide extra values to be exported to Make.
-	MakeVars(ctx MakeVarsModuleContext)
+	MakeVars(ctx MakeVarsModuleContext) []ModuleMakeVarsValue
 }
+
+var ModuleMakeVarsInfoProvider = blueprint.NewProvider[[]ModuleMakeVarsValue]()
 
 // /////////////////////////////////////////////////////////////////////////////
 
@@ -185,6 +175,7 @@ func makeVarsSingletonFunc() Singleton {
 type makeVarsSingleton struct {
 	varsForTesting     []makeVarsVariable
 	installsForTesting []byte
+	lateForTesting     []byte
 }
 
 type makeVarsProvider struct {
@@ -197,11 +188,9 @@ var makeVarsInitProviders []makeVarsProvider
 
 type makeVarsContext struct {
 	SingletonContext
-	config  Config
 	pctx    PackageContext
 	vars    []makeVarsVariable
 	phonies []phony
-	dists   []dist
 }
 
 var _ MakeVarsContext = &makeVarsContext{}
@@ -220,7 +209,7 @@ type phony struct {
 
 type dist struct {
 	goals []string
-	paths []string
+	paths distCopies
 }
 
 func (s *makeVarsSingleton) GenerateBuildActions(ctx SingletonContext) {
@@ -262,28 +251,40 @@ func (s *makeVarsSingleton) GenerateBuildActions(ctx SingletonContext) {
 
 		vars = append(vars, mctx.vars...)
 		phonies = append(phonies, mctx.phonies...)
-		dists = append(dists, mctx.dists...)
 	}
 
-	ctx.VisitAllModules(func(m Module) {
-		if provider, ok := m.(ModuleMakeVarsProvider); ok && m.Enabled(ctx) {
+	singletonDists := getSingletonDists(ctx.Config())
+	singletonDists.lock.Lock()
+	dists = append(dists, singletonDists.dists...)
+	singletonDists.lock.Unlock()
+
+	ctx.VisitAllModuleProxies(func(m ModuleProxy) {
+		commonInfo := OtherModulePointerProviderOrDefault(ctx, m, CommonModuleInfoProvider)
+		if provider, ok := OtherModuleProvider(ctx, m, ModuleMakeVarsInfoProvider); ok &&
+			commonInfo.Enabled {
 			mctx := &makeVarsContext{
 				SingletonContext: ctx,
 			}
-
-			provider.MakeVars(mctx)
+			for _, val := range provider {
+				if val.Name != "" {
+					mctx.StrictRaw(val.Name, val.Value)
+				}
+			}
 
 			vars = append(vars, mctx.vars...)
 			phonies = append(phonies, mctx.phonies...)
-			dists = append(dists, mctx.dists...)
 		}
 
-		if m.ExportedToMake() {
+		if commonInfo.ExportedToMake {
 			info := OtherModuleProviderOrDefault(ctx, m, InstallFilesProvider)
 			katiInstalls = append(katiInstalls, info.KatiInstalls...)
 			katiInitRcInstalls = append(katiInitRcInstalls, info.KatiInitRcInstalls...)
 			katiVintfManifestInstalls = append(katiVintfManifestInstalls, info.KatiVintfInstalls...)
 			katiSymlinks = append(katiSymlinks, info.KatiSymlinks...)
+		}
+
+		if distInfo, ok := OtherModuleProvider(ctx, m, DistProvider); ok {
+			dists = append(dists, distInfo.Dists...)
 		}
 	})
 
@@ -318,19 +319,12 @@ func (s *makeVarsSingleton) GenerateBuildActions(ctx SingletonContext) {
 	sort.Slice(phonies, func(i, j int) bool {
 		return phonies[i].name < phonies[j].name
 	})
-	lessArr := func(a, b []string) bool {
-		if len(a) == len(b) {
-			for i := range a {
-				if a[i] < b[i] {
-					return true
-				}
-			}
-			return false
-		}
-		return len(a) < len(b)
-	}
 	sort.Slice(dists, func(i, j int) bool {
-		return lessArr(dists[i].goals, dists[j].goals) || lessArr(dists[i].paths, dists[j].paths)
+		goals := slices.Compare(dists[i].goals, dists[j].goals)
+		if goals != 0 {
+			return goals < 0
+		}
+		return slices.Compare(dists[i].paths.Strings(), dists[j].paths.Strings()) < 0
 	})
 
 	outBytes := s.writeVars(vars)
@@ -354,6 +348,7 @@ func (s *makeVarsSingleton) GenerateBuildActions(ctx SingletonContext) {
 	if ctx.Config().RunningInsideUnitTest() {
 		s.varsForTesting = vars
 		s.installsForTesting = installsBytes
+		s.lateForTesting = lateOutBytes
 	}
 }
 
@@ -458,7 +453,7 @@ func (s *makeVarsSingleton) writeLate(phonies []phony, dists []dist) []byte {
 	for _, dist := range dists {
 		fmt.Fprintf(buf, ".PHONY: %s\n", strings.Join(dist.goals, " "))
 		fmt.Fprintf(buf, "$(call dist-for-goals,%s,%s)\n",
-			strings.Join(dist.goals, " "), strings.Join(dist.paths, " "))
+			strings.Join(dist.goals, " "), strings.Join(dist.paths.Strings(), " "))
 	}
 
 	return buf.Bytes()
@@ -607,13 +602,6 @@ func (c *makeVarsContext) addPhony(name string, deps []string) {
 	c.phonies = append(c.phonies, phony{name, deps})
 }
 
-func (c *makeVarsContext) addDist(goals []string, paths []string) {
-	c.dists = append(c.dists, dist{
-		goals: goals,
-		paths: paths,
-	})
-}
-
 func (c *makeVarsContext) Strict(name, ninjaStr string) {
 	c.addVariable(name, ninjaStr, true, false)
 }
@@ -636,20 +624,4 @@ func (c *makeVarsContext) CheckRaw(name, value string) {
 
 func (c *makeVarsContext) Phony(name string, deps ...Path) {
 	c.addPhony(name, Paths(deps).Strings())
-}
-
-func (c *makeVarsContext) DistForGoal(goal string, paths ...Path) {
-	c.DistForGoals([]string{goal}, paths...)
-}
-
-func (c *makeVarsContext) DistForGoalWithFilename(goal string, path Path, filename string) {
-	c.DistForGoalsWithFilename([]string{goal}, path, filename)
-}
-
-func (c *makeVarsContext) DistForGoals(goals []string, paths ...Path) {
-	c.addDist(goals, Paths(paths).Strings())
-}
-
-func (c *makeVarsContext) DistForGoalsWithFilename(goals []string, path Path, filename string) {
-	c.addDist(goals, []string{path.String() + ":" + filename})
 }

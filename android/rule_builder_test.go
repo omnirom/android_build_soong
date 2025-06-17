@@ -358,7 +358,7 @@ func TestRuleBuilder(t *testing.T) {
 			"command3 input3 out_local/soong/module/output2 out_local/soong/module/output3 input3 out_local/soong/module/output2",
 		}
 
-		wantDepMergerCommand := "out_local/soong/host/" + ctx.Config().PrebuiltOS() + "/bin/dep_fixer " +
+		wantDepMergerCommand := "out_local/host/" + ctx.Config().PrebuiltOS() + "/bin/dep_fixer " +
 			"out_local/soong/module/DepFile out_local/soong/module/depfile out_local/soong/module/ImplicitDepFile out_local/soong/module/depfile2"
 
 		AssertDeepEquals(t, "rule.Commands()", wantCommands, rule.Commands())
@@ -388,7 +388,7 @@ func TestRuleBuilder(t *testing.T) {
 			"command3 input3 __SBOX_SANDBOX_DIR__/out/output2 __SBOX_SANDBOX_DIR__/out/output3 input3 __SBOX_SANDBOX_DIR__/out/output2",
 		}
 
-		wantDepMergerCommand := "out_local/soong/host/" + ctx.Config().PrebuiltOS() + "/bin/dep_fixer __SBOX_SANDBOX_DIR__/out/DepFile __SBOX_SANDBOX_DIR__/out/depfile __SBOX_SANDBOX_DIR__/out/ImplicitDepFile __SBOX_SANDBOX_DIR__/out/depfile2"
+		wantDepMergerCommand := "out_local/host/" + ctx.Config().PrebuiltOS() + "/bin/dep_fixer __SBOX_SANDBOX_DIR__/out/DepFile __SBOX_SANDBOX_DIR__/out/depfile __SBOX_SANDBOX_DIR__/out/ImplicitDepFile __SBOX_SANDBOX_DIR__/out/depfile2"
 
 		AssertDeepEquals(t, "rule.Commands()", wantCommands, rule.Commands())
 
@@ -651,7 +651,7 @@ func TestRuleBuilder_Build(t *testing.T) {
 		outFile := "out/soong/.intermediates/foo/gen/foo"
 		rspFile := "out/soong/.intermediates/foo/rsp"
 		rspFile2 := "out/soong/.intermediates/foo/rsp2"
-		module := result.ModuleForTests("foo", "")
+		module := result.ModuleForTests(t, "foo", "")
 		check(t, module.Rule("rule"), module.Output(rspFile2),
 			"cp in "+outFile+" @"+rspFile+" @"+rspFile2,
 			outFile, outFile+".d", rspFile, rspFile2, true, nil, nil)
@@ -664,11 +664,11 @@ func TestRuleBuilder_Build(t *testing.T) {
 		rspFile := filepath.Join(outDir, "rsp")
 		rspFile2 := filepath.Join(outDir, "rsp2")
 		manifest := filepath.Join(outDir, "sbox.textproto")
-		sbox := filepath.Join("out", "soong", "host", result.Config.PrebuiltOS(), "bin/sbox")
+		sbox := filepath.Join("out", "host", result.Config.PrebuiltOS(), "bin/sbox")
 		sandboxPath := shared.TempDirForOutDir("out/soong")
 
 		cmd := sbox + ` --sandbox-path ` + sandboxPath + ` --output-dir ` + sboxOutDir + ` --manifest ` + manifest
-		module := result.ModuleForTests("foo_sbox", "")
+		module := result.ModuleForTests(t, "foo_sbox", "")
 		check(t, module.Output("gen/foo_sbox"), module.Output(rspFile2),
 			cmd, outFile, depFile, rspFile, rspFile2, false, []string{manifest}, []string{sbox})
 	})
@@ -680,12 +680,12 @@ func TestRuleBuilder_Build(t *testing.T) {
 		rspFile := filepath.Join(outDir, "rsp")
 		rspFile2 := filepath.Join(outDir, "rsp2")
 		manifest := filepath.Join(outDir, "sbox.textproto")
-		sbox := filepath.Join("out", "soong", "host", result.Config.PrebuiltOS(), "bin/sbox")
+		sbox := filepath.Join("out", "host", result.Config.PrebuiltOS(), "bin/sbox")
 		sandboxPath := shared.TempDirForOutDir("out/soong")
 
 		cmd := sbox + ` --sandbox-path ` + sandboxPath + ` --output-dir ` + sboxOutDir + ` --manifest ` + manifest
 
-		module := result.ModuleForTests("foo_sbox_inputs", "")
+		module := result.ModuleForTests(t, "foo_sbox_inputs", "")
 		check(t, module.Output("gen/foo_sbox_inputs"), module.Output(rspFile2),
 			cmd, outFile, depFile, rspFile, rspFile2, false, []string{manifest}, []string{sbox})
 	})
@@ -693,7 +693,7 @@ func TestRuleBuilder_Build(t *testing.T) {
 		outFile := filepath.Join("out/soong/singleton/gen/baz")
 		rspFile := filepath.Join("out/soong/singleton/rsp")
 		rspFile2 := filepath.Join("out/soong/singleton/rsp2")
-		singleton := result.SingletonForTests("rule_builder_test")
+		singleton := result.SingletonForTests(t, "rule_builder_test")
 		check(t, singleton.Rule("rule"), singleton.Output(rspFile2),
 			"cp in "+outFile+" @"+rspFile+" @"+rspFile2,
 			outFile, outFile+".d", rspFile, rspFile2, true, nil, nil)
@@ -756,14 +756,14 @@ func TestRuleBuilderHashInputs(t *testing.T) {
 	for _, test := range testcases {
 		t.Run(test.name, func(t *testing.T) {
 			t.Run("sbox", func(t *testing.T) {
-				gen := result.ModuleForTests(test.name+"_sbox", "")
+				gen := result.ModuleForTests(t, test.name+"_sbox", "")
 				manifest := RuleBuilderSboxProtoForTests(t, result.TestContext, gen.Output("sbox.textproto"))
 				hash := manifest.Commands[0].GetInputHash()
 
 				AssertStringEquals(t, "hash", test.expectedHash, hash)
 			})
 			t.Run("", func(t *testing.T) {
-				gen := result.ModuleForTests(test.name+"", "")
+				gen := result.ModuleForTests(t, test.name+"", "")
 				command := gen.Output("gen/" + test.name).RuleParams.Command
 				if g, w := command, " # hash of input list: "+test.expectedHash; !strings.HasSuffix(g, w) {
 					t.Errorf("Expected command line to end with %q, got %q", w, g)

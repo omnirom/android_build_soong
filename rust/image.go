@@ -137,7 +137,7 @@ func (mod *Module) InstallInVendor() bool {
 	// Additionally check if this module is inVendor() that means it is a "vendor" variant of a
 	// module. As well as SoC specific modules, vendor variants must be installed to /vendor
 	// unless they have "odm_available: true".
-	return mod.InVendor() && !mod.VendorVariantToOdm()
+	return mod.HasVendorVariant() && mod.InVendor() && !mod.VendorVariantToOdm()
 }
 
 func (mod *Module) InstallInOdm() bool {

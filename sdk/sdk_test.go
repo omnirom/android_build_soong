@@ -40,6 +40,7 @@ func TestMain(m *testing.M) {
 // Ensure that prebuilt modules have the same effective visibility as the source
 // modules.
 func TestSnapshotVisibility(t *testing.T) {
+	t.Parallel()
 	packageBp := `
 		package {
 			default_visibility: ["//other/foo"],
@@ -160,6 +161,7 @@ java_import {
 }
 
 func TestSdkInstall(t *testing.T) {
+	t.Parallel()
 	sdk := `
 		sdk {
 			name: "mysdk",
@@ -326,6 +328,7 @@ func TestCommonValueOptimization_InvalidArchSpecificVariants(t *testing.T) {
 
 // Ensure that sdk snapshot related environment variables work correctly.
 func TestSnapshot_EnvConfiguration(t *testing.T) {
+	t.Parallel()
 	bp := `
 		sdk {
 			name: "mysdk",
@@ -347,11 +350,12 @@ func TestSnapshot_EnvConfiguration(t *testing.T) {
 	)
 
 	checkZipFile := func(t *testing.T, result *android.TestResult, expected string) {
-		zipRule := result.ModuleForTests("mysdk", "common_os").Rule("SnapshotZipFiles")
+		zipRule := result.ModuleForTests(t, "mysdk", "common_os").Rule("SnapshotZipFiles")
 		android.AssertStringEquals(t, "snapshot zip file", expected, zipRule.Output.String())
 	}
 
 	t.Run("no env variables", func(t *testing.T) {
+		t.Parallel()
 		result := preparer.RunTest(t)
 
 		checkZipFile(t, result, "out/soong/.intermediates/mysdk/common_os/mysdk-current.zip")
@@ -377,6 +381,7 @@ java_import {
 	})
 
 	t.Run("SOONG_SDK_SNAPSHOT_TARGET_BUILD_RELEASE=S", func(t *testing.T) {
+		t.Parallel()
 		result := android.GroupFixturePreparers(
 			prepareForSdkTestWithJava,
 			java.PrepareForTestWithJavaDefaultModules,
@@ -468,6 +473,7 @@ java_sdk_library_import {
 	})
 
 	t.Run("test replacing exportable module", func(t *testing.T) {
+		t.Parallel()
 		result := android.GroupFixturePreparers(
 			prepareForSdkTestWithJava,
 			java.PrepareForTestWithJavaDefaultModules,

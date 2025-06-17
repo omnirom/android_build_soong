@@ -546,7 +546,7 @@ func (p *nativeLibInfoProperties) PopulateFromVariant(ctx android.SdkMemberConte
 		specifiedDeps = ccModule.linker.linkerSpecifiedDeps(ctx.SdkModuleContext(), ccModule, specifiedDeps)
 
 		if lib := ccModule.library; lib != nil {
-			if !lib.hasStubsVariants() {
+			if !lib.HasStubsVariants() {
 				// Propagate dynamic dependencies for implementation libs, but not stubs.
 				p.SharedLibs = specifiedDeps.sharedLibs
 			} else {
@@ -554,8 +554,8 @@ func (p *nativeLibInfoProperties) PopulateFromVariant(ctx android.SdkMemberConte
 				// ccModule.StubsVersion()) if the module is versioned. 2. Ensure that all
 				// the versioned stub libs are retained in the prebuilt tree; currently only
 				// the stub corresponding to ccModule.StubsVersion() is.
-				p.StubsVersions = lib.allStubsVersions()
-				if lib.buildStubs() && ccModule.stubsSymbolFilePath() == nil {
+				p.StubsVersions = lib.AllStubsVersions()
+				if lib.BuildStubs() && ccModule.stubsSymbolFilePath() == nil {
 					ctx.ModuleErrorf("Could not determine symbol_file")
 				} else {
 					p.StubsSymbolFilePath = ccModule.stubsSymbolFilePath()
@@ -573,9 +573,8 @@ func (p *nativeLibInfoProperties) PopulateFromVariant(ctx android.SdkMemberConte
 
 func getRequiredMemberOutputFile(ctx android.SdkMemberContext, ccModule *Module) android.Path {
 	var path android.Path
-	outputFile := ccModule.OutputFile()
-	if outputFile.Valid() {
-		path = outputFile.Path()
+	if info, ok := android.OtherModuleProvider(ctx.SdkModuleContext(), ccModule, LinkableInfoProvider); ok && info.OutputFile.Valid() {
+		path = info.OutputFile.Path()
 	} else {
 		ctx.SdkModuleContext().ModuleErrorf("member variant %s does not have a valid output file", ccModule)
 	}

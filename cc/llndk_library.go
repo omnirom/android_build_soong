@@ -63,23 +63,51 @@ type llndkLibraryProperties struct {
 }
 
 func makeLlndkVars(ctx android.MakeVarsContext) {
-	// Make uses LLNDK_MOVED_TO_APEX_LIBRARIES to generate the linker config.
-	movedToApexLlndkLibraries := make(map[string]bool)
-	ctx.VisitAllModules(func(module android.Module) {
-		if library := moduleLibraryInterface(module); library != nil && library.hasLLNDKStubs() {
-			if library.isLLNDKMovedToApex() {
-				name := library.implementationModuleName(module.(*Module).BaseModuleName())
-				movedToApexLlndkLibraries[name] = true
-			}
-		}
-	})
 
-	ctx.Strict("LLNDK_MOVED_TO_APEX_LIBRARIES",
-		strings.Join(android.SortedKeys(movedToApexLlndkLibraries), " "))
 }
 
 func init() {
 	RegisterLlndkLibraryTxtType(android.InitRegistrationContext)
+	android.RegisterParallelSingletonType("movedToApexLlndkLibraries", movedToApexLlndkLibrariesFactory)
+}
+
+func movedToApexLlndkLibrariesFactory() android.Singleton {
+	return &movedToApexLlndkLibraries{}
+}
+
+type movedToApexLlndkLibraries struct {
+	movedToApexLlndkLibraries []string
+}
+
+func (s *movedToApexLlndkLibraries) GenerateBuildActions(ctx android.SingletonContext) {
+	// Make uses LLNDK_MOVED_TO_APEX_LIBRARIES to generate the linker config.
+	movedToApexLlndkLibrariesMap := make(map[string]bool)
+	ctx.VisitAllModuleProxies(func(module android.ModuleProxy) {
+		if library, ok := android.OtherModuleProvider(ctx, module, LinkableInfoProvider); ok {
+			if library.HasLLNDKStubs && library.IsLLNDKMovedToApex {
+				movedToApexLlndkLibrariesMap[library.ImplementationModuleName] = true
+			}
+		}
+	})
+	s.movedToApexLlndkLibraries = android.SortedKeys(movedToApexLlndkLibrariesMap)
+
+	var sb strings.Builder
+	for i, l := range s.movedToApexLlndkLibraries {
+		if i > 0 {
+			sb.WriteRune(' ')
+		}
+		sb.WriteString(l)
+		sb.WriteString(".so")
+	}
+	android.WriteFileRule(ctx, MovedToApexLlndkLibrariesFile(ctx), sb.String())
+}
+
+func MovedToApexLlndkLibrariesFile(ctx android.PathContext) android.WritablePath {
+	return android.PathForIntermediates(ctx, "moved_to_apex_llndk_libraries.txt")
+}
+
+func (s *movedToApexLlndkLibraries) MakeVars(ctx android.MakeVarsContext) {
+	ctx.Strict("LLNDK_MOVED_TO_APEX_LIBRARIES", strings.Join(s.movedToApexLlndkLibraries, " "))
 }
 
 func RegisterLlndkLibraryTxtType(ctx android.RegistrationContext) {
@@ -118,16 +146,20 @@ func (txt *llndkLibrariesTxtModule) GenerateAndroidBuildActions(ctx android.Modu
 	ctx.InstallFile(installPath, filename, txt.outputFile)
 
 	ctx.SetOutputFiles(android.Paths{txt.outputFile}, "")
+
+	etc.SetCommonPrebuiltEtcInfo(ctx, txt)
 }
 
-func getVndkFileName(m *Module) (string, error) {
-	if library, ok := m.linker.(*libraryDecorator); ok {
-		return library.getLibNameHelper(m.BaseModuleName(), true, false) + ".so", nil
+func getVndkFileName(info *LinkerInfo) (string, error) {
+	if info != nil {
+		if info.LibraryDecoratorInfo != nil {
+			return info.LibraryDecoratorInfo.VndkFileName, nil
+		}
+		if info.PrebuiltLibraryLinkerInfo != nil {
+			return info.PrebuiltLibraryLinkerInfo.VndkFileName, nil
+		}
 	}
-	if prebuilt, ok := m.linker.(*prebuiltLibraryLinker); ok {
-		return prebuilt.libraryDecorator.getLibNameHelper(m.BaseModuleName(), true, false) + ".so", nil
-	}
-	return "", fmt.Errorf("VNDK library should have libraryDecorator or prebuiltLibraryLinker as linker: %T", m.linker)
+	return "", fmt.Errorf("VNDK library should have libraryDecorator or prebuiltLibraryLinker as linker: %T", info)
 }
 
 func (txt *llndkLibrariesTxtModule) GenerateSingletonBuildActions(ctx android.SingletonContext) {
@@ -136,9 +168,17 @@ func (txt *llndkLibrariesTxtModule) GenerateSingletonBuildActions(ctx android.Si
 		return
 	}
 
-	ctx.VisitAllModules(func(m android.Module) {
-		if c, ok := m.(*Module); ok && c.VendorProperties.IsLLNDK && !c.Header() && !c.IsVndkPrebuiltLibrary() {
-			filename, err := getVndkFileName(c)
+	ctx.VisitAllModuleProxies(func(m android.ModuleProxy) {
+		ccInfo, ok := android.OtherModuleProvider(ctx, m, CcInfoProvider)
+		if !ok {
+			return
+		}
+		linkableInfo, ok := android.OtherModuleProvider(ctx, m, LinkableInfoProvider)
+		if !ok {
+			return
+		}
+		if linkableInfo.IsLlndk && !linkableInfo.Header && !linkableInfo.IsVndkPrebuiltLibrary {
+			filename, err := getVndkFileName(ccInfo.LinkerInfo)
 			if err != nil {
 				ctx.ModuleErrorf(m, "%s", err)
 			}
@@ -194,10 +234,10 @@ func llndkMutator(mctx android.BottomUpMutatorContext) {
 	lib, isLib := m.linker.(*libraryDecorator)
 	prebuiltLib, isPrebuiltLib := m.linker.(*prebuiltLibraryLinker)
 
-	if m.InVendorOrProduct() && isLib && lib.hasLLNDKStubs() {
+	if m.InVendorOrProduct() && isLib && lib.HasLLNDKStubs() {
 		m.VendorProperties.IsLLNDK = true
 	}
-	if m.InVendorOrProduct() && isPrebuiltLib && prebuiltLib.hasLLNDKStubs() {
+	if m.InVendorOrProduct() && isPrebuiltLib && prebuiltLib.HasLLNDKStubs() {
 		m.VendorProperties.IsLLNDK = true
 	}
 

@@ -41,7 +41,7 @@ func TestOrderfileProfileSharedLibrary(t *testing.T) {
 
 	expectedCFlag := "-forder-file-instrumentation"
 
-	libTest := result.ModuleForTests("libTest", "android_arm64_armv8-a_shared")
+	libTest := result.ModuleForTests(t, "libTest", "android_arm64_armv8-a_shared")
 
 	// Check cFlags of orderfile-enabled module
 	cFlags := libTest.Rule("cc").Args["cFlags"]
@@ -77,7 +77,7 @@ func TestOrderfileLoadSharedLibrary(t *testing.T) {
 
 	expectedCFlag := "-Wl,--symbol-ordering-file=toolchain/pgo-profiles/orderfiles/libTest.orderfile"
 
-	libTest := result.ModuleForTests("libTest", "android_arm64_armv8-a_shared")
+	libTest := result.ModuleForTests(t, "libTest", "android_arm64_armv8-a_shared")
 
 	// Check ldFlags of orderfile-enabled module
 	ldFlags := libTest.Rule("ld").Args["ldFlags"]
@@ -106,7 +106,7 @@ func TestOrderfileProfileBinary(t *testing.T) {
 
 	expectedCFlag := "-forder-file-instrumentation"
 
-	test := result.ModuleForTests("test", "android_arm64_armv8-a")
+	test := result.ModuleForTests(t, "test", "android_arm64_armv8-a")
 
 	// Check cFlags of orderfile-enabled module
 	cFlags := test.Rule("cc").Args["cFlags"]
@@ -142,7 +142,7 @@ func TestOrderfileLoadBinary(t *testing.T) {
 
 	expectedCFlag := "-Wl,--symbol-ordering-file=toolchain/pgo-profiles/orderfiles/test.orderfile"
 
-	test := result.ModuleForTests("test", "android_arm64_armv8-a")
+	test := result.ModuleForTests(t, "test", "android_arm64_armv8-a")
 
 	// Check ldFlags of orderfile-enabled module
 	ldFlags := test.Rule("ld").Args["ldFlags"]
@@ -185,7 +185,7 @@ func TestOrderfileProfilePropagateStaticDeps(t *testing.T) {
 	expectedCFlag := "-forder-file-instrumentation"
 
 	// Check cFlags of orderfile-enabled module
-	libTest := result.ModuleForTests("libTest", "android_arm64_armv8-a_shared")
+	libTest := result.ModuleForTests(t, "libTest", "android_arm64_armv8-a_shared")
 
 	cFlags := libTest.Rule("cc").Args["cFlags"]
 	if !strings.Contains(cFlags, expectedCFlag) {
@@ -193,8 +193,8 @@ func TestOrderfileProfilePropagateStaticDeps(t *testing.T) {
 	}
 
 	// Check cFlags of orderfile variant static libraries
-	libFooOfVariant := result.ModuleForTests("libFoo", "android_arm64_armv8-a_static_orderfile")
-	libBarOfVariant := result.ModuleForTests("libBar", "android_arm64_armv8-a_static_orderfile")
+	libFooOfVariant := result.ModuleForTests(t, "libFoo", "android_arm64_armv8-a_static_orderfile")
+	libBarOfVariant := result.ModuleForTests(t, "libBar", "android_arm64_armv8-a_static_orderfile")
 
 	cFlags = libFooOfVariant.Rule("cc").Args["cFlags"]
 	if !strings.Contains(cFlags, expectedCFlag) {
@@ -216,8 +216,8 @@ func TestOrderfileProfilePropagateStaticDeps(t *testing.T) {
 	}
 
 	// Check cFlags of the non-orderfile variant static libraries
-	libFoo := result.ModuleForTests("libFoo", "android_arm64_armv8-a_static")
-	libBar := result.ModuleForTests("libBar", "android_arm64_armv8-a_static")
+	libFoo := result.ModuleForTests(t, "libFoo", "android_arm64_armv8-a_static")
+	libBar := result.ModuleForTests(t, "libBar", "android_arm64_armv8-a_static")
 
 	cFlags = libFoo.Rule("cc").Args["cFlags"]
 	if strings.Contains(cFlags, expectedCFlag) {
@@ -274,15 +274,15 @@ func TestOrderfileLoadPropagateStaticDeps(t *testing.T) {
 	expectedCFlag := "-Wl,--symbol-ordering-file=toolchain/pgo-profiles/orderfiles/test.orderfile"
 
 	// Check ldFlags of orderfile-enabled module
-	libTest := result.ModuleForTests("libTest", "android_arm64_armv8-a_shared")
+	libTest := result.ModuleForTests(t, "libTest", "android_arm64_armv8-a_shared")
 
 	ldFlags := libTest.Rule("ld").Args["ldFlags"]
 	if !strings.Contains(ldFlags, expectedCFlag) {
 		t.Errorf("Expected 'libTest' to load orderfile, but did not find %q in ldFlags %q", expectedCFlag, ldFlags)
 	}
 
-	libFoo := result.ModuleForTests("libFoo", "android_arm64_armv8-a_static")
-	libBar := result.ModuleForTests("libBar", "android_arm64_armv8-a_static")
+	libFoo := result.ModuleForTests(t, "libFoo", "android_arm64_armv8-a_static")
+	libBar := result.ModuleForTests(t, "libBar", "android_arm64_armv8-a_static")
 
 	// Check dependency edge from orderfile-enabled module to non-orderfile variant static libraries
 	if !hasDirectDep(result, libTest.Module(), libFoo.Module()) {
@@ -343,7 +343,7 @@ func TestOrderfileProfilePropagateSharedDeps(t *testing.T) {
 	expectedCFlag := "-forder-file-instrumentation"
 
 	// Check cFlags of orderfile-enabled module
-	libTest := result.ModuleForTests("libTest", "android_arm64_armv8-a_shared")
+	libTest := result.ModuleForTests(t, "libTest", "android_arm64_armv8-a_shared")
 
 	cFlags := libTest.Rule("cc").Args["cFlags"]
 	if !strings.Contains(cFlags, expectedCFlag) {
@@ -351,8 +351,8 @@ func TestOrderfileProfilePropagateSharedDeps(t *testing.T) {
 	}
 
 	// Check cFlags of the static and shared libraries
-	libFoo := result.ModuleForTests("libFoo", "android_arm64_armv8-a_shared")
-	libBar := result.ModuleForTests("libBar", "android_arm64_armv8-a_static")
+	libFoo := result.ModuleForTests(t, "libFoo", "android_arm64_armv8-a_shared")
+	libBar := result.ModuleForTests(t, "libBar", "android_arm64_armv8-a_static")
 
 	cFlags = libFoo.Rule("cc").Args["cFlags"]
 	if strings.Contains(cFlags, expectedCFlag) {
@@ -423,7 +423,7 @@ func TestOrderfileProfileStaticLibrary(t *testing.T) {
 	expectedCFlag := "-forder-file-instrumentation"
 
 	// Check cFlags of module
-	libTest := result.ModuleForTests("libTest", "android_arm64_armv8-a_static")
+	libTest := result.ModuleForTests(t, "libTest", "android_arm64_armv8-a_static")
 
 	cFlags := libTest.Rule("cc").Args["cFlags"]
 	if strings.Contains(cFlags, expectedCFlag) {
@@ -431,8 +431,8 @@ func TestOrderfileProfileStaticLibrary(t *testing.T) {
 	}
 
 	// Check cFlags of the static libraries
-	libFoo := result.ModuleForTests("libFoo", "android_arm64_armv8-a_static")
-	libBar := result.ModuleForTests("libBar", "android_arm64_armv8-a_static")
+	libFoo := result.ModuleForTests(t, "libFoo", "android_arm64_armv8-a_static")
+	libBar := result.ModuleForTests(t, "libBar", "android_arm64_armv8-a_static")
 
 	cFlags = libFoo.Rule("cc").Args["cFlags"]
 	if strings.Contains(cFlags, expectedCFlag) {

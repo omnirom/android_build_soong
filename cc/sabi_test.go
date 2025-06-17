@@ -48,16 +48,16 @@ func TestSabi(t *testing.T) {
 		PrepareForTestWithCcDefaultModules,
 	).RunTestWithBp(t, bp)
 
-	libsabiStatic := result.ModuleForTests("libsabi", "android_arm64_armv8-a_static_sabi")
+	libsabiStatic := result.ModuleForTests(t, "libsabi", "android_arm64_armv8-a_static_sabi")
 	sabiObjSDump := libsabiStatic.Output("obj/sabi.sdump")
 
-	libDirect := result.ModuleForTests("libdirect", "android_arm64_armv8-a_static_sabi")
+	libDirect := result.ModuleForTests(t, "libdirect", "android_arm64_armv8-a_static_sabi")
 	directObjSDump := libDirect.Output("obj/direct.sdump")
 
-	libTransitive := result.ModuleForTests("libtransitive", "android_arm64_armv8-a_static_sabi")
+	libTransitive := result.ModuleForTests(t, "libtransitive", "android_arm64_armv8-a_static_sabi")
 	transitiveObjSDump := libTransitive.Output("obj/transitive.sdump")
 
-	libsabiShared := result.ModuleForTests("libsabi", "android_arm64_armv8-a_shared")
+	libsabiShared := result.ModuleForTests(t, "libsabi", "android_arm64_armv8-a_shared")
 	sabiLink := libsabiShared.Rule("sAbiLink")
 
 	android.AssertStringListContains(t, "sabi link inputs", sabiLink.Inputs.Strings(), sabiObjSDump.Output.String())

@@ -74,7 +74,7 @@ func TestAconfigDeclarationsGroup(t *testing.T) {
 
 	// Check if srcjar files are correctly passed to the reverse dependency of
 	// aconfig_declarations_group module
-	bazModule := result.ModuleForTests("baz", "android_common")
+	bazModule := result.ModuleForTests(t, "baz", "android_common")
 	bazJavacSrcjars := bazModule.Rule("javac").Args["srcJars"]
 	errorMessage := "baz javac argument expected to contain srcjar provided by aconfig_declrations_group"
 	android.AssertStringDoesContain(t, errorMessage, bazJavacSrcjars, "foo-java.srcjar")

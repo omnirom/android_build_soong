@@ -51,6 +51,7 @@ var avbPubKeyRule = pctx.AndroidStaticRule("avbpubkey",
 		Command: `${avbtool} extract_public_key --key ${in} --output ${out}.tmp` +
 			` && ( if cmp -s ${out}.tmp ${out} ; then rm ${out}.tmp ; else mv ${out}.tmp ${out} ; fi )`,
 		CommandDeps: []string{"${avbtool}"},
+		Restat:      true,
 		Description: "Extracting system_other avb key",
 	})
 

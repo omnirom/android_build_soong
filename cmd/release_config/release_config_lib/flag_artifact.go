@@ -189,7 +189,7 @@ func (fa *FlagArtifact) UpdateValue(flagValue FlagValue) error {
 	if redacted {
 		fa.Redact()
 		flagValue.proto.Value = fa.Value
-		fmt.Printf("Redacting flag %s in %s\n", name, flagValue.path)
+		warnf("Redacting flag %s in %s\n", name, flagValue.path)
 	} else {
 		// If we are assigning a value, then the flag is no longer redacted.
 		fa.Redacted = false

@@ -17,6 +17,7 @@ package android
 import "encoding/gob"
 
 func init() {
+	gob.Register(applicableLicensesPropertyImpl{})
 	gob.Register(extraFilesZip{})
 	gob.Register(InstallPath{})
 	gob.Register(ModuleGenPath{})

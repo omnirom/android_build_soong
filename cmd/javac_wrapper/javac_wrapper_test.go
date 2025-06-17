@@ -90,6 +90,15 @@ warning: [options] bootstrap class path not set in conjunction with -source 1.9\
 `,
 		out: "\n\x1b[1m\x1b[35mwarning:\x1b[0m\x1b[1m foo\x1b[0m\n1 warning\n",
 	},
+	{
+		in: `
+warning: [options] source value 8 is obsolete and will be removed in a future release
+warning: [options] target value 8 is obsolete and will be removed in a future release
+warning: [options] To suppress warnings about obsolete options, use -Xlint:-options.
+3 warnings
+`,
+		out: "\n",
+	},
 }
 
 func TestJavacColorize(t *testing.T) {

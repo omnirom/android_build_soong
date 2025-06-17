@@ -77,7 +77,7 @@ Did you mean to use an annotation of ",omitempty"?
 func TestProductConfigAnnotations(t *testing.T) {
 	err := validateConfigAnnotations(&ProductVariables{})
 	if err != nil {
-		t.Errorf(err.Error())
+		t.Error(err.Error())
 	}
 }
 
@@ -213,13 +213,18 @@ func TestConfiguredJarList(t *testing.T) {
 	})
 }
 
-func (p partialCompileFlags) updateEnabled(value bool) partialCompileFlags {
-	p.enabled = value
+func (p partialCompileFlags) updateUseD8(value bool) partialCompileFlags {
+	p.Use_d8 = value
 	return p
 }
 
-func (p partialCompileFlags) updateUseD8(value bool) partialCompileFlags {
-	p.use_d8 = value
+func (p partialCompileFlags) updateDisableApiLint(value bool) partialCompileFlags {
+	p.Disable_api_lint = value
+	return p
+}
+
+func (p partialCompileFlags) updateDisableStubValidation(value bool) partialCompileFlags {
+	p.Disable_stub_validation = value
 	return p
 }
 
@@ -239,12 +244,31 @@ func TestPartialCompile(t *testing.T) {
 	}{
 		{"", true, defaultPartialCompileFlags},
 		{"false", true, partialCompileFlags{}},
-		{"true", true, defaultPartialCompileFlags.updateEnabled(true)},
+		{"true", true, enabledPartialCompileFlags},
 		{"true", false, partialCompileFlags{}},
-		{"true,use_d8", true, defaultPartialCompileFlags.updateEnabled(true).updateUseD8(true)},
-		{"true,-use_d8", true, defaultPartialCompileFlags.updateEnabled(true).updateUseD8(false)},
+		{"all", true, partialCompileFlags{}.updateUseD8(true).updateDisableApiLint(true).updateDisableStubValidation(true)},
+
+		// This verifies both use_d8 and the processing order.
+		{"true,use_d8", true, enabledPartialCompileFlags.updateUseD8(true)},
+		{"true,-use_d8", true, enabledPartialCompileFlags.updateUseD8(false)},
 		{"use_d8,false", true, partialCompileFlags{}},
 		{"false,+use_d8", true, partialCompileFlags{}.updateUseD8(true)},
+
+		// disable_api_lint can be specified with any of 3 options.
+		{"false,-api_lint", true, partialCompileFlags{}.updateDisableApiLint(true)},
+		{"false,-enable_api_lint", true, partialCompileFlags{}.updateDisableApiLint(true)},
+		{"false,+disable_api_lint", true, partialCompileFlags{}.updateDisableApiLint(true)},
+		{"false,+api_lint", true, partialCompileFlags{}.updateDisableApiLint(false)},
+		{"false,+enable_api_lint", true, partialCompileFlags{}.updateDisableApiLint(false)},
+		{"false,-disable_api_lint", true, partialCompileFlags{}.updateDisableApiLint(false)},
+
+		// disable_stub_validation can be specified with any of 3 options.
+		{"false,-stub_validation", true, partialCompileFlags{}.updateDisableStubValidation(true)},
+		{"false,-enable_stub_validation", true, partialCompileFlags{}.updateDisableStubValidation(true)},
+		{"false,+disable_stub_validation", true, partialCompileFlags{}.updateDisableStubValidation(true)},
+		{"false,+stub_validation", true, partialCompileFlags{}.updateDisableStubValidation(false)},
+		{"false,+enable_stub_validation", true, partialCompileFlags{}.updateDisableStubValidation(false)},
+		{"false,-disable_stub_validation", true, partialCompileFlags{}.updateDisableStubValidation(false)},
 	}
 
 	for _, test := range tests {
@@ -256,4 +280,73 @@ func TestPartialCompile(t *testing.T) {
 			}
 		})
 	}
+}
+
+type configTestProperties struct {
+	Use_generic_config *bool
+}
+
+type configTestModule struct {
+	ModuleBase
+	properties configTestProperties
+}
+
+func (d *configTestModule) GenerateAndroidBuildActions(ctx ModuleContext) {
+	deviceName := ctx.Config().DeviceName()
+	if ctx.ModuleName() == "foo" {
+		if ctx.Module().UseGenericConfig() {
+			ctx.PropertyErrorf("use_generic_config", "must not be set for this test")
+		}
+	} else if ctx.ModuleName() == "bar" {
+		if !ctx.Module().UseGenericConfig() {
+			ctx.ModuleErrorf("\"use_generic_config: true\" must be set for this test")
+		}
+	}
+
+	if ctx.Module().UseGenericConfig() {
+		if deviceName != "generic" {
+			ctx.ModuleErrorf("Device name for this module must be \"generic\" but %q\n", deviceName)
+		}
+	} else {
+		if deviceName == "generic" {
+			ctx.ModuleErrorf("Device name for this module must not be \"generic\"\n")
+		}
+	}
+}
+
+func configTestModuleFactory() Module {
+	module := &configTestModule{}
+	module.AddProperties(&module.properties)
+	InitAndroidModule(module)
+	return module
+}
+
+var prepareForConfigTest = GroupFixturePreparers(
+	FixtureRegisterWithContext(func(ctx RegistrationContext) {
+		ctx.RegisterModuleType("test", configTestModuleFactory)
+	}),
+)
+
+func TestGenericConfig(t *testing.T) {
+	bp := `
+		test {
+			name: "foo",
+		}
+
+		test {
+			name: "bar",
+			use_generic_config: true,
+		}
+	`
+
+	result := GroupFixturePreparers(
+		prepareForConfigTest,
+		FixtureWithRootAndroidBp(bp),
+	).RunTest(t)
+
+	foo := result.Module("foo", "").(*configTestModule)
+	bar := result.Module("bar", "").(*configTestModule)
+
+	AssertBoolEquals(t, "Do not use generic config", false, foo.UseGenericConfig())
+	AssertBoolEquals(t, "Use generic config", true, bar.UseGenericConfig())
 }

@@ -19,6 +19,9 @@ import (
 	"slices"
 
 	"android/soong/android"
+
+	"github.com/google/blueprint"
+	"github.com/google/blueprint/proptools"
 )
 
 // A singleton module that collects all of the aconfig flags declared in the
@@ -28,17 +31,36 @@ import (
 // Note that this is ALL aconfig_declarations modules present in the tree, not just
 // ones that are relevant to the product currently being built, so that that infra
 // doesn't need to pull from multiple builds and merge them.
-func AllAconfigDeclarationsFactory() android.Singleton {
-	return &allAconfigDeclarationsSingleton{releaseMap: make(map[string]allAconfigReleaseDeclarationsSingleton)}
+func AllAconfigDeclarationsFactory() android.SingletonModule {
+	module := &allAconfigDeclarationsSingleton{releaseMap: make(map[string]allAconfigReleaseDeclarationsSingleton)}
+	module.AddProperties(&module.properties)
+	android.InitAndroidArchModule(module, android.DeviceSupported, android.MultilibCommon)
+	return module
 }
+
+type allAconfigDeclarationsInfo struct {
+	parsedFlagsFile android.Path
+}
+
+var allAconfigDeclarationsInfoProvider = blueprint.NewProvider[allAconfigDeclarationsInfo]()
 
 type allAconfigReleaseDeclarationsSingleton struct {
 	intermediateBinaryProtoPath android.OutputPath
 	intermediateTextProtoPath   android.OutputPath
 }
 
+type ApiSurfaceContributorProperties struct {
+	Api_signature_files  proptools.Configurable[[]string] `android:"arch_variant,path"`
+	Finalized_flags_file string                           `android:"arch_variant,path"`
+}
+
 type allAconfigDeclarationsSingleton struct {
+	android.SingletonModuleBase
+
 	releaseMap map[string]allAconfigReleaseDeclarationsSingleton
+	properties ApiSurfaceContributorProperties
+
+	finalizedFlags android.OutputPath
 }
 
 func (this *allAconfigDeclarationsSingleton) sortedConfigNames() []string {
@@ -50,12 +72,80 @@ func (this *allAconfigDeclarationsSingleton) sortedConfigNames() []string {
 	return names
 }
 
-func (this *allAconfigDeclarationsSingleton) GenerateBuildActions(ctx android.SingletonContext) {
+func GenerateFinalizedFlagsForApiSurface(ctx android.ModuleContext, outputPath android.WritablePath,
+	parsedFlagsFile android.Path, apiSurface ApiSurfaceContributorProperties) {
+
+	apiSignatureFiles := android.Paths{}
+	for _, apiSignatureFile := range apiSurface.Api_signature_files.GetOrDefault(ctx, nil) {
+		if path := android.PathForModuleSrc(ctx, apiSignatureFile); path != nil {
+			apiSignatureFiles = append(apiSignatureFiles, path)
+		}
+	}
+	finalizedFlagsFile := android.PathForModuleSrc(ctx, apiSurface.Finalized_flags_file)
+
+	ctx.Build(pctx, android.BuildParams{
+		Rule:   RecordFinalizedFlagsRule,
+		Inputs: append(apiSignatureFiles, finalizedFlagsFile, parsedFlagsFile),
+		Output: outputPath,
+		Args: map[string]string{
+			"api_signature_files":  android.JoinPathsWithPrefix(apiSignatureFiles, "--api-signature-file "),
+			"finalized_flags_file": "--finalized-flags-file " + finalizedFlagsFile.String(),
+			"parsed_flags_file":    "--parsed-flags-file " + parsedFlagsFile.String(),
+		},
+	})
+}
+
+func GenerateExportedFlagCheck(ctx android.ModuleContext, outputPath android.WritablePath,
+	parsedFlagsFile android.Path, apiSurface ApiSurfaceContributorProperties) {
+
+	apiSignatureFiles := android.Paths{}
+	for _, apiSignatureFile := range apiSurface.Api_signature_files.GetOrDefault(ctx, nil) {
+		if path := android.PathForModuleSrc(ctx, apiSignatureFile); path != nil {
+			apiSignatureFiles = append(apiSignatureFiles, path)
+		}
+	}
+	finalizedFlagsFile := android.PathForModuleSrc(ctx, apiSurface.Finalized_flags_file)
+
+	ctx.Build(pctx, android.BuildParams{
+		Rule:   ExportedFlagCheckRule,
+		Inputs: append(apiSignatureFiles, finalizedFlagsFile, parsedFlagsFile),
+		Output: outputPath,
+		Args: map[string]string{
+			"api_signature_files":  android.JoinPathsWithPrefix(apiSignatureFiles, "--api-signature-file "),
+			"finalized_flags_file": "--finalized-flags-file " + finalizedFlagsFile.String(),
+			"parsed_flags_file":    "--parsed-flags-file " + parsedFlagsFile.String(),
+		},
+	})
+}
+
+func (this *allAconfigDeclarationsSingleton) GenerateAndroidBuildActions(ctx android.ModuleContext) {
+	parsedFlagsFile := android.PathForIntermediates(ctx, "all_aconfig_declarations.pb")
+	this.finalizedFlags = android.PathForIntermediates(ctx, "finalized-flags.txt")
+	GenerateFinalizedFlagsForApiSurface(ctx, this.finalizedFlags, parsedFlagsFile, this.properties)
+
+	depsFiles := android.Paths{this.finalizedFlags}
+	if checkExportedFlag, ok := ctx.Config().GetBuildFlag("RELEASE_EXPORTED_FLAG_CHECK"); ok {
+		if checkExportedFlag == "true" {
+			invalidExportedFlags := android.PathForIntermediates(ctx, "invalid_exported_flags.txt")
+			GenerateExportedFlagCheck(ctx, invalidExportedFlags, parsedFlagsFile, this.properties)
+			depsFiles = append(depsFiles, invalidExportedFlags)
+			ctx.Phony("droidcore", invalidExportedFlags)
+		}
+	}
+
+	ctx.Phony("all_aconfig_declarations", depsFiles...)
+
+	android.SetProvider(ctx, allAconfigDeclarationsInfoProvider, allAconfigDeclarationsInfo{
+		parsedFlagsFile: parsedFlagsFile,
+	})
+}
+
+func (this *allAconfigDeclarationsSingleton) GenerateSingletonBuildActions(ctx android.SingletonContext) {
 	for _, rcName := range append([]string{""}, ctx.Config().ReleaseAconfigExtraReleaseConfigs()...) {
 		// Find all of the aconfig_declarations modules
 		var packages = make(map[string]int)
 		var cacheFiles android.Paths
-		ctx.VisitAllModules(func(module android.Module) {
+		ctx.VisitAllModuleProxies(func(module android.ModuleProxy) {
 			decl, ok := android.OtherModuleProvider(ctx, module, android.AconfigReleaseDeclarationsProviderKey)
 			if !ok {
 				return
@@ -65,15 +155,16 @@ func (this *allAconfigDeclarationsSingleton) GenerateBuildActions(ctx android.Si
 		})
 
 		var numOffendingPkg = 0
+		offendingPkgsMessage := ""
 		for pkg, cnt := range packages {
 			if cnt > 1 {
-				fmt.Printf("%d aconfig_declarations found for package %s\n", cnt, pkg)
+				offendingPkgsMessage += fmt.Sprintf("%d aconfig_declarations found for package %s\n", cnt, pkg)
 				numOffendingPkg++
 			}
 		}
 
 		if numOffendingPkg > 0 {
-			panic(fmt.Errorf("Only one aconfig_declarations allowed for each package."))
+			panic("Only one aconfig_declarations allowed for each package.\n" + offendingPkgsMessage)
 		}
 
 		// Generate build action for aconfig (binary proto output)
@@ -105,9 +196,7 @@ func (this *allAconfigDeclarationsSingleton) GenerateBuildActions(ctx android.Si
 		})
 		ctx.Phony("all_aconfig_declarations_textproto", this.releaseMap[rcName].intermediateTextProtoPath)
 	}
-}
 
-func (this *allAconfigDeclarationsSingleton) MakeVars(ctx android.MakeVarsContext) {
 	for _, rcName := range this.sortedConfigNames() {
 		ctx.DistForGoal("droid", this.releaseMap[rcName].intermediateBinaryProtoPath)
 		for _, goal := range []string{"docs", "droid", "sdk"} {
@@ -115,4 +204,5 @@ func (this *allAconfigDeclarationsSingleton) MakeVars(ctx android.MakeVarsContex
 			ctx.DistForGoalWithFilename(goal, this.releaseMap[rcName].intermediateTextProtoPath, assembleFileName(rcName, "flags.textproto"))
 		}
 	}
+	ctx.DistForGoalWithFilename("sdk", this.finalizedFlags, "finalized-flags.txt")
 }

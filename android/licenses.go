@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	"github.com/google/blueprint"
+	"github.com/google/blueprint/gobtools"
 )
 
 // Adds cross-cutting licenses dependency to propagate license metadata through the build system.
@@ -65,6 +66,31 @@ type applicableLicensesProperty interface {
 type applicableLicensesPropertyImpl struct {
 	name             string
 	licensesProperty *[]string
+}
+
+type applicableLicensesPropertyImplGob struct {
+	Name             string
+	LicensesProperty []string
+}
+
+func (a *applicableLicensesPropertyImpl) ToGob() *applicableLicensesPropertyImplGob {
+	return &applicableLicensesPropertyImplGob{
+		Name:             a.name,
+		LicensesProperty: *a.licensesProperty,
+	}
+}
+
+func (a *applicableLicensesPropertyImpl) FromGob(data *applicableLicensesPropertyImplGob) {
+	a.name = data.Name
+	a.licensesProperty = &data.LicensesProperty
+}
+
+func (a applicableLicensesPropertyImpl) GobEncode() ([]byte, error) {
+	return gobtools.CustomGobEncode[applicableLicensesPropertyImplGob](&a)
+}
+
+func (a *applicableLicensesPropertyImpl) GobDecode(data []byte) error {
+	return gobtools.CustomGobDecode[applicableLicensesPropertyImplGob](data, a)
 }
 
 func newApplicableLicensesProperty(name string, licensesProperty *[]string) applicableLicensesProperty {
@@ -227,16 +253,18 @@ func licensesPropertyFlattener(ctx ModuleContext) {
 	}
 
 	var licenses []string
-	for _, module := range ctx.GetDirectDepsWithTag(licensesTag) {
-		if l, ok := module.(*licenseModule); ok {
+	var texts NamedPaths
+	var conditions []string
+	var kinds []string
+	for _, module := range ctx.GetDirectDepsProxyWithTag(licensesTag) {
+		if l, ok := OtherModuleProvider(ctx, module, LicenseInfoProvider); ok {
 			licenses = append(licenses, ctx.OtherModuleName(module))
-			if m.base().commonProperties.Effective_package_name == nil && l.properties.Package_name != nil {
-				m.base().commonProperties.Effective_package_name = l.properties.Package_name
+			if m.base().commonProperties.Effective_package_name == nil && l.PackageName != nil {
+				m.base().commonProperties.Effective_package_name = l.PackageName
 			}
-			mergeStringProps(&m.base().commonProperties.Effective_licenses, module.base().commonProperties.Effective_licenses...)
-			mergeNamedPathProps(&m.base().commonProperties.Effective_license_text, module.base().commonProperties.Effective_license_text...)
-			mergeStringProps(&m.base().commonProperties.Effective_license_kinds, module.base().commonProperties.Effective_license_kinds...)
-			mergeStringProps(&m.base().commonProperties.Effective_license_conditions, module.base().commonProperties.Effective_license_conditions...)
+			texts = append(texts, l.EffectiveLicenseText...)
+			kinds = append(kinds, l.EffectiveLicenseKinds...)
+			conditions = append(conditions, l.EffectiveLicenseConditions...)
 		} else {
 			propertyName := "licenses"
 			primaryProperty := m.base().primaryLicensesProperty
@@ -247,17 +275,15 @@ func licensesPropertyFlattener(ctx ModuleContext) {
 		}
 	}
 
+	m.base().commonProperties.Effective_license_text = SortedUniqueNamedPaths(texts)
+	m.base().commonProperties.Effective_license_kinds = SortedUniqueStrings(kinds)
+	m.base().commonProperties.Effective_license_conditions = SortedUniqueStrings(conditions)
+
 	// Make the license information available for other modules.
-	licenseInfo := LicenseInfo{
+	licenseInfo := LicensesInfo{
 		Licenses: licenses,
 	}
-	SetProvider(ctx, LicenseInfoProvider, licenseInfo)
-}
-
-// Update a property string array with a distinct union of its values and a list of new values.
-func mergeStringProps(prop *[]string, values ...string) {
-	*prop = append(*prop, values...)
-	*prop = SortedUniqueStrings(*prop)
+	SetProvider(ctx, LicensesInfoProvider, licenseInfo)
 }
 
 // Update a property NamedPath array with a distinct union of its values and a list of new values.
@@ -271,12 +297,6 @@ func namePathProps(prop *NamedPaths, name *string, values ...Path) {
 			*prop = append(*prop, NamedPath{value, *name})
 		}
 	}
-	*prop = SortedUniqueNamedPaths(*prop)
-}
-
-// Update a property NamedPath array with a distinct union of its values and a list of new values.
-func mergeNamedPathProps(prop *NamedPaths, values ...NamedPath) {
-	*prop = append(*prop, values...)
 	*prop = SortedUniqueNamedPaths(*prop)
 }
 
@@ -336,14 +356,14 @@ func exemptFromRequiredApplicableLicensesProperty(module Module) bool {
 	return true
 }
 
-// LicenseInfo contains information about licenses for a specific module.
-type LicenseInfo struct {
+// LicensesInfo contains information about licenses for a specific module.
+type LicensesInfo struct {
 	// The list of license modules this depends upon, either explicitly or through default package
 	// configuration.
 	Licenses []string
 }
 
-var LicenseInfoProvider = blueprint.NewProvider[LicenseInfo]()
+var LicensesInfoProvider = blueprint.NewProvider[LicensesInfo]()
 
 func init() {
 	RegisterMakeVarsProvider(pctx, licensesMakeVarsProvider)
@@ -357,9 +377,7 @@ func licensesMakeVarsProvider(ctx MakeVarsContext) {
 	ctx.Strict("HTMLNOTICE", ctx.Config().HostToolPath(ctx, "htmlnotice").String())
 	ctx.Strict("XMLNOTICE", ctx.Config().HostToolPath(ctx, "xmlnotice").String())
 	ctx.Strict("TEXTNOTICE", ctx.Config().HostToolPath(ctx, "textnotice").String())
-	ctx.Strict("COMPLIANCENOTICE_BOM", ctx.Config().HostToolPath(ctx, "compliancenotice_bom").String())
 	ctx.Strict("COMPLIANCENOTICE_SHIPPEDLIBS", ctx.Config().HostToolPath(ctx, "compliancenotice_shippedlibs").String())
 	ctx.Strict("COMPLIANCE_LISTSHARE", ctx.Config().HostToolPath(ctx, "compliance_listshare").String())
 	ctx.Strict("COMPLIANCE_CHECKSHARE", ctx.Config().HostToolPath(ctx, "compliance_checkshare").String())
-	ctx.Strict("COMPLIANCE_SBOM", ctx.Config().HostToolPath(ctx, "compliance_sbom").String())
 }

@@ -30,11 +30,11 @@ var (
 	rustc = pctx.AndroidStaticRule("rustc",
 		blueprint.RuleParams{
 			Command: "$envVars $rustcCmd " +
-				"-C linker=${config.RustLinker} " +
-				"-C link-args=\"${crtBegin} ${earlyLinkFlags} ${linkFlags} ${crtEnd}\" " +
+				"-C linker=${RustcLinkerCmd} " +
+				"-C link-args=\"--android-clang-bin=${config.ClangCmd} ${crtBegin} ${earlyLinkFlags} ${linkFlags} ${crtEnd}\" " +
 				"--emit link -o $out --emit dep-info=$out.d.raw $in ${libFlags} $rustcFlags" +
 				" && grep ^$out: $out.d.raw > $out.d",
-			CommandDeps: []string{"$rustcCmd"},
+			CommandDeps: []string{"$rustcCmd", "${RustcLinkerCmd}", "${config.ClangCmd}"},
 			// Rustc deps-info writes out make compatible dep files: https://github.com/rust-lang/rust/issues/7633
 			// Rustc emits unneeded dependency lines for the .d and input .rs files.
 			// Those extra lines cause ninja warning:
@@ -102,10 +102,10 @@ var (
 				`KYTHE_CANONICALIZE_VNAME_PATHS=prefer-relative ` +
 				`$rustExtractor $envVars ` +
 				`$rustcCmd ` +
-				`-C linker=${config.RustLinker} ` +
-				`-C link-args="${crtBegin} ${linkFlags} ${crtEnd}" ` +
+				`-C linker=${RustcLinkerCmd} ` +
+				`-C link-args="--android-clang-bin=${config.ClangCmd} ${crtBegin} ${linkFlags} ${crtEnd}" ` +
 				`$in ${libFlags} $rustcFlags`,
-			CommandDeps:    []string{"$rustExtractor", "$kytheVnames"},
+			CommandDeps:    []string{"$rustExtractor", "$kytheVnames", "${RustcLinkerCmd}", "${config.ClangCmd}"},
 			Rspfile:        "${out}.rsp",
 			RspfileContent: "$in",
 		},
@@ -119,6 +119,7 @@ type buildOutput struct {
 
 func init() {
 	pctx.HostBinToolVariable("SoongZipCmd", "soong_zip")
+	pctx.HostBinToolVariable("RustcLinkerCmd", "rustc_linker")
 	cc.TransformRlibstoStaticlib = TransformRlibstoStaticlib
 }
 
@@ -170,7 +171,7 @@ func TransformSrctoRlib(ctx ModuleContext, mainSrc android.Path, deps PathDeps, 
 	return transformSrctoCrate(ctx, mainSrc, deps, flags, outputFile, getTransformProperties(ctx, "rlib"))
 }
 
-// TransformRlibstoStaticlib is assumed to be called from the cc module, and
+// TransformRlibstoStaticlib is assumed to be callable from the cc module, and
 // thus needs to reconstruct the common set of flags which need to be passed
 // to the rustc compiler.
 func TransformRlibstoStaticlib(ctx android.ModuleContext, mainSrc android.Path, deps []cc.RustRlibDep,
@@ -184,7 +185,7 @@ func TransformRlibstoStaticlib(ctx android.ModuleContext, mainSrc android.Path, 
 		rustPathDeps.linkDirs = append(rustPathDeps.linkDirs, rlibDep.LinkDirs...)
 	}
 
-	ccModule := ctx.(cc.ModuleContext).Module().(*cc.Module)
+	mod := ctx.Module().(cc.LinkableInterface)
 	toolchain := config.FindToolchain(ctx.Os(), ctx.Arch())
 	t := transformProperties{
 		// Crate name can be a predefined value as this is a staticlib and
@@ -194,10 +195,10 @@ func TransformRlibstoStaticlib(ctx android.ModuleContext, mainSrc android.Path, 
 		crateName:       "generated_rust_staticlib",
 		is64Bit:         toolchain.Is64Bit(),
 		targetTriple:    toolchain.RustTriple(),
-		bootstrap:       ccModule.Bootstrap(),
-		inRecovery:      ccModule.InRecovery(),
-		inRamdisk:       ccModule.InRamdisk(),
-		inVendorRamdisk: ccModule.InVendorRamdisk(),
+		bootstrap:       mod.Bootstrap(),
+		inRecovery:      mod.InRecovery(),
+		inRamdisk:       mod.InRamdisk(),
+		inVendorRamdisk: mod.InVendorRamdisk(),
 
 		// crateType indicates what type of crate to build
 		crateType: "staticlib",
@@ -263,7 +264,7 @@ func makeLibFlags(deps PathDeps) []string {
 		libFlags = append(libFlags, "--extern "+lib.CrateName+"="+lib.Path.String())
 	}
 	for _, lib := range deps.DyLibs {
-		libFlags = append(libFlags, "--extern "+lib.CrateName+"="+lib.Path.String())
+		libFlags = append(libFlags, "--extern force:"+lib.CrateName+"="+lib.Path.String())
 	}
 	for _, proc_macro := range deps.ProcMacros {
 		libFlags = append(libFlags, "--extern "+proc_macro.CrateName+"="+proc_macro.Path.String())
@@ -401,6 +402,11 @@ func transformSrctoCrate(ctx android.ModuleContext, main android.Path, deps Path
 		linkFlags = append(linkFlags, dynamicLinker)
 	}
 
+	if generatedLib := cc.GenerateRustStaticlib(ctx, deps.ccRlibDeps); generatedLib != nil {
+		deps.StaticLibs = append(deps.StaticLibs, generatedLib)
+		linkFlags = append(linkFlags, generatedLib.String())
+	}
+
 	libFlags := makeLibFlags(deps)
 
 	// Collect dependencies
@@ -411,6 +417,7 @@ func transformSrctoCrate(ctx android.ModuleContext, main android.Path, deps Path
 	implicits = append(implicits, deps.SharedLibDeps...)
 	implicits = append(implicits, deps.srcProviderFiles...)
 	implicits = append(implicits, deps.AfdoProfiles...)
+	implicits = append(implicits, deps.LinkerDeps...)
 
 	implicits = append(implicits, deps.CrtBegin...)
 	implicits = append(implicits, deps.CrtEnd...)

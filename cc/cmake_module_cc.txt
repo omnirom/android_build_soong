@@ -1,14 +1,14 @@
-<<$srcs := getSources .M>>
-<<$includeDirs := getIncludeDirs .Ctx .M>>
-<<$cflags := getCflagsProperty .Ctx .M>>
+<<$srcs := getSources .Ctx .CcInfo>>
+<<$includeDirs := getIncludeDirs .Ctx .M .CcInfo>>
+<<$cflags := getCflagsProperty .Ctx .CcInfo>>
 <<$deps := mapLibraries .Ctx .M (concat5
-(getWholeStaticLibsProperty .Ctx .M)
-(getStaticLibsProperty .Ctx .M)
-(getSharedLibsProperty .Ctx .M)
-(getHeaderLibsProperty .Ctx .M)
-(getExtraLibs .M)
+(getWholeStaticLibsProperty .Ctx .CcInfo)
+(getStaticLibsProperty .Ctx .CcInfo)
+(getSharedLibsProperty .Ctx .CcInfo)
+(getHeaderLibsProperty .Ctx .CcInfo)
+(getExtraLibs .CcInfo)
 ) .Pprop.LibraryMapping>>
-<<$moduleType := getModuleType .M>>
+<<$moduleType := getModuleType .CcInfo>>
 <<$moduleTypeCmake := "executable">>
 <<if eq $moduleType "library">>
 <<$moduleTypeCmake = "library">>

@@ -104,19 +104,8 @@ var (
 	AcDepTag = apexContributionsDepTag{}
 )
 
-// Creates a dep to each selected apex_contributions
-func (a *allApexContributions) DepsMutator(ctx BottomUpMutatorContext) {
-	// Skip apex_contributions if BuildApexContributionContents is true
-	// This product config var allows some products in the same family to use mainline modules from source
-	// (e.g. shiba and shiba_fullmte)
-	// Eventually these product variants will have their own release config maps.
-	if !proptools.Bool(ctx.Config().BuildIgnoreApexContributionContents()) {
-		ctx.AddDependency(ctx.Module(), AcDepTag, ctx.Config().AllApexContributions()...)
-	}
-}
-
 // Set PrebuiltSelectionInfoProvider in post deps phase
-func (a *allApexContributions) SetPrebuiltSelectionInfoProvider(ctx BaseModuleContext) {
+func (a *allApexContributions) SetPrebuiltSelectionInfoProvider(ctx BottomUpMutatorContext) {
 	addContentsToProvider := func(p *PrebuiltSelectionInfoMap, m *apexContributions) {
 		for _, content := range m.Contents() {
 			// Verify that the module listed in contents exists in the tree
@@ -135,13 +124,23 @@ func (a *allApexContributions) SetPrebuiltSelectionInfoProvider(ctx BaseModuleCo
 	}
 
 	p := PrebuiltSelectionInfoMap{}
-	ctx.VisitDirectDepsWithTag(AcDepTag, func(child Module) {
-		if m, ok := child.(*apexContributions); ok {
-			addContentsToProvider(&p, m)
-		} else {
-			ctx.ModuleErrorf("%s is not an apex_contributions module\n", child.Name())
+	// Skip apex_contributions if BuildApexContributionContents is true
+	// This product config var allows some products in the same family to use mainline modules from source
+	// (e.g. shiba and shiba_fullmte)
+	// Eventually these product variants will have their own release config maps.
+	if !proptools.Bool(ctx.Config().BuildIgnoreApexContributionContents()) {
+		deps := ctx.AddDependency(ctx.Module(), AcDepTag, ctx.Config().AllApexContributions()...)
+		for _, child := range deps {
+			if child == nil {
+				continue
+			}
+			if m, ok := child.(*apexContributions); ok {
+				addContentsToProvider(&p, m)
+			} else {
+				ctx.ModuleErrorf("%s is not an apex_contributions module\n", child.Name())
+			}
 		}
-	})
+	}
 	SetProvider(ctx, PrebuiltSelectionInfoProvider, p)
 }
 

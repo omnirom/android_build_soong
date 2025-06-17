@@ -15,6 +15,8 @@
 package build_flags
 
 import (
+	"fmt"
+
 	"android/soong/android"
 )
 
@@ -41,7 +43,7 @@ func (this *allBuildFlagDeclarationsSingleton) GenerateBuildActions(ctx android.
 	var flagsFiles android.Paths
 	// Find all of the release_config_contribution modules
 	var contributionDirs android.Paths
-	ctx.VisitAllModules(func(module android.Module) {
+	ctx.VisitAllModuleProxies(func(module android.ModuleProxy) {
 		decl, ok := android.OtherModuleProvider(ctx, module, BuildFlagDeclarationsProviderKey)
 		if ok {
 			flagsFiles = append(flagsFiles, decl.IntermediateCacheOutputPath)
@@ -110,14 +112,34 @@ func (this *allBuildFlagDeclarationsSingleton) GenerateBuildActions(ctx android.
 		this.configsBinaryProtoPath,
 		this.configsTextProtoPath,
 	)
-}
 
-func (this *allBuildFlagDeclarationsSingleton) MakeVars(ctx android.MakeVarsContext) {
 	ctx.DistForGoal("droid", this.flagsBinaryProtoPath)
 	for _, goal := range []string{"docs", "droid", "sdk", "release_config_metadata"} {
 		ctx.DistForGoalWithFilename(goal, this.flagsBinaryProtoPath, "build_flags/all_flags.pb")
 		ctx.DistForGoalWithFilename(goal, this.flagsTextProtoPath, "build_flags/all_flags.textproto")
 		ctx.DistForGoalWithFilename(goal, this.configsBinaryProtoPath, "build_flags/all_release_config_contributions.pb")
 		ctx.DistForGoalWithFilename(goal, this.configsTextProtoPath, "build_flags/all_release_config_contributions.textproto")
+	}
+
+	if ctx.Config().HasDeviceProduct() {
+		flagsDir := android.PathForOutput(ctx, "release-config")
+		baseAllRelease := fmt.Sprintf("all_release_configs-%s", ctx.Config().DeviceProduct())
+
+		distAllReleaseConfigsArtifact := func(ext string) {
+			ctx.DistForGoalWithFilename(
+				"droid",
+				flagsDir.Join(ctx, fmt.Sprintf("%s.%s", baseAllRelease, ext)),
+				fmt.Sprintf("build_flags/all_release_configs.%s", ext),
+			)
+		}
+
+		distAllReleaseConfigsArtifact("pb")
+		distAllReleaseConfigsArtifact("textproto")
+		distAllReleaseConfigsArtifact("json")
+		ctx.DistForGoalWithFilename(
+			"droid",
+			flagsDir.Join(ctx, fmt.Sprintf("inheritance_graph-%s.dot", ctx.Config().DeviceProduct())),
+			fmt.Sprintf("build_flags/inheritance_graph-%s.dot", ctx.Config().DeviceProduct()),
+		)
 	}
 }

@@ -84,12 +84,6 @@ func (this *sbomSingleton) GenerateBuildActions(ctx SingletonContext) {
 			Inputs: []Path{this.sbomFile},
 			Output: PathForPhony(ctx, "sbom"),
 		})
-	}
-}
-
-func (this *sbomSingleton) MakeVars(ctx MakeVarsContext) {
-	// When building SBOM of products
-	if !ctx.Config().UnbundledBuildApps() {
 		ctx.DistForGoalWithFilename("droid", this.sbomFile, "sbom/sbom.spdx.json")
 	}
 }

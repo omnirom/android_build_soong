@@ -11,6 +11,10 @@ type ModuleProxy struct {
 
 var _ Module = (*ModuleProxy)(nil)
 
+func (m ModuleProxy) IsNil() bool {
+	return m.module.IsNil()
+}
+
 func (m ModuleProxy) Name() string {
 	return m.module.Name()
 }
@@ -20,6 +24,10 @@ func (m ModuleProxy) GenerateBuildActions(context blueprint.ModuleContext) {
 }
 
 func (m ModuleProxy) GenerateAndroidBuildActions(context ModuleContext) {
+	panic("method is not implemented on ModuleProxy")
+}
+
+func (m ModuleProxy) CleanupAfterBuildActions() {
 	panic("method is not implemented on ModuleProxy")
 }
 
@@ -160,10 +168,6 @@ func (m ModuleProxy) ExportedToMake() bool {
 	panic("method is not implemented on ModuleProxy")
 }
 
-func (m ModuleProxy) EffectiveLicenseKinds() []string {
-	panic("method is not implemented on ModuleProxy")
-}
-
 func (m ModuleProxy) EffectiveLicenseFiles() Paths {
 	panic("method is not implemented on ModuleProxy")
 }
@@ -189,7 +193,7 @@ func (m ModuleProxy) VariablesForTests() map[string]string {
 }
 
 func (m ModuleProxy) String() string {
-	return m.module.Name()
+	return m.module.String()
 }
 
 func (m ModuleProxy) qualifiedModuleId(ctx BaseModuleContext) qualifiedModuleName {
@@ -229,5 +233,9 @@ func (m ModuleProxy) Overrides() []string {
 }
 
 func (m ModuleProxy) VintfFragments(ctx ConfigurableEvaluatorContext) []string {
+	panic("method is not implemented on ModuleProxy")
+}
+
+func (m ModuleProxy) UseGenericConfig() bool {
 	panic("method is not implemented on ModuleProxy")
 }

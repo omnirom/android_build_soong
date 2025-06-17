@@ -71,12 +71,17 @@ type noticeXmlProperties struct {
 }
 
 func (nx *NoticeXmlModule) GenerateAndroidBuildActions(ctx android.ModuleContext) {
+	prodVars := ctx.Config().ProductVariables()
+	buildFingerprintFile := android.PathForArbitraryOutput(ctx, "target", "product", android.String(prodVars.DeviceName), "build_fingerprint.txt")
+	implicits := []android.Path{buildFingerprintFile}
+
 	output := android.PathForModuleOut(ctx, "NOTICE.xml.gz")
 	metadataDb := android.PathForOutput(ctx, "compliance-metadata", ctx.Config().DeviceProduct(), "compliance-metadata.db")
 	ctx.Build(pctx, android.BuildParams{
-		Rule:   genNoticeXmlRule,
-		Input:  metadataDb,
-		Output: output,
+		Rule:      genNoticeXmlRule,
+		Input:     metadataDb,
+		Implicits: implicits,
+		Output:    output,
 		Args: map[string]string{
 			"productOut": filepath.Join(ctx.Config().OutDir(), "target", "product", ctx.Config().DeviceName()),
 			"soongOut":   ctx.Config().SoongOutDir(),
@@ -86,8 +91,10 @@ func (nx *NoticeXmlModule) GenerateAndroidBuildActions(ctx android.ModuleContext
 
 	nx.outputFile = output.OutputPath
 
-	installPath := android.PathForModuleInPartitionInstall(ctx, nx.props.Partition_name, "etc")
-	ctx.PackageFile(installPath, "NOTICE.xml.gz", nx.outputFile)
+	if android.Bool(ctx.Config().ProductVariables().UseSoongNoticeXML) {
+		installPath := android.PathForModuleInPartitionInstall(ctx, nx.props.Partition_name, "etc")
+		ctx.InstallFile(installPath, "NOTICE.xml.gz", nx.outputFile)
+	}
 }
 
 func (nx *NoticeXmlModule) AndroidMkEntries() []android.AndroidMkEntries {

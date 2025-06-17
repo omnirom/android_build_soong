@@ -51,6 +51,14 @@ var (
 		},
 		"cpFlags", "extraCmds")
 
+	// A copy rule wrapped with bash.
+	CpWithBash = pctx.AndroidStaticRule("CpWithBash",
+		blueprint.RuleParams{
+			Command:     "/bin/bash -c \"rm -f $out && cp $cpFlags $cpPreserveSymlinks $in $out$extraCmds\"",
+			Description: "cp $out",
+		},
+		"cpFlags", "extraCmds")
+
 	// A copy rule that doesn't preserve symlinks.
 	CpNoPreserveSymlink = pctx.AndroidStaticRule("CpNoPreserveSymlink",
 		blueprint.RuleParams{
@@ -74,6 +82,14 @@ var (
 		},
 		"cpFlags", "extraCmds")
 
+	// A copy executable rule wrapped with bash
+	CpExecutableWithBash = pctx.AndroidStaticRule("CpExecutableWithBash",
+		blueprint.RuleParams{
+			Command:     "/bin/bash -c \"(rm -f $out && cp $cpFlags $cpPreserveSymlinks $in $out ) && (chmod +x $out$extraCmds )\"",
+			Description: "cp $out",
+		},
+		"cpFlags", "extraCmds")
+
 	// A timestamp touch rule.
 	Touch = pctx.AndroidStaticRule("Touch",
 		blueprint.RuleParams{
@@ -85,6 +101,14 @@ var (
 	Symlink = pctx.AndroidStaticRule("Symlink",
 		blueprint.RuleParams{
 			Command:     "rm -f $out && ln -f -s $fromPath $out",
+			Description: "symlink $out",
+		},
+		"fromPath")
+
+	// A symlink rule wrapped with bash
+	SymlinkWithBash = pctx.AndroidStaticRule("SymlinkWithBash",
+		blueprint.RuleParams{
+			Command:     "/bin/bash -c \"rm -f $out && ln -sfn $fromPath $out\"",
 			Description: "symlink $out",
 		},
 		"fromPath")
@@ -117,5 +141,15 @@ func init() {
 
 	pctx.VariableFunc("RBEWrapper", func(ctx PackageVarContext) string {
 		return ctx.Config().RBEWrapper()
+	})
+}
+
+// CopyFileRule creates a ninja rule to copy path to outPath.
+func CopyFileRule(ctx ModuleContext, path Path, outPath OutputPath) {
+	ctx.Build(pctx, BuildParams{
+		Rule:        Cp,
+		Input:       path,
+		Output:      outPath,
+		Description: "copy " + outPath.Base(),
 	})
 }

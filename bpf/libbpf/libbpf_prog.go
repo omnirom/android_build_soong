@@ -239,8 +239,6 @@ func (libbpf *libbpfProg) GenerateAndroidBuildActions(ctx android.ModuleContext)
 		ctx.PackageFile(installDir, obj.Base(), obj)
 	}
 
-	android.SetProvider(ctx, blueprint.SrcsFileProviderKey, blueprint.SrcsFileProviderData{SrcPaths: srcs.Strings()})
-
 	ctx.SetOutputFiles(libbpf.objs, "")
 }
 

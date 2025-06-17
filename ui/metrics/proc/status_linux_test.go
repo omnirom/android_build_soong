@@ -1,7 +1,6 @@
 package proc
 
 import (
-	"fmt"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -29,7 +28,6 @@ func TestNewProcStatus(t *testing.T) {
 		t.Fatalf("got %v, want nil for error", err)
 	}
 
-	fmt.Printf("%d %d\b", status.VmPeak, expectedStatus.VmPeak)
 	if !reflect.DeepEqual(status, expectedStatus) {
 		t.Errorf("got %v, expecting %v for ProcStatus", status, expectedStatus)
 	}

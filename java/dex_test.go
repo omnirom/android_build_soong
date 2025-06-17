@@ -16,6 +16,7 @@ package java
 
 import (
 	"fmt"
+	"strconv"
 	"testing"
 
 	"android/soong/android"
@@ -24,6 +25,7 @@ import (
 )
 
 func TestR8(t *testing.T) {
+	t.Parallel()
 	result := PrepareForTestWithJavaDefaultModules.RunTestWithBp(t, `
 		android_app {
 			name: "app",
@@ -58,26 +60,27 @@ func TestR8(t *testing.T) {
 		}
 	`)
 
-	app := result.ModuleForTests("app", "android_common")
-	stableApp := result.ModuleForTests("stable_app", "android_common")
-	corePlatformApp := result.ModuleForTests("core_platform_app", "android_common")
-	lib := result.ModuleForTests("lib", "android_common")
-	staticLib := result.ModuleForTests("static_lib", "android_common")
+	app := result.ModuleForTests(t, "app", "android_common")
+	stableApp := result.ModuleForTests(t, "stable_app", "android_common")
+	corePlatformApp := result.ModuleForTests(t, "core_platform_app", "android_common")
+	lib := result.ModuleForTests(t, "lib", "android_common")
+	staticLib := result.ModuleForTests(t, "static_lib", "android_common")
 
 	appJavac := app.Rule("javac")
 	appR8 := app.Rule("r8")
 	stableAppR8 := stableApp.Rule("r8")
 	corePlatformAppR8 := corePlatformApp.Rule("r8")
-	libHeader := lib.Output("turbine-combined/lib.jar").Output
-	staticLibHeader := staticLib.Output("turbine-combined/static_lib.jar").Output
+	libHeader := lib.Output("turbine/lib.jar").Output
+	libCombinedHeader := lib.Output("turbine-combined/lib.jar").Output
+	staticLibHeader := staticLib.Output("turbine/static_lib.jar").Output
 
 	android.AssertStringDoesContain(t, "expected lib header jar in app javac classpath",
 		appJavac.Args["classpath"], libHeader.String())
 	android.AssertStringDoesContain(t, "expected static_lib header jar in app javac classpath",
 		appJavac.Args["classpath"], staticLibHeader.String())
 
-	android.AssertStringDoesContain(t, "expected lib header jar in app r8 classpath",
-		appR8.Args["r8Flags"], libHeader.String())
+	android.AssertStringDoesContain(t, "expected lib combined header jar in app r8 classpath",
+		appR8.Args["r8Flags"], libCombinedHeader.String())
 	android.AssertStringDoesNotContain(t, "expected no static_lib header jar in app r8 classpath",
 		appR8.Args["r8Flags"], staticLibHeader.String())
 	android.AssertStringDoesContain(t, "expected -ignorewarnings in app r8 flags",
@@ -91,6 +94,7 @@ func TestR8(t *testing.T) {
 }
 
 func TestR8TransitiveDeps(t *testing.T) {
+	t.Parallel()
 	bp := `
 		override_android_app {
 			name: "override_app",
@@ -192,6 +196,7 @@ func TestR8TransitiveDeps(t *testing.T) {
 
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			fixturePreparer := PrepareForTestWithJavaDefaultModules
 			if tc.unbundled {
 				fixturePreparer = android.GroupFixturePreparers(
@@ -206,14 +211,14 @@ func TestR8TransitiveDeps(t *testing.T) {
 			result := fixturePreparer.RunTestWithBp(t, bp)
 
 			getHeaderJar := func(name string) android.Path {
-				mod := result.ModuleForTests(name, "android_common")
+				mod := result.ModuleForTests(t, name, "android_common")
 				return mod.Output("turbine-combined/" + name + ".jar").Output
 			}
 
-			appR8 := result.ModuleForTests("app", "android_common").Rule("r8")
-			overrideAppR8 := result.ModuleForTests("app", "android_common_override_app").Rule("r8")
+			appR8 := result.ModuleForTests(t, "app", "android_common").Rule("r8")
+			overrideAppR8 := result.ModuleForTests(t, "app", "android_common_override_app").Rule("r8")
 			appHeader := getHeaderJar("app")
-			overrideAppHeader := result.ModuleForTests("app", "android_common_override_app").Output("turbine-combined/app.jar").Output
+			overrideAppHeader := result.ModuleForTests(t, "app", "android_common_override_app").Output("turbine-combined/app.jar").Output
 			libHeader := getHeaderJar("lib")
 			transitiveLibHeader := getHeaderJar("transitive_lib")
 			transitiveLib2Header := getHeaderJar("transitive_lib_2")
@@ -222,7 +227,7 @@ func TestR8TransitiveDeps(t *testing.T) {
 			repeatedDepHeader := getHeaderJar("repeated_dep")
 			usesLibHeader := getHeaderJar("uses_lib")
 			optionalUsesLibHeader := getHeaderJar("optional_uses_lib")
-			prebuiltLibHeader := result.ModuleForTests("prebuilt_lib", "android_common").Output("combined/lib.jar").Output
+			prebuiltLibHeader := result.ModuleForTests(t, "prebuilt_lib", "android_common").Output("combined/lib.jar").Output
 
 			for _, rule := range []android.TestingBuildParams{appR8, overrideAppR8} {
 				android.AssertStringDoesNotContain(t, "expected no app header jar in app r8 classpath",
@@ -259,6 +264,7 @@ func TestR8TransitiveDeps(t *testing.T) {
 }
 
 func TestR8Flags(t *testing.T) {
+	t.Parallel()
 	result := PrepareForTestWithJavaDefaultModules.RunTestWithBp(t, `
 		android_app {
 			name: "app",
@@ -273,7 +279,7 @@ func TestR8Flags(t *testing.T) {
 		}
 	`)
 
-	app := result.ModuleForTests("app", "android_common")
+	app := result.ModuleForTests(t, "app", "android_common")
 	appR8 := app.Rule("r8")
 	android.AssertStringDoesContain(t, "expected -dontshrink in app r8 flags",
 		appR8.Args["r8Flags"], "-dontshrink")
@@ -288,6 +294,7 @@ func TestR8Flags(t *testing.T) {
 }
 
 func TestD8(t *testing.T) {
+	t.Parallel()
 	result := PrepareForTestWithJavaDefaultModules.RunTestWithBp(t, `
 		java_library {
 			name: "foo",
@@ -306,29 +313,52 @@ func TestD8(t *testing.T) {
 			name: "static_lib",
 			srcs: ["foo.java"],
 		}
+
+		android_app {
+			name: "app",
+			srcs: ["foo.java"],
+			platform_apis: true,
+			optimize: {
+				enabled: false,
+			},
+		}
 	`)
 
-	foo := result.ModuleForTests("foo", "android_common")
-	lib := result.ModuleForTests("lib", "android_common")
-	staticLib := result.ModuleForTests("static_lib", "android_common")
+	foo := result.ModuleForTests(t, "foo", "android_common")
+	lib := result.ModuleForTests(t, "lib", "android_common")
+	app := result.ModuleForTests(t, "app", "android_common")
+	staticLib := result.ModuleForTests(t, "static_lib", "android_common")
 
 	fooJavac := foo.Rule("javac")
 	fooD8 := foo.Rule("d8")
-	libHeader := lib.Output("turbine-combined/lib.jar").Output
-	staticLibHeader := staticLib.Output("turbine-combined/static_lib.jar").Output
+	appD8 := app.Rule("d8")
+	libHeader := lib.Output("turbine/lib.jar").Output
+	libCombinedHeader := lib.Output("turbine-combined/lib.jar").Output
+	staticLibHeader := staticLib.Output("turbine/static_lib.jar").Output
 
 	android.AssertStringDoesContain(t, "expected lib header jar in foo javac classpath",
 		fooJavac.Args["classpath"], libHeader.String())
 	android.AssertStringDoesContain(t, "expected static_lib header jar in foo javac classpath",
 		fooJavac.Args["classpath"], staticLibHeader.String())
 
-	android.AssertStringDoesContain(t, "expected lib header jar in foo d8 classpath",
-		fooD8.Args["d8Flags"], libHeader.String())
+	android.AssertStringDoesContain(t, "expected lib combined header jar in foo d8 classpath",
+		fooD8.Args["d8Flags"], libCombinedHeader.String())
 	android.AssertStringDoesNotContain(t, "expected no  static_lib header jar in foo javac classpath",
 		fooD8.Args["d8Flags"], staticLibHeader.String())
+
+	// A --release flag is added only for targets that opt out of default R8 behavior (e.g., apps).
+	// For library targets that don't use R8 by default, no --debug or --release flag should be
+	// added, instead relying on default D8 behavior (--debug).
+	android.AssertStringDoesContain(t, "expected --release in app d8 flags",
+		appD8.Args["d8Flags"], "--release")
+	android.AssertStringDoesNotContain(t, "expected no --release flag in lib d8 flags",
+		fooD8.Args["d8Flags"], "--release")
+	android.AssertStringDoesNotContain(t, "expected no --debug flag in lib d8 flags",
+		fooD8.Args["d8Flags"], "--debug")
 }
 
 func TestProguardFlagsInheritanceStatic(t *testing.T) {
+	t.Parallel()
 	result := PrepareForTestWithJavaDefaultModules.RunTestWithBp(t, `
 		android_app {
 			name: "app",
@@ -370,7 +400,7 @@ func TestProguardFlagsInheritanceStatic(t *testing.T) {
 		}
 	`)
 
-	app := result.ModuleForTests("app", "android_common")
+	app := result.ModuleForTests(t, "app", "android_common")
 	appR8 := app.Rule("r8")
 	android.AssertStringDoesContain(t, "expected primary_lib's proguard flags from direct dep",
 		appR8.Args["r8Flags"], "primary.flags")
@@ -383,6 +413,7 @@ func TestProguardFlagsInheritanceStatic(t *testing.T) {
 }
 
 func TestProguardFlagsInheritance(t *testing.T) {
+	t.Parallel()
 	directDepFlagsFileName := "direct_dep.flags"
 	transitiveDepFlagsFileName := "transitive_dep.flags"
 
@@ -601,6 +632,7 @@ func TestProguardFlagsInheritance(t *testing.T) {
 	for _, topLevelModuleDef := range topLevelModules {
 		for _, tc := range testcases {
 			t.Run(topLevelModuleDef.name+"-"+tc.name, func(t *testing.T) {
+				t.Parallel()
 				result := android.GroupFixturePreparers(
 					PrepareForTestWithJavaDefaultModules,
 					android.FixtureMergeMockFs(android.MockFS{
@@ -617,7 +649,7 @@ func TestProguardFlagsInheritance(t *testing.T) {
 							tc.transitiveDepExportsFlagsFiles,
 						),
 				)
-				appR8 := result.ModuleForTests("app", "android_common").Rule("r8")
+				appR8 := result.ModuleForTests(t, "app", "android_common").Rule("r8")
 
 				shouldHaveDepFlags := android.InList(directDepFlagsFileName, tc.expectedFlagsFiles)
 				if shouldHaveDepFlags {
@@ -642,6 +674,7 @@ func TestProguardFlagsInheritance(t *testing.T) {
 }
 
 func TestProguardFlagsInheritanceAppImport(t *testing.T) {
+	t.Parallel()
 	bp := `
 		android_app {
 			name: "app",
@@ -658,12 +691,13 @@ func TestProguardFlagsInheritanceAppImport(t *testing.T) {
 		PrepareForTestWithJavaDefaultModules,
 	).RunTestWithBp(t, bp)
 
-	appR8 := result.ModuleForTests("app", "android_common").Rule("r8")
+	appR8 := result.ModuleForTests(t, "app", "android_common").Rule("r8")
 	android.AssertStringDoesContain(t, "expected aarimports's proguard flags",
 		appR8.Args["r8Flags"], "proguard.txt")
 }
 
 func TestR8FlagsArtProfile(t *testing.T) {
+	t.Parallel()
 	result := PrepareForTestWithJavaDefaultModules.RunTestWithBp(t, `
 		android_app {
 			name: "app",
@@ -677,7 +711,7 @@ func TestR8FlagsArtProfile(t *testing.T) {
 		}
 	`)
 
-	app := result.ModuleForTests("app", "android_common")
+	app := result.ModuleForTests(t, "app", "android_common")
 	appR8 := app.Rule("r8")
 	android.AssertStringDoesContain(t, "expected --art-profile in app r8 flags",
 		appR8.Args["r8Flags"], "--art-profile")
@@ -696,6 +730,7 @@ func TestR8FlagsArtProfile(t *testing.T) {
 //
 // The rewritten profile should be used since the dex signatures in the checked-in profile will not match the optimized binary.
 func TestEnableProfileRewritingIsRequiredForOptimizedApps(t *testing.T) {
+	t.Parallel()
 	testJavaError(t,
 		"Enable_profile_rewriting must be true when profile_guided dexpreopt and R8 optimization/obfuscation is turned on",
 		`
@@ -715,11 +750,15 @@ android_app {
 }
 
 func TestDebugReleaseFlags(t *testing.T) {
+	t.Parallel()
 	bp := `
 		android_app {
 			name: "app",
 			srcs: ["foo.java"],
 			platform_apis: true,
+			optimize: {
+				enabled: %s,
+			},
 			dxflags: ["%s"]
 		}
 	`
@@ -728,6 +767,7 @@ func TestDebugReleaseFlags(t *testing.T) {
 		name          string
 		envVar        string
 		isEng         bool
+		useD8         bool
 		dxFlags       string
 		expectedFlags string
 	}{
@@ -757,20 +797,36 @@ func TestDebugReleaseFlags(t *testing.T) {
 		},
 		{
 			name:          "app_eng",
+			useD8:         true,
 			isEng:         true,
 			expectedFlags: "--debug",
 		},
 		{
 			name:    "app_release_eng",
 			isEng:   true,
+			useD8:   true,
 			dxFlags: "--release",
 			// Eng mode does *not* override explicit dxflags.
 			expectedFlags: "--release",
+		},
+		{
+			name:  "app_d8",
+			useD8: true,
+			// D8 usage w/ apps should explicitly enable --release mode.
+			expectedFlags: "--release",
+		},
+		{
+			name:    "app_d8_debug",
+			useD8:   true,
+			dxFlags: "--debug",
+			// D8 usage w/ apps respects overriding dxFlags.
+			expectedFlags: "--debug",
 		},
 	}
 
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			fixturePreparer := PrepareForTestWithJavaDefaultModules
 			fixturePreparer = android.GroupFixturePreparers(
 				fixturePreparer,
@@ -788,11 +844,16 @@ func TestDebugReleaseFlags(t *testing.T) {
 					}),
 				)
 			}
-			result := fixturePreparer.RunTestWithBp(t, fmt.Sprintf(bp, tc.dxFlags))
+			result := fixturePreparer.RunTestWithBp(t, fmt.Sprintf(bp, strconv.FormatBool(!tc.useD8), tc.dxFlags))
 
-			appR8 := result.ModuleForTests("app", "android_common").Rule("r8")
-			android.AssertStringDoesContain(t, "expected flag in R8 flags",
-				appR8.Args["r8Flags"], tc.expectedFlags)
+			dexRuleKey := "r8"
+			if tc.useD8 {
+				dexRuleKey = "d8"
+			}
+			dexFlagsKey := dexRuleKey + "Flags"
+			appDex := result.ModuleForTests(t, "app", "android_common").Rule(dexRuleKey)
+			android.AssertStringDoesContain(t, "expected flag in dex flags",
+				appDex.Args[dexFlagsKey], tc.expectedFlags)
 
 			var unexpectedFlags string
 			if tc.expectedFlags == "--debug" {
@@ -801,9 +862,52 @@ func TestDebugReleaseFlags(t *testing.T) {
 				unexpectedFlags = "--debug"
 			}
 			if unexpectedFlags != "" {
-				android.AssertStringDoesNotContain(t, "unexpected flag in R8 flags",
-					appR8.Args["r8Flags"], unexpectedFlags)
+				android.AssertStringDoesNotContain(t, "unexpected flag in dex flags",
+					appDex.Args[dexFlagsKey], unexpectedFlags)
 			}
 		})
 	}
+}
+
+func TestTraceReferences(t *testing.T) {
+	t.Parallel()
+	bp := `
+		android_app {
+			name: "app",
+			libs: ["lib.impl"],
+			srcs: ["foo.java"],
+			platform_apis: true,
+		}
+
+		java_library {
+			name: "lib",
+			optimize: {
+				enabled: true,
+				trace_references_from: ["app"],
+			},
+			srcs: ["bar.java"],
+			static_libs: ["lib.impl"],
+			installable: true,
+		}
+
+		java_library {
+			name: "lib.impl",
+			srcs: ["baz.java"],
+		}
+	`
+	result := android.GroupFixturePreparers(
+		PrepareForTestWithJavaDefaultModules,
+	).RunTestWithBp(t, bp)
+
+	appJar := result.ModuleForTests(t, "app", "android_common").Output("combined/app.jar").Output
+	libJar := result.ModuleForTests(t, "lib", "android_common").Output("combined/lib.jar").Output
+	libTraceRefs := result.ModuleForTests(t, "lib", "android_common").Rule("traceReferences")
+	libR8 := result.ModuleForTests(t, "lib", "android_common").Rule("r8")
+
+	android.AssertStringDoesContain(t, "expected trace reference source from app jar",
+		libTraceRefs.Args["sources"], "--source "+appJar.String())
+	android.AssertStringEquals(t, "expected trace reference target into lib jar",
+		libJar.String(), libTraceRefs.Input.String())
+	android.AssertStringDoesContain(t, "expected trace reference proguard flags in lib r8 flags",
+		libR8.Args["r8Flags"], "trace_references.flags")
 }

@@ -121,7 +121,7 @@ func (fuzzer *fuzzDecorator) compile(ctx ModuleContext, flags Flags, deps PathDe
 	return out
 }
 
-func (fuzzer *fuzzDecorator) stdLinkage(ctx *depsContext) RustLinkage {
+func (fuzzer *fuzzDecorator) stdLinkage(device bool) RustLinkage {
 	return RlibLinkage
 }
 
@@ -130,7 +130,7 @@ func (fuzzer *fuzzDecorator) autoDep(ctx android.BottomUpMutatorContext) autoDep
 }
 
 func (fuzz *fuzzDecorator) install(ctx ModuleContext) {
-	fuzz.fuzzPackagedModule = cc.PackageFuzzModule(ctx, fuzz.fuzzPackagedModule, pctx)
+	fuzz.fuzzPackagedModule = cc.PackageFuzzModule(ctx, fuzz.fuzzPackagedModule)
 
 	installBase := "fuzz"
 

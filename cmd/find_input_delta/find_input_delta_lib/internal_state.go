@@ -51,6 +51,9 @@ func CreateState(inputs []string, inspect_contents bool, fsys StatReadFileFS) (*
 	for _, input := range inputs {
 		stat, err := fs.Stat(fsys, input)
 		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
 			return ret, err
 		}
 		pci := &fid_proto.PartialCompileInput{
@@ -92,9 +95,14 @@ func inspectZipFileContents(name string) ([]*fid_proto.PartialCompileInput, erro
 	}
 	ret := []*fid_proto.PartialCompileInput{}
 	for _, v := range rc.File {
+		// Only include timestamp when there is no CRC.
+		timeNsec := proto.Int64(v.ModTime().UnixNano())
+		if v.CRC32 != 0 {
+			timeNsec = nil
+		}
 		pci := &fid_proto.PartialCompileInput{
 			Name:      proto.String(v.Name),
-			MtimeNsec: proto.Int64(v.ModTime().UnixNano()),
+			MtimeNsec: timeNsec,
 			Hash:      proto.String(fmt.Sprintf("%08x", v.CRC32)),
 		}
 		ret = append(ret, pci)

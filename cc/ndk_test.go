@@ -50,7 +50,7 @@ func TestNdkHeaderDependency(t *testing.T) {
 	}
 	`
 	ctx := prepareForCcTest.RunTestWithBp(t, bp)
-	libfoo := ctx.ModuleForTests("libfoo.ndk", "android_arm64_armv8-a_sdk_shared")
-	libfoo_headers := ctx.ModuleForTests("libfoo_headers", "")
+	libfoo := ctx.ModuleForTests(t, "libfoo.ndk", "android_arm64_armv8-a_sdk_shared")
+	libfoo_headers := ctx.ModuleForTests(t, "libfoo_headers", "")
 	android.AssertBoolEquals(t, "Could not find headers of ndk_library", true, isDep(ctx, libfoo.Module(), libfoo_headers.Module()))
 }

@@ -1,13 +1,14 @@
 package tradefed_modules
 
 import (
-	"android/soong/android"
-	"android/soong/tradefed"
 	"encoding/json"
 	"fmt"
 	"io"
 	"slices"
 	"strings"
+
+	"android/soong/android"
+	"android/soong/tradefed"
 
 	"github.com/google/blueprint"
 	"github.com/google/blueprint/proptools"
@@ -162,6 +163,26 @@ func (m *testModuleConfigModule) GenerateAndroidBuildActions(ctx android.ModuleC
 	m.validateBase(ctx, &testModuleConfigTag, "android_test", false)
 	m.generateManifestAndConfig(ctx)
 
+	moduleInfoJSON := ctx.ModuleInfoJSON()
+	moduleInfoJSON.Class = []string{m.provider.MkAppClass}
+	if m.provider.MkAppClass != "NATIVE_TESTS" {
+		moduleInfoJSON.Tags = append(moduleInfoJSON.Tags, "tests")
+	}
+	if m.provider.IsUnitTest {
+		moduleInfoJSON.IsUnitTest = "true"
+	}
+	moduleInfoJSON.CompatibilitySuites = append(moduleInfoJSON.CompatibilitySuites, m.tradefedProperties.Test_suites...)
+	moduleInfoJSON.SystemSharedLibs = []string{"none"}
+	moduleInfoJSON.ExtraRequired = append(moduleInfoJSON.ExtraRequired, m.provider.RequiredModuleNames...)
+	moduleInfoJSON.ExtraRequired = append(moduleInfoJSON.ExtraRequired, *m.Base)
+	moduleInfoJSON.ExtraHostRequired = append(moduleInfoJSON.ExtraRequired, m.provider.HostRequiredModuleNames...)
+	moduleInfoJSON.TestConfig = []string{m.testConfig.String()}
+	moduleInfoJSON.AutoTestConfig = []string{"true"}
+	moduleInfoJSON.TestModuleConfigBase = proptools.String(m.Base)
+
+	android.SetProvider(ctx, android.SupportFilesInfoProvider, android.SupportFilesInfo{
+		SupportFiles: m.supportFiles,
+	})
 }
 
 // Ensure at least one test_suite is listed.  Ideally it should be general-tests
@@ -311,6 +332,9 @@ func (m *testModuleConfigHostModule) DepsMutator(ctx android.BottomUpMutatorCont
 func (m *testModuleConfigHostModule) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	m.validateBase(ctx, &testModuleConfigHostTag, "java_test_host", true)
 	m.generateManifestAndConfig(ctx)
+	android.SetProvider(ctx, android.SupportFilesInfoProvider, android.SupportFilesInfo{
+		SupportFiles: m.supportFiles,
+	})
 }
 
 // Ensure the base listed is the right type by checking that we get the expected provider data.
@@ -409,6 +433,10 @@ func (m *testModuleConfigModule) generateManifestAndConfig(ctx android.ModuleCon
 		IsHost:                  m.provider.IsHost,
 		LocalCertificate:        m.provider.LocalCertificate,
 		IsUnitTest:              m.provider.IsUnitTest,
+	})
+
+	android.SetProvider(ctx, android.TestSuiteInfoProvider, android.TestSuiteInfo{
+		TestSuites: m.tradefedProperties.Test_suites,
 	})
 }
 

@@ -660,12 +660,17 @@ func (r *RuleBuilder) build(name string, desc string) {
 			}
 			for _, c := range r.commands {
 				for _, tool := range c.packagedTools {
-					command.CopyBefore = append(command.CopyBefore, &sbox_proto.Copy{
-						From:       proto.String(tool.srcPath.String()),
-						To:         proto.String(sboxPathForPackagedToolRel(tool)),
-						Executable: proto.Bool(tool.executable),
-					})
-					tools = append(tools, tool.srcPath)
+					if tool.srcPath != nil {
+						command.CopyBefore = append(command.CopyBefore, &sbox_proto.Copy{
+							From:       proto.String(tool.srcPath.String()),
+							To:         proto.String(sboxPathForPackagedToolRel(tool)),
+							Executable: proto.Bool(tool.executable),
+						})
+						tools = append(tools, tool.srcPath)
+					} else if tool.SymlinkTarget() == "" {
+						// We ignore symlinks for now, could be added later if needed
+						panic("Expected tool packagingSpec to either be a file or symlink")
+					}
 				}
 			}
 		}
@@ -1187,7 +1192,11 @@ func (c *RuleBuilderCommand) Text(text string) *RuleBuilderCommand {
 // Textf adds the specified formatted text to the command line.  The text should not contain input or output paths or
 // the rule will not have them listed in its dependencies or outputs.
 func (c *RuleBuilderCommand) Textf(format string, a ...interface{}) *RuleBuilderCommand {
-	return c.Text(fmt.Sprintf(format, a...))
+	if c.buf.Len() > 0 {
+		c.buf.WriteByte(' ')
+	}
+	fmt.Fprintf(&c.buf, format, a...)
+	return c
 }
 
 // Flag adds the specified raw text to the command line.  The text should not contain input or output paths or the

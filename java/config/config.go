@@ -159,6 +159,7 @@ func init() {
 	pctx.SourcePathVariable("ResourceProcessorBusyBox", "prebuilts/bazel/common/android_tools/android_tools/all_android_tools_deploy.jar")
 
 	pctx.HostBinToolVariable("GenKotlinBuildFileCmd", "gen-kotlin-build-file")
+	pctx.HostBinToolVariable("FindInputDeltaCmd", "find_input_delta")
 
 	pctx.SourcePathVariable("JarArgsCmd", "build/soong/scripts/jar-args.sh")
 	pctx.SourcePathVariable("PackageCheckCmd", "build/soong/scripts/package-check.sh")
@@ -170,7 +171,9 @@ func init() {
 	pctx.HostBinToolVariable("ApiCheckCmd", "apicheck")
 	pctx.HostBinToolVariable("D8Cmd", "d8")
 	pctx.HostBinToolVariable("R8Cmd", "r8")
+	pctx.HostBinToolVariable("ExtractR8RulesCmd", "extract-r8-rules")
 	pctx.HostBinToolVariable("ResourceShrinkerCmd", "resourceshrinker")
+	pctx.HostBinToolVariable("TraceReferencesCmd", "tracereferences")
 	pctx.HostBinToolVariable("HiddenAPICmd", "hiddenapi")
 	pctx.HostBinToolVariable("ExtractApksCmd", "extract_apks")
 	pctx.VariableFunc("TurbineJar", func(ctx android.PackageVarContext) string {

@@ -16,4 +16,20 @@
 
 <config xmlns="http://www.google.com/tools/metalava/config"
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-    xsi:schemaLocation="http://www.google.com/tools/metalava/config ../../../../tools/metalava/metalava/src/main/resources/schemas/config.xsd"/>
+    xsi:schemaLocation="http://www.google.com/tools/metalava/config ../../../../tools/metalava/metalava/src/main/resources/schemas/config.xsd">
+  <api-surfaces>
+    <!-- These are hard coded into java_sdk_library. -->
+    <api-surface name="public"/>
+    <api-surface name="system" extends="public"/>
+    <api-surface name="module-lib" extends="system"/>
+    <api-surface name="test" extends="system"/>
+    <api-surface name="system-server" extends="public"/>
+    <!-- This is used in java/core-libraries/Android.bp. -->
+    <api-surface name="core"/>
+    <!-- These are used in libcore, external/conscrypt and external/icu. -->
+    <api-surface name="core-platform" extends="public"/>
+    <api-surface name="core-platform-legacy" extends="public"/>
+    <api-surface name="core-platform-plus-public"/>
+    <api-surface name="intra-core" extends="public"/>
+  </api-surfaces>
+</config>

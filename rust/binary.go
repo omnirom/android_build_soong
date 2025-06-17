@@ -139,7 +139,10 @@ func (binary *binaryDecorator) compile(ctx ModuleContext, flags Flags, deps Path
 
 	flags.RustFlags = append(flags.RustFlags, deps.depFlags...)
 	flags.LinkFlags = append(flags.LinkFlags, deps.depLinkFlags...)
-	flags.LinkFlags = append(flags.LinkFlags, deps.linkObjects...)
+	flags.LinkFlags = append(flags.LinkFlags, deps.rustLibObjects...)
+	flags.LinkFlags = append(flags.LinkFlags, deps.sharedLibObjects...)
+	flags.LinkFlags = append(flags.LinkFlags, deps.staticLibObjects...)
+	flags.LinkFlags = append(flags.LinkFlags, deps.wholeStaticLibObjects...)
 
 	if binary.stripper.NeedsStrip(ctx) {
 		strippedOutputFile := outputFile
@@ -165,11 +168,11 @@ func (binary *binaryDecorator) autoDep(ctx android.BottomUpMutatorContext) autoD
 	}
 }
 
-func (binary *binaryDecorator) stdLinkage(ctx *depsContext) RustLinkage {
+func (binary *binaryDecorator) stdLinkage(device bool) RustLinkage {
 	if binary.preferRlib() {
 		return RlibLinkage
 	}
-	return binary.baseCompiler.stdLinkage(ctx)
+	return binary.baseCompiler.stdLinkage(device)
 }
 
 func (binary *binaryDecorator) binary() bool {
@@ -182,4 +185,9 @@ func (binary *binaryDecorator) staticallyLinked() bool {
 
 func (binary *binaryDecorator) testBinary() bool {
 	return false
+}
+
+func (binary *binaryDecorator) moduleInfoJSON(ctx ModuleContext, moduleInfoJSON *android.ModuleInfoJSON) {
+	binary.baseCompiler.moduleInfoJSON(ctx, moduleInfoJSON)
+	moduleInfoJSON.Class = []string{"EXECUTABLES"}
 }

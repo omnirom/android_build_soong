@@ -26,6 +26,7 @@ var (
 	// For java_aconfig_library: Generate java library
 	javaRule = pctx.AndroidStaticRule("java_aconfig_library",
 		blueprint.RuleParams{
+			// LINT.IfChange
 			Command: `rm -rf ${out}.tmp` +
 				` && mkdir -p ${out}.tmp` +
 				` && ${aconfig} create-java-lib` +
@@ -33,14 +34,17 @@ var (
 				`    --cache ${in}` +
 				`    --out ${out}.tmp` +
 				`    --allow-instrumentation ${debug}` +
+				`    --new-exported ${new_exported}` +
+				`		 --check-api-level ${check_api_level}` +
 				` && $soong_zip -write_if_changed -jar -o ${out} -C ${out}.tmp -D ${out}.tmp` +
 				` && rm -rf ${out}.tmp`,
+			// LINT.ThenChange(/aconfig/init.go)
 			CommandDeps: []string{
 				"$aconfig",
 				"$soong_zip",
 			},
 			Restat: true,
-		}, "mode", "debug")
+		}, "mode", "debug", "new_exported", "check_api_level")
 
 	// For cc_aconfig_library: Generate C++ library
 	cppRule = pctx.AndroidStaticRule("cc_aconfig_library",
@@ -50,12 +54,11 @@ var (
 				` && ${aconfig} create-cpp-lib` +
 				`    --mode ${mode}` +
 				`    --cache ${in}` +
-				`    --out ${gendir}` +
-				`    --allow-instrumentation ${debug}`,
+				`    --out ${gendir}`,
 			CommandDeps: []string{
 				"$aconfig",
 			},
-		}, "gendir", "mode", "debug")
+		}, "gendir", "mode")
 
 	// For rust_aconfig_library: Generate Rust library
 	rustRule = pctx.AndroidStaticRule("rust_aconfig_library",
@@ -65,12 +68,11 @@ var (
 				` && ${aconfig} create-rust-lib` +
 				`    --mode ${mode}` +
 				`    --cache ${in}` +
-				`    --allow-instrumentation ${debug}` +
 				`    --out ${gendir}`,
 			CommandDeps: []string{
 				"$aconfig",
 			},
-		}, "gendir", "mode", "debug")
+		}, "gendir", "mode")
 )
 
 func init() {

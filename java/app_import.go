@@ -43,6 +43,12 @@ var (
 		Description: "Uncompress embedded JNI libs",
 	})
 
+	stripEmbeddedJniLibsUnusedArchRule = pctx.AndroidStaticRule("strip-embedded-jni-libs-from-unused-arch", blueprint.RuleParams{
+		Command:     `${config.Zip2ZipCmd} -i $in -o $out -x 'lib/**/*.so' $extraArgs`,
+		CommandDeps: []string{"${config.Zip2ZipCmd}"},
+		Description: "Remove all JNI libs from unused architectures",
+	}, "extraArgs")
+
 	uncompressDexRule = pctx.AndroidStaticRule("uncompress-dex", blueprint.RuleParams{
 		Command: `if (zipinfo $in '*.dex' 2>/dev/null | grep -v ' stor ' >/dev/null) ; then ` +
 			`${config.Zip2ZipCmd} -i $in -o $out -0 'classes*.dex'` +
@@ -56,6 +62,18 @@ var (
 		CommandDeps: []string{"build/soong/scripts/check_prebuilt_presigned_apk.py", "${config.Aapt2Cmd}", "${config.ZipAlign}"},
 		Description: "Check presigned apk",
 	}, "extraArgs")
+
+	extractApkRule = pctx.AndroidStaticRule("extract-apk", blueprint.RuleParams{
+		Command:     "unzip -p $in $extract_apk > $out",
+		Description: "Extract specific sub apk",
+	}, "extract_apk")
+
+	gzipRule = pctx.AndroidStaticRule("gzip",
+		blueprint.RuleParams{
+			Command:     "prebuilts/build-tools/path/linux-x86/gzip -9 -c $in > $out",
+			CommandDeps: []string{"prebuilts/build-tools/path/linux-x86/gzip"},
+			Description: "gzip $out",
+		})
 )
 
 func RegisterAppImportBuildComponents(ctx android.RegistrationContext) {
@@ -150,10 +168,19 @@ type AndroidAppImportProperties struct {
 	// the prebuilt is Name() without "prebuilt_" prefix
 	Source_module_name *string
 
+	// Whether stripping all libraries from unused architectures.
+	Strip_unused_jni_arch *bool
+
 	// Path to the .prebuilt_info file of the prebuilt app.
 	// In case of mainline modules, the .prebuilt_info file contains the build_id that was used
 	// to generate the prebuilt.
 	Prebuilt_info *string `android:"path"`
+
+	// Path of extracted apk which is extracted from prebuilt apk. Use this extracted to import.
+	Extract_apk proptools.Configurable[string]
+
+	// Compress the output APK using gzip. Defaults to false.
+	Compress_apk proptools.Configurable[bool] `android:"arch_variant,replace_instead_of_append"`
 }
 
 func (a *AndroidAppImport) IsInstallable() bool {
@@ -278,6 +305,19 @@ func (a *AndroidAppImport) uncompressEmbeddedJniLibs(
 	})
 }
 
+func (a *AndroidAppImport) extractSubApk(
+	ctx android.ModuleContext, inputPath android.Path, outputPath android.WritablePath) {
+	extractApkPath := a.properties.Extract_apk.GetOrDefault(ctx, "")
+	ctx.Build(pctx, android.BuildParams{
+		Rule:   extractApkRule,
+		Input:  inputPath,
+		Output: outputPath,
+		Args: map[string]string{
+			"extract_apk": extractApkPath,
+		},
+	})
+}
+
 // Returns whether this module should have the dex file stored uncompressed in the APK.
 func (a *AndroidAppImport) shouldUncompressDex(ctx android.ModuleContext) bool {
 	if ctx.Config().UnbundledBuild() || proptools.Bool(a.properties.Preprocessed) {
@@ -292,8 +332,34 @@ func (a *AndroidAppImport) shouldUncompressDex(ctx android.ModuleContext) bool {
 	return shouldUncompressDex(ctx, android.RemoveOptionalPrebuiltPrefix(ctx.ModuleName()), &a.dexpreopter)
 }
 
+func (a *AndroidAppImport) stripEmbeddedJniLibsUnusedArch(
+	ctx android.ModuleContext, inputPath android.Path, outputPath android.WritablePath) {
+	var wantedJniLibSlice []string
+	for _, target := range ctx.MultiTargets() {
+		supported_abis := target.Arch.Abi
+		for _, arch := range supported_abis {
+			wantedJniLibSlice = append(wantedJniLibSlice, " -X 'lib/"+arch+"/*.so'")
+		}
+	}
+	wantedJniLibString := strings.Join(wantedJniLibSlice, " ")
+	ctx.Build(pctx, android.BuildParams{
+		Rule:   stripEmbeddedJniLibsUnusedArchRule,
+		Input:  inputPath,
+		Output: outputPath,
+		Args: map[string]string{
+			"extraArgs": wantedJniLibString,
+		},
+	})
+}
+
 func (a *AndroidAppImport) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	a.generateAndroidBuildActions(ctx)
+
+	appInfo := &AppInfo{
+		Prebuilt: true,
+	}
+	setCommonAppInfo(appInfo, a)
+	android.SetProvider(ctx, AppInfoProvider, appInfo)
 }
 
 func (a *AndroidAppImport) InstallApkName() string {
@@ -336,16 +402,27 @@ func (a *AndroidAppImport) generateAndroidBuildActions(ctx android.ModuleContext
 		ctx.ModuleErrorf("One and only one of certficate, presigned (implied by preprocessed), and default_dev_cert properties must be set")
 	}
 
-	// TODO: LOCAL_EXTRACT_APK/LOCAL_EXTRACT_DPI_APK
 	// TODO: LOCAL_PACKAGE_SPLITS
 
 	srcApk := a.prebuilt.SingleSourcePath(ctx)
+	if a.properties.Extract_apk.GetOrDefault(ctx, "") != "" {
+		extract_apk := android.PathForModuleOut(ctx, "extract-apk", ctx.ModuleName()+".apk")
+		a.extractSubApk(ctx, srcApk, extract_apk)
+		srcApk = extract_apk
+	}
 
 	// TODO: Install or embed JNI libraries
 
 	// Uncompress JNI libraries in the apk
 	jnisUncompressed := android.PathForModuleOut(ctx, "jnis-uncompressed", ctx.ModuleName()+".apk")
 	a.uncompressEmbeddedJniLibs(ctx, srcApk, jnisUncompressed)
+
+	// Strip all embedded JNI libs and include only required ones accordingly to the module's compile_multilib
+	if Bool(a.properties.Strip_unused_jni_arch) {
+		jnisStripped := android.PathForModuleOut(ctx, "jnis-stripped", ctx.ModuleName()+".apk")
+		a.stripEmbeddedJniLibsUnusedArch(ctx, jnisUncompressed, jnisStripped)
+		jnisUncompressed = jnisStripped
+	}
 
 	var pathFragments []string
 	relInstallPath := String(a.properties.Relative_install_path)
@@ -366,7 +443,9 @@ func (a *AndroidAppImport) generateAndroidBuildActions(ctx android.ModuleContext
 
 	a.dexpreopter.enforceUsesLibs = a.usesLibrary.enforceUsesLibraries(ctx)
 	a.dexpreopter.classLoaderContexts = a.usesLibrary.classLoaderContextForUsesLibDeps(ctx)
-	if a.usesLibrary.shouldDisableDexpreopt {
+
+	// Disable Dexpreopt if Compress_apk is true. It follows the build/make/core/app_prebuilt_internal.mk
+	if a.usesLibrary.shouldDisableDexpreopt || a.properties.Compress_apk.GetOrDefault(ctx, false) {
 		a.dexpreopter.disableDexpreopt()
 	}
 
@@ -385,7 +464,13 @@ func (a *AndroidAppImport) generateAndroidBuildActions(ctx android.ModuleContext
 		jnisUncompressed = dexUncompressed
 	}
 
-	apkFilename := proptools.StringDefault(a.properties.Filename, a.BaseModuleName()+".apk")
+	defaultApkFilename := a.BaseModuleName()
+	if a.properties.Compress_apk.GetOrDefault(ctx, false) {
+		defaultApkFilename += ".apk.gz"
+	} else {
+		defaultApkFilename += ".apk"
+	}
+	apkFilename := proptools.StringDefault(a.properties.Filename, defaultApkFilename)
 
 	// TODO: Handle EXTERNAL
 
@@ -425,7 +510,16 @@ func (a *AndroidAppImport) generateAndroidBuildActions(ctx android.ModuleContext
 		a.certificate = PresignedCertificate
 	}
 
-	// TODO: Optionally compress the output apk.
+	if a.properties.Compress_apk.GetOrDefault(ctx, false) {
+		outputFile := android.PathForModuleOut(ctx, "compressed_apk", apkFilename)
+		ctx.Build(pctx, android.BuildParams{
+			Rule:        gzipRule,
+			Input:       a.outputFile,
+			Output:      outputFile,
+			Description: "Compressing " + a.outputFile.Base(),
+		})
+		a.outputFile = outputFile
+	}
 
 	if apexInfo.IsForPlatform() {
 		a.installPath = ctx.InstallFile(installDir, apkFilename, a.outputFile)
@@ -442,6 +536,8 @@ func (a *AndroidAppImport) generateAndroidBuildActions(ctx android.ModuleContext
 	)
 
 	ctx.SetOutputFiles([]android.Path{a.outputFile}, "")
+
+	buildComplianceMetadata(ctx)
 
 	// TODO: androidmk converter jni libs
 }
@@ -538,7 +634,15 @@ func (a *AndroidAppImport) Privileged() bool {
 	return Bool(a.properties.Privileged)
 }
 
-func (a *AndroidAppImport) DepIsInSameApex(_ android.BaseModuleContext, _ android.Module) bool {
+func (m *AndroidAppImport) GetDepInSameApexChecker() android.DepInSameApexChecker {
+	return AppImportDepInSameApexChecker{}
+}
+
+type AppImportDepInSameApexChecker struct {
+	android.BaseDepInSameApexChecker
+}
+
+func (m AppImportDepInSameApexChecker) OutgoingDepIsInSameApex(tag blueprint.DependencyTag) bool {
 	// android_app_import might have extra dependencies via uses_libs property.
 	// Don't track the dependency as we don't automatically add those libraries
 	// to the classpath. It should be explicitly added to java_libs property of APEX
@@ -556,10 +660,8 @@ func (a *AndroidAppImport) MinSdkVersion(ctx android.EarlyModuleContext) android
 var _ android.ApexModule = (*AndroidAppImport)(nil)
 
 // Implements android.ApexModule
-func (j *AndroidAppImport) ShouldSupportSdkVersion(ctx android.BaseModuleContext,
-	sdkVersion android.ApiLevel) error {
-	// Do not check for prebuilts against the min_sdk_version of enclosing APEX
-	return nil
+func (m *AndroidAppImport) MinSdkVersionSupported(ctx android.BaseModuleContext) android.ApiLevel {
+	return android.MinApiLevel
 }
 
 func createVariantGroupType(variants []string, variantGroupName string) reflect.Type {
@@ -682,7 +784,29 @@ type AndroidTestImport struct {
 func (a *AndroidTestImport) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	a.generateAndroidBuildActions(ctx)
 
+	a.updateModuleInfoJSON(ctx)
+
 	a.data = android.PathsForModuleSrc(ctx, a.testProperties.Data)
+
+	android.SetProvider(ctx, android.TestSuiteInfoProvider, android.TestSuiteInfo{
+		TestSuites: a.testProperties.Test_suites,
+	})
+}
+
+func (a *AndroidTestImport) updateModuleInfoJSON(ctx android.ModuleContext) {
+	moduleInfoJSON := ctx.ModuleInfoJSON()
+	moduleInfoJSON.Class = []string{"APPS"}
+	moduleInfoJSON.CompatibilitySuites = []string{"null-suite"}
+	if len(a.testProperties.Test_suites) > 0 {
+		moduleInfoJSON.CompatibilitySuites = a.testProperties.Test_suites
+	}
+	moduleInfoJSON.SystemSharedLibs = []string{"none"}
+	moduleInfoJSON.Tags = []string{"tests"}
+	moduleInfoJSON.RegisterNameOverride = a.BaseModuleName()
+	testConfig := android.ExistentPathForSource(ctx, ctx.ModuleDir(), "AndroidTest.xml")
+	if testConfig.Valid() {
+		moduleInfoJSON.TestConfig = []string{testConfig.String()}
+	}
 }
 
 func (a *AndroidTestImport) InstallInTestcases() bool {

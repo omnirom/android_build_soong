@@ -108,33 +108,18 @@ type ClasspathElementContext interface {
 //
 // e.g. Given the following input:
 //
-//	libraries: com.android.art:core-oj, com.android.art:core-libart, framework, ext
-//	fragments: com.android.art:art-bootclasspath-fragment
+//		libraries: core-oj, core-libart, framework, ext
+//		fragments: art-bootclasspath-fragment
+//	    libraryToApex: core-oj: com.android.art, core-libart: com.android.art
+//	    apexNameToFragment: com.android.art: art-bootclasspath-fragment
 //
 // Then this will return:
 //
 //	ClasspathFragmentElement(art-bootclasspath-fragment, [core-oj, core-libart]),
 //	ClasspathLibraryElement(framework),
 //	ClasspathLibraryElement(ext),
-func CreateClasspathElements(ctx ClasspathElementContext, libraries []android.Module, fragments []android.Module) ClasspathElements {
-	// Create a map from apex name to the fragment module. This makes it easy to find the fragment
-	// associated with a particular apex.
-	apexToFragment := map[string]android.Module{}
-	for _, fragment := range fragments {
-		apexInfo, ok := android.OtherModuleProvider(ctx, fragment, android.ApexInfoProvider)
-		if !ok {
-			ctx.ModuleErrorf("fragment %s is not part of an apex", fragment)
-			continue
-		}
-
-		for _, apex := range apexInfo.InApexVariants {
-			if existing, ok := apexToFragment[apex]; ok {
-				ctx.ModuleErrorf("apex %s has multiple fragments, %s and %s", apex, fragment, existing)
-				continue
-			}
-			apexToFragment[apex] = fragment
-		}
-	}
+func CreateClasspathElements(ctx ClasspathElementContext, libraries []android.Module, fragments []android.Module,
+	libraryToApex map[android.Module]string, apexNameToFragment map[string]android.Module) ClasspathElements {
 
 	fragmentToElement := map[android.Module]*ClasspathFragmentElement{}
 	elements := []ClasspathElement{}
@@ -144,31 +129,28 @@ skipLibrary:
 	// Iterate over the libraries to construct the ClasspathElements list.
 	for _, library := range libraries {
 		var element ClasspathElement
-		if apexInfo, ok := android.OtherModuleProvider(ctx, library, android.ApexInfoProvider); ok {
-
+		if libraryApex, ok := libraryToApex[library]; ok {
 			var fragment android.Module
 
 			// Make sure that the library is in only one fragment of the classpath.
-			for _, apex := range apexInfo.InApexVariants {
-				if f, ok := apexToFragment[apex]; ok {
-					if fragment == nil {
-						// This is the first fragment so just save it away.
-						fragment = f
-					} else if f != fragment {
-						// This apex variant of the library is in a different fragment.
-						ctx.ModuleErrorf("library %s is in two separate fragments, %s and %s", library, fragment, f)
-						// Skip over this library entirely as otherwise the resulting classpath elements would
-						// be invalid.
-						continue skipLibrary
-					}
-				} else {
-					// There is no fragment associated with the library's apex.
+			if f, ok := apexNameToFragment[libraryApex]; ok {
+				if fragment == nil {
+					// This is the first fragment so just save it away.
+					fragment = f
+				} else if f != fragment {
+					// This apex variant of the library is in a different fragment.
+					ctx.ModuleErrorf("library %s is in two separate fragments, %s and %s", library, fragment, f)
+					// Skip over this library entirely as otherwise the resulting classpath elements would
+					// be invalid.
+					continue skipLibrary
 				}
+			} else {
+				// There is no fragment associated with the library's apex.
 			}
 
 			if fragment == nil {
 				ctx.ModuleErrorf("library %s is from apexes %s which have no corresponding fragment in %s",
-					library, apexInfo.InApexVariants, fragments)
+					library, []string{libraryApex}, fragments)
 				// Skip over this library entirely as otherwise the resulting classpath elements would
 				// be invalid.
 				continue skipLibrary

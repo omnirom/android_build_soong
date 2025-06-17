@@ -34,7 +34,41 @@ notice_xml {
     name: "notice_xml_system",
     partition_name: "system",
     visibility: [
-        "//build/make/target/product/generic",
-        "//build/make/target/product/gsi",
+        "//visibility:any_system_partition",
     ],
+}
+
+notice_xml {
+    name: "notice_xml_system_ext",
+    partition_name: "system_ext",
+}
+
+notice_xml {
+    name: "notice_xml_system_dlkm",
+    partition_name: "system_dlkm",
+}
+
+notice_xml {
+    name: "notice_xml_product",
+    partition_name: "product",
+}
+
+notice_xml {
+    name: "notice_xml_odm",
+    partition_name: "odm",
+}
+
+notice_xml {
+    name: "notice_xml_odm_dlkm",
+    partition_name: "odm_dlkm",
+}
+
+notice_xml {
+    name: "notice_xml_vendor",
+    partition_name: "vendor",
+}
+
+notice_xml {
+    name: "notice_xml_vendor_dlkm",
+    partition_name: "vendor_dlkm",
 }

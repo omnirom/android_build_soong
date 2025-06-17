@@ -309,7 +309,8 @@ func (b *bindgenDecorator) GenerateSource(ctx ModuleContext, deps PathDeps) andr
 
 	var cmd, cmdDesc string
 	if b.Properties.Custom_bindgen != "" {
-		cmd = ctx.GetDirectDepWithTag(b.Properties.Custom_bindgen, customBindgenDepTag).(android.HostToolProvider).HostToolPath().String()
+		m := ctx.GetDirectDepProxyWithTag(b.Properties.Custom_bindgen, customBindgenDepTag)
+		cmd = android.OtherModuleProviderOrDefault(ctx, m, android.HostToolProviderInfoProvider).HostToolPath.String()
 		cmdDesc = b.Properties.Custom_bindgen
 	} else {
 		cmd = "$bindgenCmd"
@@ -397,7 +398,7 @@ func (b *bindgenDecorator) SourceProviderDeps(ctx DepsContext, deps Deps) Deps {
 		//
 		// This is necessary to avoid a circular dependency between the source variant and the
 		// dependent cc module.
-		deps.StaticLibs = append(deps.StaticLibs, String(b.Properties.Static_inline_library))
+		deps.WholeStaticLibs = append(deps.WholeStaticLibs, String(b.Properties.Static_inline_library))
 	}
 
 	deps.SharedLibs = append(deps.SharedLibs, b.ClangProperties.Shared_libs.GetOrDefault(ctx, nil)...)

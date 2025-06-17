@@ -36,10 +36,8 @@ type pyModule struct {
 }
 
 var (
-	buildNamePrefix = "soong_python_test"
-	// We allow maching almost anything before the actual variant so that the os/arch variant
-	// is matched.
-	moduleVariantErrTemplate = `%s: module %q variant "[a-zA-Z0-9_]*%s": `
+	buildNamePrefix          = "soong_python_test"
+	moduleVariantErrTemplate = `%s: module %q variant "[a-zA-Z0-9_]*": `
 	pkgPathErrTemplate       = moduleVariantErrTemplate +
 		"pkg_path: %q must be a relative path contained in par file."
 	badIdentifierErrTemplate = moduleVariantErrTemplate +
@@ -48,9 +46,8 @@ var (
 		"found two files to be placed at the same location within zip %q." +
 		" First file: in module %s at path %q." +
 		" Second file: in module %s at path %q."
-	noSrcFileErr      = moduleVariantErrTemplate + "doesn't have any source files!"
-	badSrcFileExtErr  = moduleVariantErrTemplate + "srcs: found non (.py|.proto) file: %q!"
-	badDataFileExtErr = moduleVariantErrTemplate + "data: found (.py) file: %q!"
+	badSrcFileExtErr  = moduleVariantErrTemplate + `srcs: found non \(.py\|.proto\) file: %q!`
+	badDataFileExtErr = moduleVariantErrTemplate + `data: found \(.py\) file: %q!`
 	bpFile            = "Android.bp"
 
 	data = []struct {
@@ -60,20 +57,6 @@ var (
 		errors           []string
 		expectedBinaries []pyModule
 	}{
-		{
-			desc: "module without any src files",
-			mockFiles: map[string][]byte{
-				filepath.Join("dir", bpFile): []byte(
-					`python_library_host {
-						name: "lib1",
-					}`,
-				),
-			},
-			errors: []string{
-				fmt.Sprintf(noSrcFileErr,
-					"dir/Android.bp:1:1", "lib1", "PY3"),
-			},
-		},
 		{
 			desc: "module with bad src file ext",
 			mockFiles: map[string][]byte{
@@ -89,7 +72,7 @@ var (
 			},
 			errors: []string{
 				fmt.Sprintf(badSrcFileExtErr,
-					"dir/Android.bp:3:11", "lib1", "PY3", "dir/file1.exe"),
+					"dir/Android.bp:3:11", "lib1", "dir/file1.exe"),
 			},
 		},
 		{
@@ -111,7 +94,7 @@ var (
 			},
 			errors: []string{
 				fmt.Sprintf(badDataFileExtErr,
-					"dir/Android.bp:6:11", "lib1", "PY3", "dir/file2.py"),
+					"dir/Android.bp:6:11", "lib1", "dir/file2.py"),
 			},
 		},
 		{
@@ -146,9 +129,9 @@ var (
 			},
 			errors: []string{
 				fmt.Sprintf(pkgPathErrTemplate,
-					"dir/Android.bp:11:15", "lib2", "PY3", "a/c/../../../"),
+					"dir/Android.bp:11:15", "lib2", "a/c/../../../"),
 				fmt.Sprintf(pkgPathErrTemplate,
-					"dir/Android.bp:19:15", "lib3", "PY3", "/a/c/../../"),
+					"dir/Android.bp:19:15", "lib3", "/a/c/../../"),
 			},
 		},
 		{
@@ -171,11 +154,11 @@ var (
 			},
 			errors: []string{
 				fmt.Sprintf(badIdentifierErrTemplate, "dir/Android.bp:4:11",
-					"lib1", "PY3", "a/b/c/-e/f/file1.py", "-e"),
+					"lib1", "a/b/c/-e/f/file1.py", "-e"),
 				fmt.Sprintf(badIdentifierErrTemplate, "dir/Android.bp:4:11",
-					"lib1", "PY3", "a/b/c/.file1.py", ".file1"),
+					"lib1", "a/b/c/.file1.py", ".file1"),
 				fmt.Sprintf(badIdentifierErrTemplate, "dir/Android.bp:4:11",
-					"lib1", "PY3", "a/b/c/123/file1.py", "123"),
+					"lib1", "a/b/c/123/file1.py", "123"),
 			},
 		},
 		{
@@ -219,105 +202,8 @@ var (
 			},
 			errors: []string{
 				fmt.Sprintf(dupRunfileErrTemplate, "dir/Android.bp:20:6",
-					"bin", "PY3", "a/b/c/file1.py", "bin", "dir/file1.py",
+					"bin", "a/b/c/file1.py", "bin", "dir/file1.py",
 					"lib1", "dir/c/file1.py"),
-			},
-		},
-		{
-			desc: "module for testing dependencies",
-			mockFiles: map[string][]byte{
-				filepath.Join("dir", bpFile): []byte(
-					`python_defaults {
-						name: "default_lib",
-						srcs: [
-							"default.py",
-						],
-						version: {
-							py2: {
-								enabled: true,
-								srcs: [
-									"default_py2.py",
-								],
-							},
-							py3: {
-								enabled: false,
-								srcs: [
-									"default_py3.py",
-								],
-							},
-						},
-					}
-
-					python_library_host {
-						name: "lib5",
-						pkg_path: "a/b/",
-						srcs: [
-							"file1.py",
-						],
-						version: {
-							py2: {
-								enabled: true,
-							},
-							py3: {
-								enabled: true,
-							},
-						},
-					}
-
-					python_library_host {
-						name: "lib6",
-						pkg_path: "c/d/",
-						srcs: [
-							"file2.py",
-						],
-						libs: [
-							"lib5",
-						],
-					}
-
-					python_binary_host {
-						name: "bin",
-						defaults: ["default_lib"],
-						pkg_path: "e/",
-						srcs: [
-							"bin.py",
-						],
-						libs: [
-							"lib5",
-						],
-						version: {
-							py3: {
-								enabled: true,
-								srcs: [
-									"file4.py",
-								],
-								libs: [
-									"lib6",
-								],
-							},
-						},
-					}`,
-				),
-				filepath.Join("dir", "default.py"):     nil,
-				filepath.Join("dir", "default_py2.py"): nil,
-				filepath.Join("dir", "default_py3.py"): nil,
-				filepath.Join("dir", "file1.py"):       nil,
-				filepath.Join("dir", "file2.py"):       nil,
-				filepath.Join("dir", "bin.py"):         nil,
-				filepath.Join("dir", "file4.py"):       nil,
-			},
-			expectedBinaries: []pyModule{
-				{
-					name:          "bin",
-					actualVersion: "PY3",
-					pyRunfiles: []string{
-						"e/default.py",
-						"e/bin.py",
-						"e/default_py3.py",
-						"e/file4.py",
-					},
-					srcsZip: "out/soong/.intermediates/dir/bin/PY3/bin.py.srcszip",
-				},
 			},
 		},
 	}
@@ -325,9 +211,6 @@ var (
 
 func TestPythonModule(t *testing.T) {
 	for _, d := range data {
-		if d.desc != "module with duplicate runfile path" {
-			continue
-		}
 		d.mockFiles[filepath.Join("common", bpFile)] = []byte(`
 python_library {
   name: "py3-stdlib",
@@ -416,10 +299,6 @@ func TestInvalidTestOnlyTargets(t *testing.T) {
 	for i, bp := range testCases {
 		ctx := android.GroupFixturePreparers(
 			PrepareForTestWithPythonBuildComponents,
-			android.FixtureRegisterWithContext(func(ctx android.RegistrationContext) {
-
-				ctx.RegisterModuleType("python_defaults", DefaultsFactory)
-			}),
 			android.PrepareForTestWithAllowMissingDependencies).
 			ExtendWithErrorHandler(android.FixtureIgnoreErrors).
 			RunTestWithBp(t, bp)
@@ -434,7 +313,7 @@ func TestInvalidTestOnlyTargets(t *testing.T) {
 }
 
 func expectModule(t *testing.T, ctx *android.TestContext, name, variant, expectedSrcsZip string, expectedPyRunfiles []string) {
-	module := ctx.ModuleForTests(name, variant)
+	module := ctx.ModuleForTests(t, name, variant)
 
 	base, baseOk := module.Module().(*PythonLibraryModule)
 	if !baseOk {

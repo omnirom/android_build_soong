@@ -22,14 +22,13 @@ import (
 	"android/soong/cc"
 )
 
-// Test that cc modules can depend on vendor_available rust_ffi_rlib/rust_ffi_static libraries.
+// Test that cc modules can depend on vendor_available rust_ffi_static libraries.
 func TestVendorLinkage(t *testing.T) {
 	ctx := testRust(t, `
 			cc_binary {
 				name: "fizz_vendor_available",
 				static_libs: [
 					"libfoo_vendor",
-					"libfoo_vendor_static"
 				],
 				vendor_available: true,
 			}
@@ -38,24 +37,18 @@ func TestVendorLinkage(t *testing.T) {
 				static_libs: ["libfoo_vendor"],
 				soc_specific: true,
 			}
-			rust_ffi_rlib {
-				name: "libfoo_vendor",
-				crate_name: "foo",
-				srcs: ["foo.rs"],
-				vendor_available: true,
-			}
 			rust_ffi_static {
-				name: "libfoo_vendor_static",
+				name: "libfoo_vendor",
 				crate_name: "foo",
 				srcs: ["foo.rs"],
 				vendor_available: true,
 			}
 		`)
 
-	vendorBinary := ctx.ModuleForTests("fizz_vendor_available", "android_vendor_arm64_armv8-a").Module().(*cc.Module)
+	vendorBinary := ctx.ModuleForTests(t, "fizz_vendor_available", "android_vendor_arm64_armv8-a").Module().(*cc.Module)
 
-	if android.InList("libfoo_vendor_static.vendor", vendorBinary.Properties.AndroidMkStaticLibs) {
-		t.Errorf("vendorBinary should not have a staticlib dependency on libfoo_vendor_static.vendor: %#v", vendorBinary.Properties.AndroidMkStaticLibs)
+	if android.InList("libfoo_vendor.vendor", vendorBinary.Properties.AndroidMkStaticLibs) {
+		t.Errorf("vendorBinary should not have a staticlib dependency on libfoo_vendor.vendor: %#v", vendorBinary.Properties.AndroidMkStaticLibs)
 	}
 }
 
@@ -71,7 +64,7 @@ func TestImageCfgFlag(t *testing.T) {
 			}
 		`)
 
-	vendor := ctx.ModuleForTests("libfoo", "android_vendor_arm64_armv8-a_shared").Rule("rustc")
+	vendor := ctx.ModuleForTests(t, "libfoo", "android_vendor_arm64_armv8-a_shared").Rule("rustc")
 
 	if !strings.Contains(vendor.Args["rustcFlags"], "--cfg 'android_vndk'") {
 		t.Errorf("missing \"--cfg 'android_vndk'\" for libfoo vendor variant, rustcFlags: %#v", vendor.Args["rustcFlags"])
@@ -83,7 +76,7 @@ func TestImageCfgFlag(t *testing.T) {
 		t.Errorf("unexpected \"--cfg 'android_product'\" for libfoo vendor variant, rustcFlags: %#v", vendor.Args["rustcFlags"])
 	}
 
-	product := ctx.ModuleForTests("libfoo", "android_product_arm64_armv8-a_shared").Rule("rustc")
+	product := ctx.ModuleForTests(t, "libfoo", "android_product_arm64_armv8-a_shared").Rule("rustc")
 	if !strings.Contains(product.Args["rustcFlags"], "--cfg 'android_vndk'") {
 		t.Errorf("missing \"--cfg 'android_vndk'\" for libfoo product variant, rustcFlags: %#v", product.Args["rustcFlags"])
 	}
@@ -94,7 +87,7 @@ func TestImageCfgFlag(t *testing.T) {
 		t.Errorf("missing \"--cfg 'android_product'\" for libfoo product variant, rustcFlags: %#v", product.Args["rustcFlags"])
 	}
 
-	system := ctx.ModuleForTests("libfoo", "android_arm64_armv8-a_shared").Rule("rustc")
+	system := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_shared").Rule("rustc")
 	if strings.Contains(system.Args["rustcFlags"], "--cfg 'android_vndk'") {
 		t.Errorf("unexpected \"--cfg 'android_vndk'\" for libfoo system variant, rustcFlags: %#v", system.Args["rustcFlags"])
 	}
@@ -107,36 +100,29 @@ func TestImageCfgFlag(t *testing.T) {
 
 }
 
-// Test that cc modules can link against vendor_ramdisk_available rust_ffi_rlib and rust_ffi_static libraries.
+// Test that cc modules can link against vendor_ramdisk_available rust_ffi_static libraries.
 func TestVendorRamdiskLinkage(t *testing.T) {
 	ctx := testRust(t, `
 			cc_library_shared {
 				name: "libcc_vendor_ramdisk",
 				static_libs: [
 					"libfoo_vendor_ramdisk",
-					"libfoo_static_vendor_ramdisk"
 				],
 				system_shared_libs: [],
 				vendor_ramdisk_available: true,
 			}
-			rust_ffi_rlib {
-				name: "libfoo_vendor_ramdisk",
-				crate_name: "foo",
-				srcs: ["foo.rs"],
-				vendor_ramdisk_available: true,
-			}
 			rust_ffi_static {
-				name: "libfoo_static_vendor_ramdisk",
+				name: "libfoo_vendor_ramdisk",
 				crate_name: "foo",
 				srcs: ["foo.rs"],
 				vendor_ramdisk_available: true,
 			}
 		`)
 
-	vendorRamdiskLibrary := ctx.ModuleForTests("libcc_vendor_ramdisk", "android_vendor_ramdisk_arm64_armv8-a_shared").Module().(*cc.Module)
+	vendorRamdiskLibrary := ctx.ModuleForTests(t, "libcc_vendor_ramdisk", "android_vendor_ramdisk_arm64_armv8-a_shared").Module().(*cc.Module)
 
-	if android.InList("libfoo_static_vendor_ramdisk.vendor_ramdisk", vendorRamdiskLibrary.Properties.AndroidMkStaticLibs) {
-		t.Errorf("libcc_vendor_ramdisk should not have a dependency on the libfoo_static_vendor_ramdisk static library")
+	if android.InList("libfoo_vendor_ramdisk.vendor_ramdisk", vendorRamdiskLibrary.Properties.AndroidMkStaticLibs) {
+		t.Errorf("libcc_vendor_ramdisk should not have a dependency on the libfoo_vendor_ramdisk static library")
 	}
 }
 
@@ -158,7 +144,7 @@ func TestForbiddenVendorLinkage(t *testing.T) {
 }
 
 func checkInstallPartition(t *testing.T, ctx *android.TestContext, name, variant, expected string) {
-	mod := ctx.ModuleForTests(name, variant).Module().(*Module)
+	mod := ctx.ModuleForTests(t, name, variant).Module().(*Module)
 	partitionDefined := false
 	checkPartition := func(specific bool, partition string) {
 		if specific {

@@ -40,7 +40,7 @@ message Mapping {
 
   // LocationType is the place where to look for the file with the given
   // identifier.
-  Enum LocationType {
+  enum LocationType {
     // ZIP denotes the file with the given identifier is in the distribuited
     // symbols.zip or proguard_dict.zip files, or the local disc.
     ZIP = 0;

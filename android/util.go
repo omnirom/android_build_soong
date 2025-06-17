@@ -23,7 +23,6 @@ import (
 	"runtime"
 	"sort"
 	"strings"
-	"sync"
 
 	"github.com/google/blueprint/proptools"
 )
@@ -100,13 +99,6 @@ func JoinWithPrefixSuffixAndSeparator(strs []string, prefix, suffix, sep string)
 		buf.WriteString(suffix)
 	}
 	return buf.String()
-}
-
-// SortedStringKeys returns the keys of the given map in the ascending order.
-//
-// Deprecated: Use SortedKeys instead.
-func SortedStringKeys[V any](m map[string]V) []string {
-	return SortedKeys(m)
 }
 
 // SortedKeys returns the keys of the given map in the ascending order.
@@ -213,21 +205,23 @@ func PrettyConcat(list []string, quote bool, lastSep string) string {
 }
 
 // ListSetDifference checks if the two lists contain the same elements. It returns
-// a boolean which is true if there is a difference, and then returns lists of elements
+// a boolean which is true if there is a difference, and then returns lists of unique elements
 // that are in l1 but not l2, and l2 but not l1.
 func ListSetDifference[T comparable](l1, l2 []T) (bool, []T, []T) {
 	listsDiffer := false
+	l1 = firstUnique(l1)
+	l2 = firstUnique(l2)
 	diff1 := []T{}
 	diff2 := []T{}
 	m1 := setFromList(l1)
 	m2 := setFromList(l2)
-	for t := range m1 {
+	for _, t := range l1 {
 		if _, ok := m2[t]; !ok {
 			diff1 = append(diff1, t)
 			listsDiffer = true
 		}
 	}
-	for t := range m2 {
+	for _, t := range l2 {
 		if _, ok := m1[t]; !ok {
 			diff2 = append(diff2, t)
 			listsDiffer = true
@@ -238,8 +232,13 @@ func ListSetDifference[T comparable](l1, l2 []T) (bool, []T, []T) {
 
 // Returns true if the two lists have common elements.
 func HasIntersection[T comparable](l1, l2 []T) bool {
-	_, a, b := ListSetDifference(l1, l2)
-	return len(a)+len(b) < len(setFromList(l1))+len(setFromList(l2))
+	m1 := setFromList(l1)
+	for _, x := range l2 {
+		if _, ok := m1[x]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // Returns true if the given string s is prefixed with any string in the given prefix list.
@@ -299,6 +298,20 @@ func FilterList(list []string, filter []string) (remainder []string, filtered []
 	// InList is O(n). May be worth using more efficient lookup for longer lists.
 	for _, l := range list {
 		if InList(l, filter) {
+			filtered = append(filtered, l)
+		} else {
+			remainder = append(remainder, l)
+		}
+	}
+
+	return
+}
+
+// FilterListByPrefixes performs the same splitting as FilterList does, but treats the passed
+// filters as prefixes
+func FilterListByPrefix(list []string, filter []string) (remainder []string, filtered []string) {
+	for _, l := range list {
+		if HasAnyPrefix(l, filter) {
 			filtered = append(filtered, l)
 		} else {
 			remainder = append(remainder, l)
@@ -630,35 +643,6 @@ func AddToStringSet(set map[string]bool, items []string) {
 	for _, item := range items {
 		set[item] = true
 	}
-}
-
-// SyncMap is a wrapper around sync.Map that provides type safety via generics.
-type SyncMap[K comparable, V any] struct {
-	sync.Map
-}
-
-// Load returns the value stored in the map for a key, or the zero value if no
-// value is present.
-// The ok result indicates whether value was found in the map.
-func (m *SyncMap[K, V]) Load(key K) (value V, ok bool) {
-	v, ok := m.Map.Load(key)
-	if !ok {
-		return *new(V), false
-	}
-	return v.(V), true
-}
-
-// Store sets the value for a key.
-func (m *SyncMap[K, V]) Store(key K, value V) {
-	m.Map.Store(key, value)
-}
-
-// LoadOrStore returns the existing value for the key if present.
-// Otherwise, it stores and returns the given value.
-// The loaded result is true if the value was loaded, false if stored.
-func (m *SyncMap[K, V]) LoadOrStore(key K, value V) (actual V, loaded bool) {
-	v, loaded := m.Map.LoadOrStore(key, value)
-	return v.(V), loaded
 }
 
 // AppendIfNotZero append the given value to the slice if it is not the zero value

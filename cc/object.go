@@ -159,7 +159,7 @@ func (object *objectLinker) link(ctx ModuleContext,
 	// isForPlatform is terribly named and actually means isNotApex.
 	if Bool(object.Properties.Crt) &&
 		!Bool(object.Properties.Exclude_from_ndk_sysroot) && ctx.useSdk() &&
-		ctx.isSdkVariant() && ctx.isForPlatform() {
+		ctx.isSdkVariant() && CtxIsForPlatform(ctx) {
 
 		output = getVersionedLibraryInstallPath(ctx,
 			nativeApiLevelOrPanic(ctx, ctx.sdkVersion())).Join(ctx, outputName)
@@ -242,7 +242,15 @@ func (object *objectLinker) isCrt() bool {
 	return Bool(object.Properties.Crt)
 }
 
+func (object *objectLinker) defaultDistFiles() []android.Path {
+	return nil
+}
+
 func (object *objectLinker) moduleInfoJSON(ctx ModuleContext, moduleInfoJSON *android.ModuleInfoJSON) {
 	object.baseLinker.moduleInfoJSON(ctx, moduleInfoJSON)
 	moduleInfoJSON.Class = []string{"STATIC_LIBRARIES"}
+}
+
+func (object *objectLinker) testSuiteInfo(ctx ModuleContext) {
+	// not a test
 }

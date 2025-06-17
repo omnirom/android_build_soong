@@ -15,6 +15,8 @@
 package java
 
 import (
+	"fmt"
+
 	"android/soong/android"
 
 	"github.com/google/blueprint"
@@ -23,36 +25,9 @@ import (
 
 // Contains code that is common to both platform_bootclasspath and bootclasspath_fragment.
 
-func init() {
-	registerBootclasspathBuildComponents(android.InitRegistrationContext)
-}
-
-func registerBootclasspathBuildComponents(ctx android.RegistrationContext) {
-	ctx.FinalDepsMutators(func(ctx android.RegisterMutatorsContext) {
-		ctx.BottomUp("bootclasspath_deps", bootclasspathDepsMutator)
-	})
-}
-
-// BootclasspathDepsMutator is the interface that a module must implement if it wants to add
-// dependencies onto APEX specific variants of bootclasspath fragments or bootclasspath contents.
-type BootclasspathDepsMutator interface {
-	// BootclasspathDepsMutator implementations should add dependencies using
-	// addDependencyOntoApexModulePair and addDependencyOntoApexVariants.
-	BootclasspathDepsMutator(ctx android.BottomUpMutatorContext)
-}
-
-// bootclasspathDepsMutator is called during the final deps phase after all APEX variants have
-// been created so can add dependencies onto specific APEX variants of modules.
-func bootclasspathDepsMutator(ctx android.BottomUpMutatorContext) {
-	m := ctx.Module()
-	if p, ok := m.(BootclasspathDepsMutator); ok {
-		p.BootclasspathDepsMutator(ctx)
-	}
-}
-
 // addDependencyOntoApexVariants adds dependencies onto the appropriate apex specific variants of
 // the module as specified in the ApexVariantReference list.
-func addDependencyOntoApexVariants(ctx android.BottomUpMutatorContext, propertyName string, refs []ApexVariantReference, tag blueprint.DependencyTag) {
+func addDependencyOntoApexVariants(ctx android.BottomUpMutatorContext, propertyName string, refs []ApexVariantReference, tagType bootclasspathDependencyTagType) {
 	for i, ref := range refs {
 		apex := proptools.StringDefault(ref.Apex, "platform")
 
@@ -62,7 +37,7 @@ func addDependencyOntoApexVariants(ctx android.BottomUpMutatorContext, propertyN
 		}
 		name := proptools.String(ref.Module)
 
-		addDependencyOntoApexModulePair(ctx, apex, name, tag)
+		addDependencyOntoApexModulePair(ctx, apex, name, tagType)
 	}
 }
 
@@ -75,68 +50,154 @@ func addDependencyOntoApexVariants(ctx android.BottomUpMutatorContext, propertyN
 // module when both source and prebuilt modules are available.
 //
 // Use gatherApexModulePairDepsWithTag to retrieve the dependencies.
-func addDependencyOntoApexModulePair(ctx android.BottomUpMutatorContext, apex string, name string, tag blueprint.DependencyTag) {
-	var variations []blueprint.Variation
-	if !android.IsConfiguredJarForPlatform(apex) {
-		// Pick the correct apex variant.
-		variations = []blueprint.Variation{
-			{Mutator: "apex", Variation: apex},
-		}
+func addDependencyOntoApexModulePair(ctx android.BottomUpMutatorContext, apex string, name string, tagType bootclasspathDependencyTagType) {
+	tag := bootclasspathDependencyTag{
+		typ: tagType,
 	}
-
 	target := ctx.Module().Target()
-	variations = append(variations, target.Variations()...)
-
-	addedDep := false
-	if ctx.OtherModuleDependencyVariantExists(variations, name) {
-		ctx.AddFarVariationDependencies(variations, tag, name)
-		addedDep = true
+	if android.IsConfiguredJarForPlatform(apex) {
+		// Platform variant, add a direct dependency.
+		ctx.AddFarVariationDependencies(target.Variations(), tag, name)
+	} else {
+		// A module in an apex.  Dependencies can't be added directly onto an apex variation, as that would
+		// require constructing a full ApexInfo configuration, which can't be predicted here.  Add a dependency
+		// on the apex instead, and annotate the dependency tag with the desired module in the apex.
+		tag.moduleInApex = name
+		ctx.AddFarVariationDependencies(target.Variations(), tag, apex)
 	}
 
-	// Add a dependency on the prebuilt module if it exists.
-	prebuiltName := android.PrebuiltNameFromSource(name)
-	if ctx.OtherModuleDependencyVariantExists(variations, prebuiltName) {
-		ctx.AddVariationDependencies(variations, tag, prebuiltName)
-		addedDep = true
-	}
-
-	// If no appropriate variant existing for this, so no dependency could be added, then it is an
-	// error, unless missing dependencies are allowed. The simplest way to handle that is to add a
-	// dependency that will not be satisfied and the default behavior will handle it.
-	if !addedDep {
-		// Add dependency on the unprefixed (i.e. source or renamed prebuilt) module which we know does
-		// not exist. The resulting error message will contain useful information about the available
-		// variants.
-		reportMissingVariationDependency(ctx, variations, name)
-
-		// Add dependency on the missing prefixed prebuilt variant too if a module with that name exists
-		// so that information about its available variants will be reported too.
-		if ctx.OtherModuleExists(prebuiltName) {
-			reportMissingVariationDependency(ctx, variations, prebuiltName)
-		}
-	}
 }
 
-// reportMissingVariationDependency intentionally adds a dependency on a missing variation in order
-// to generate an appropriate error message with information about the available variations.
-func reportMissingVariationDependency(ctx android.BottomUpMutatorContext, variations []blueprint.Variation, name string) {
-	ctx.AddFarVariationDependencies(variations, nil, name)
+// gatherFragments collects fragments that are direct dependencies of this module, as well as
+// any fragments in apexes via the dependency on the apex.  It returns a list of the fragment
+// modules and map from apex name to the fragment in that apex.
+func gatherFragments(ctx android.BaseModuleContext) ([]android.Module, map[string]android.Module) {
+	var fragments []android.Module
+
+	type fragmentInApex struct {
+		module string
+		apex   string
+	}
+
+	var fragmentsInApexes []fragmentInApex
+
+	// Find any direct dependencies, as well as a list of the modules in apexes.
+	ctx.VisitDirectDeps(func(module android.Module) {
+		t := ctx.OtherModuleDependencyTag(module)
+		if bcpTag, ok := t.(bootclasspathDependencyTag); ok && bcpTag.typ == fragment {
+			if bcpTag.moduleInApex != "" {
+				fragmentsInApexes = append(fragmentsInApexes, fragmentInApex{bcpTag.moduleInApex, ctx.OtherModuleName(module)})
+			} else {
+				fragments = append(fragments, module)
+			}
+		}
+	})
+
+	fragmentsMap := make(map[string]android.Module)
+	for _, fragmentInApex := range fragmentsInApexes {
+		var found android.Module
+		// Find a desired module in an apex.
+		ctx.WalkDeps(func(child, parent android.Module) bool {
+			t := ctx.OtherModuleDependencyTag(child)
+			if parent == ctx.Module() {
+				if bcpTag, ok := t.(bootclasspathDependencyTag); ok && bcpTag.typ == fragment && ctx.OtherModuleName(child) == fragmentInApex.apex {
+					// This is the dependency from this module to the apex, recurse into it.
+					return true
+				}
+			} else if android.IsDontReplaceSourceWithPrebuiltTag(t) {
+				return false
+			} else if t == android.PrebuiltDepTag {
+				return false
+			} else if IsBootclasspathFragmentContentDepTag(t) {
+				return false
+			} else if android.RemoveOptionalPrebuiltPrefix(ctx.OtherModuleName(child)) == fragmentInApex.module {
+				// This is the desired module inside the apex.
+				if found != nil && child != found {
+					panic(fmt.Errorf("found two conflicting modules %q in apex %q: %s and %s",
+						fragmentInApex.module, fragmentInApex.apex, found, child))
+				}
+				found = child
+			}
+			return false
+		})
+		if found != nil {
+			if existing, exists := fragmentsMap[fragmentInApex.apex]; exists {
+				ctx.ModuleErrorf("apex %s has multiple fragments, %s and %s", fragmentInApex.apex, fragmentInApex.module, existing)
+			} else {
+				fragmentsMap[fragmentInApex.apex] = found
+				fragments = append(fragments, found)
+			}
+		} else if !ctx.Config().AllowMissingDependencies() {
+			ctx.ModuleErrorf("failed to find fragment %q in apex %q\n",
+				fragmentInApex.module, fragmentInApex.apex)
+		}
+	}
+	return fragments, fragmentsMap
 }
 
 // gatherApexModulePairDepsWithTag returns the list of dependencies with the supplied tag that was
 // added by addDependencyOntoApexModulePair.
-func gatherApexModulePairDepsWithTag(ctx android.BaseModuleContext, tag blueprint.DependencyTag) []android.Module {
+func gatherApexModulePairDepsWithTag(ctx android.BaseModuleContext, tagType bootclasspathDependencyTagType) ([]android.Module, map[android.Module]string) {
 	var modules []android.Module
-	isActiveModulePred := func(module android.Module) bool {
-		return isActiveModule(ctx, module)
+	modulesToApex := make(map[android.Module]string)
+
+	type moduleInApex struct {
+		module string
+		apex   string
 	}
-	ctx.VisitDirectDepsIf(isActiveModulePred, func(module android.Module) {
+
+	var modulesInApexes []moduleInApex
+
+	ctx.VisitDirectDeps(func(module android.Module) {
 		t := ctx.OtherModuleDependencyTag(module)
-		if t == tag {
-			modules = append(modules, module)
+		if bcpTag, ok := t.(bootclasspathDependencyTag); ok && bcpTag.typ == tagType {
+			if bcpTag.moduleInApex != "" {
+				modulesInApexes = append(modulesInApexes, moduleInApex{bcpTag.moduleInApex, ctx.OtherModuleName(module)})
+			} else {
+				modules = append(modules, module)
+			}
 		}
 	})
-	return modules
+
+	for _, moduleInApex := range modulesInApexes {
+		var found android.Module
+		ctx.WalkDeps(func(child, parent android.Module) bool {
+			t := ctx.OtherModuleDependencyTag(child)
+			if parent == ctx.Module() {
+				if bcpTag, ok := t.(bootclasspathDependencyTag); ok && bcpTag.typ == tagType && ctx.OtherModuleName(child) == moduleInApex.apex {
+					// recurse into the apex
+					return true
+				}
+			} else if tagType != fragment && android.IsFragmentInApexTag(t) {
+				return true
+			} else if android.IsDontReplaceSourceWithPrebuiltTag(t) {
+				return false
+			} else if t == android.PrebuiltDepTag {
+				return false
+			} else if IsBootclasspathFragmentContentDepTag(t) {
+				return false
+			} else if android.RemoveOptionalPrebuiltPrefix(ctx.OtherModuleName(child)) == moduleInApex.module {
+				if found != nil && child != found {
+					panic(fmt.Errorf("found two conflicting modules %q in apex %q: %s and %s",
+						moduleInApex.module, moduleInApex.apex, found, child))
+				}
+				found = child
+			}
+			return false
+		})
+		if found != nil {
+			modules = append(modules, found)
+			if existing, exists := modulesToApex[found]; exists && existing != moduleInApex.apex {
+				ctx.ModuleErrorf("module %s is in two apexes, %s and %s", moduleInApex.module, existing, moduleInApex.apex)
+			} else {
+				modulesToApex[found] = moduleInApex.apex
+			}
+		} else if !ctx.Config().AllowMissingDependencies() {
+			ctx.ModuleErrorf("failed to find module %q in apex %q\n",
+				moduleInApex.module, moduleInApex.apex)
+		}
+	}
+	return modules, modulesToApex
 }
 
 // ApexVariantReference specifies a particular apex variant of a module.
@@ -165,7 +226,7 @@ type BootclasspathFragmentsDepsProperties struct {
 // addDependenciesOntoFragments adds dependencies to the fragments specified in this properties
 // structure.
 func (p *BootclasspathFragmentsDepsProperties) addDependenciesOntoFragments(ctx android.BottomUpMutatorContext) {
-	addDependencyOntoApexVariants(ctx, "fragments", p.Fragments, bootclasspathFragmentDepTag)
+	addDependencyOntoApexVariants(ctx, "fragments", p.Fragments, fragment)
 }
 
 // bootclasspathDependencyTag defines dependencies from/to bootclasspath_fragment,
@@ -174,22 +235,37 @@ func (p *BootclasspathFragmentsDepsProperties) addDependenciesOntoFragments(ctx 
 type bootclasspathDependencyTag struct {
 	blueprint.BaseDependencyTag
 
-	name string
+	typ bootclasspathDependencyTagType
+
+	// moduleInApex is set to the name of the desired module when this dependency points
+	// to the apex that the modules is contained in.
+	moduleInApex string
 }
 
+type bootclasspathDependencyTagType int
+
+const (
+	// The tag used for dependencies onto bootclasspath_fragments.
+	fragment bootclasspathDependencyTagType = iota
+	// The tag used for dependencies onto platform_bootclasspath.
+	platform
+	dexpreoptBootJar
+	artBootJar
+	platformBootJar
+	apexBootJar
+)
+
 func (t bootclasspathDependencyTag) ExcludeFromVisibilityEnforcement() {
+}
+
+func (t bootclasspathDependencyTag) LicenseAnnotations() []android.LicenseAnnotation {
+	return []android.LicenseAnnotation{android.LicenseAnnotationSharedDependency}
 }
 
 // Dependencies that use the bootclasspathDependencyTag instances are only added after all the
 // visibility checking has been done so this has no functional effect. However, it does make it
 // clear that visibility is not being enforced on these tags.
 var _ android.ExcludeFromVisibilityEnforcementTag = bootclasspathDependencyTag{}
-
-// The tag used for dependencies onto bootclasspath_fragments.
-var bootclasspathFragmentDepTag = bootclasspathDependencyTag{name: "fragment"}
-
-// The tag used for dependencies onto platform_bootclasspath.
-var platformBootclasspathDepTag = bootclasspathDependencyTag{name: "platform"}
 
 // BootclasspathNestedAPIProperties defines properties related to the API provided by parts of the
 // bootclasspath that are nested within the main BootclasspathAPIProperties.

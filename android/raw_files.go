@@ -18,7 +18,6 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
-	"github.com/google/blueprint"
 	"io"
 	"io/fs"
 	"os"
@@ -26,25 +25,28 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/blueprint"
+	"github.com/google/blueprint/syncmap"
+
 	"github.com/google/blueprint/proptools"
 )
 
 // WriteFileRule creates a ninja rule to write contents to a file by immediately writing the
 // contents, plus a trailing newline, to a file in out/soong/raw-${TARGET_PRODUCT}, and then creating
 // a ninja rule to copy the file into place.
-func WriteFileRule(ctx BuilderContext, outputFile WritablePath, content string) {
-	writeFileRule(ctx, outputFile, content, true, false)
+func WriteFileRule(ctx BuilderContext, outputFile WritablePath, content string, validations ...Path) {
+	writeFileRule(ctx, outputFile, content, true, false, validations)
 }
 
 // WriteFileRuleVerbatim creates a ninja rule to write contents to a file by immediately writing the
 // contents to a file in out/soong/raw-${TARGET_PRODUCT}, and then creating a ninja rule to copy the file into place.
-func WriteFileRuleVerbatim(ctx BuilderContext, outputFile WritablePath, content string) {
-	writeFileRule(ctx, outputFile, content, false, false)
+func WriteFileRuleVerbatim(ctx BuilderContext, outputFile WritablePath, content string, validations ...Path) {
+	writeFileRule(ctx, outputFile, content, false, false, validations)
 }
 
 // WriteExecutableFileRuleVerbatim is the same as WriteFileRuleVerbatim, but runs chmod +x on the result
-func WriteExecutableFileRuleVerbatim(ctx BuilderContext, outputFile WritablePath, content string) {
-	writeFileRule(ctx, outputFile, content, false, true)
+func WriteExecutableFileRuleVerbatim(ctx BuilderContext, outputFile WritablePath, content string, validations ...Path) {
+	writeFileRule(ctx, outputFile, content, false, true, validations)
 }
 
 // tempFile provides a testable wrapper around a file in out/soong/.temp.  It writes to a temporary file when
@@ -124,7 +126,7 @@ func writeContentToTempFileAndHash(ctx BuilderContext, content string, newline b
 	return tempFile, hex.EncodeToString(hash.Sum(nil))
 }
 
-func writeFileRule(ctx BuilderContext, outputFile WritablePath, content string, newline bool, executable bool) {
+func writeFileRule(ctx BuilderContext, outputFile WritablePath, content string, newline bool, executable bool, validations Paths) {
 	// Write the contents to a temporary file while computing its hash.
 	tempFile, hash := writeContentToTempFileAndHash(ctx, content, newline)
 
@@ -186,6 +188,7 @@ func writeFileRule(ctx BuilderContext, outputFile WritablePath, content string, 
 		Input:       rawPath,
 		Output:      outputFile,
 		Description: "raw " + outputFile.Base(),
+		Validations: validations,
 	})
 }
 
@@ -211,10 +214,10 @@ type rawFileInfo struct {
 
 var rawFileSetKey OnceKey = NewOnceKey("raw file set")
 
-func getRawFileSet(config Config) *SyncMap[string, rawFileInfo] {
+func getRawFileSet(config Config) *syncmap.SyncMap[string, rawFileInfo] {
 	return config.Once(rawFileSetKey, func() any {
-		return &SyncMap[string, rawFileInfo]{}
-	}).(*SyncMap[string, rawFileInfo])
+		return &syncmap.SyncMap[string, rawFileInfo]{}
+	}).(*syncmap.SyncMap[string, rawFileInfo])
 }
 
 // ContentFromFileRuleForTests returns the content that was passed to a WriteFileRule for use

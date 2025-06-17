@@ -85,7 +85,7 @@ func TestCompilationOutputFiles(t *testing.T) {
 				"out/soong/.intermediates/libfizz_buzz/android_arm64_armv8-a_dylib/libfizz_buzz.dylib.so",
 				"out/soong/.intermediates/libfizz_buzz/android_arm64_armv8-a_dylib/libfizz_buzz.dylib.so.clippy",
 				"out/soong/.intermediates/libfizz_buzz/android_arm64_armv8-a_dylib/unstripped/libfizz_buzz.dylib.so",
-				"out/soong/target/product/test_device/system/lib64/libfizz_buzz.dylib.so",
+				"out/target/product/test_device/system/lib64/libfizz_buzz.dylib.so",
 				"out/soong/.intermediates/libfizz_buzz/android_arm64_armv8-a_dylib/meta_lic",
 			},
 		},
@@ -118,7 +118,7 @@ func TestCompilationOutputFiles(t *testing.T) {
 				"out/soong/.intermediates/fizz_buzz/android_arm64_armv8-a/fizz_buzz",
 				"out/soong/.intermediates/fizz_buzz/android_arm64_armv8-a/fizz_buzz.clippy",
 				"out/soong/.intermediates/fizz_buzz/android_arm64_armv8-a/unstripped/fizz_buzz",
-				"out/soong/target/product/test_device/system/bin/fizz_buzz",
+				"out/target/product/test_device/system/bin/fizz_buzz",
 				"out/soong/.intermediates/fizz_buzz/android_arm64_armv8-a/meta_lic",
 			},
 		},
@@ -154,13 +154,13 @@ func TestCompilationOutputFiles(t *testing.T) {
 				"out/soong/.intermediates/librust_ffi/android_arm64_armv8-a_shared/unstripped/librust_ffi.so.toc",
 				"out/soong/.intermediates/librust_ffi/android_arm64_armv8-a_shared/meta_lic",
 				"out/soong/.intermediates/librust_ffi/android_arm64_armv8-a_shared/rustdoc.timestamp",
-				"out/soong/target/product/test_device/system/lib64/librust_ffi.so",
+				"out/target/product/test_device/system/lib64/librust_ffi.so",
 			},
 		},
 	}
 	for _, tc := range testcases {
 		t.Run(tc.testName, func(t *testing.T) {
-			modOutputs := ctx.ModuleForTests(tc.moduleName, tc.variant).AllOutputs()
+			modOutputs := ctx.ModuleForTests(t, tc.moduleName, tc.variant).AllOutputs()
 			sort.Strings(tc.expectedFiles)
 			sort.Strings(modOutputs)
 			android.AssertStringPathsRelativeToTopEquals(

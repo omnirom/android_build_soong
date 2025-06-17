@@ -159,10 +159,10 @@ func TestZip(t *testing.T) {
 			compressionLevel: 9,
 
 			files: []zip.FileHeader{
+				fh("[", fileEmpty, zip.Store),
 				fh("a/a/a", fileA, zip.Deflate),
 				fh("a/a/b", fileB, zip.Deflate),
 				fh("c", fileC, zip.Deflate),
-				fh("[", fileEmpty, zip.Store),
 			},
 		},
 		{
@@ -261,10 +261,10 @@ func TestZip(t *testing.T) {
 			compressionLevel: 9,
 
 			files: []zip.FileHeader{
+				fh("[", fileEmpty, zip.Store),
 				fh("a/a/a", fileA, zip.Deflate),
 				fh("a/a/b", fileB, zip.Deflate),
 				fh("c", fileC, zip.Deflate),
-				fh("[", fileEmpty, zip.Store),
 			},
 		},
 		{
@@ -274,10 +274,10 @@ func TestZip(t *testing.T) {
 			compressionLevel: 9,
 
 			files: []zip.FileHeader{
+				fh("[", fileEmpty, zip.Store),
 				fh("a/a/a", fileA, zip.Deflate),
 				fh("a/a/b", fileB, zip.Deflate),
 				fh("c", fileC, zip.Deflate),
-				fh("[", fileEmpty, zip.Store),
 			},
 		},
 		{
@@ -287,11 +287,11 @@ func TestZip(t *testing.T) {
 			compressionLevel: 9,
 
 			files: []zip.FileHeader{
+				fh("@", fileC, zip.Deflate),
+				fh("[", fileEmpty, zip.Store),
 				fh("a/a/a", fileA, zip.Deflate),
 				fh("a/a/b", fileB, zip.Deflate),
-				fh("@", fileC, zip.Deflate),
 				fh("foo'bar", fileC, zip.Deflate),
-				fh("[", fileEmpty, zip.Store),
 			},
 		},
 		{
@@ -463,8 +463,8 @@ func TestZip(t *testing.T) {
 			compressionLevel: 9,
 
 			files: []zip.FileHeader{
-				fh("foo", fileA, zip.Deflate),
 				fh("a/a/b", fileB, zip.Deflate),
+				fh("foo", fileA, zip.Deflate),
 			},
 		},
 		{
@@ -477,8 +477,8 @@ func TestZip(t *testing.T) {
 			compressionLevel: 9,
 
 			files: []zip.FileHeader{
-				fh("prefix/foo", fileA, zip.Deflate),
 				fh("prefix/a/a/b", fileB, zip.Deflate),
+				fh("prefix/foo", fileA, zip.Deflate),
 			},
 		},
 		{
@@ -490,8 +490,8 @@ func TestZip(t *testing.T) {
 			compressionLevel: 9,
 
 			files: []zip.FileHeader{
-				fh("foo", fileA, zip.Deflate),
 				fh("a/a/b", fileB, zip.Deflate),
+				fh("foo", fileA, zip.Deflate),
 			},
 		},
 		{
@@ -504,8 +504,8 @@ func TestZip(t *testing.T) {
 			compressionLevel: 9,
 
 			files: []zip.FileHeader{
-				fh("foo/bar", fileA, zip.Deflate),
 				fh("b", fileB, zip.Deflate),
+				fh("foo/bar", fileA, zip.Deflate),
 			},
 		},
 
@@ -688,8 +688,8 @@ func TestSrcJar(t *testing.T) {
 
 	want := []string{
 		"foo/",
-		"foo/wrong_package.java",
 		"foo/correct_package.java",
+		"foo/wrong_package.java",
 		"no_package.java",
 		"src2/",
 		"src2/parse_error.java",

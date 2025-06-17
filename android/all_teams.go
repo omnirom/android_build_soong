@@ -78,19 +78,19 @@ func (t *allTeamsSingleton) GenerateBuildActions(ctx SingletonContext) {
 	t.teams = make(map[string]teamProperties)
 	t.teams_for_mods = make(map[string]moduleTeamAndTestInfo)
 
-	ctx.VisitAllModules(func(module Module) {
+	ctx.VisitAllModuleProxies(func(module ModuleProxy) {
 		bpFile := ctx.BlueprintFile(module)
 
 		// Package Modules and Team Modules are stored in a map so we can look them up by name for
 		// modules without a team.
-		if pack, ok := module.(*packageModule); ok {
+		if pack, ok := OtherModuleProvider(ctx, module, PackageInfoProvider); ok {
 			// Packages don't have names, use the blueprint file as the key. we can't get qualifiedModuleId in t context.
 			pkgKey := bpFile
-			t.packages[pkgKey] = pack.properties
+			t.packages[pkgKey] = pack.Properties
 			return
 		}
-		if team, ok := module.(*teamModule); ok {
-			t.teams[team.Name()] = team.properties
+		if team, ok := OtherModuleProvider(ctx, module, TeamInfoProvider); ok {
+			t.teams[module.Name()] = team.Properties
 			return
 		}
 
@@ -116,7 +116,7 @@ func (t *allTeamsSingleton) GenerateBuildActions(ctx SingletonContext) {
 			testOnly:           testModInfo.TestOnly,
 			topLevelTestTarget: testModInfo.TopLevelTarget,
 			kind:               ctx.ModuleType(module),
-			teamName:           module.base().Team(),
+			teamName:           OtherModulePointerProviderOrDefault(ctx, module, CommonModuleInfoProvider).Team,
 		}
 		t.teams_for_mods[module.Name()] = entry
 
@@ -134,9 +134,6 @@ func (t *allTeamsSingleton) GenerateBuildActions(ctx SingletonContext) {
 
 	WriteFileRuleVerbatim(ctx, t.outputPath, string(data))
 	ctx.Phony("all_teams", t.outputPath)
-}
-
-func (t *allTeamsSingleton) MakeVars(ctx MakeVarsContext) {
 	ctx.DistForGoal("all_teams", t.outputPath)
 }
 

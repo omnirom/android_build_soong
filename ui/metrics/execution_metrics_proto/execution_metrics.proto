@@ -1,4 +1,4 @@
-// Copyright 2018 Google Inc. All Rights Reserved.
+// Copyright 2024 Google Inc. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,22 +15,22 @@
 syntax = "proto2";
 
 package soong_build_metrics;
-option go_package = "android/soong/ui/metrics/metrics_proto";
+option go_package = "android/soong/ui/metrics/execution_metrics_proto";
 
 import "cmd/find_input_delta/find_input_delta_proto/file_list.proto";
 
 // These field numbers are also found in the inner message declarations.
 // We verify that the values are the same, and that every enum value is checked
-// in combined_metrics_test.go.
+// in execution_metrics_test.go.
 // Do not change this enum without also updating:
 //  - the submessage's .proto file
-//  - combined_metrics_test.go
+//  - execution_metrics_test.go
 enum FieldNumbers {
   FIELD_NUMBERS_UNSPECIFIED = 0;
   FIELD_NUMBERS_FILE_LIST = 1;
 }
 
-message SoongCombinedMetrics {
+message SoongExecutionMetrics {
   // cmd/find_input_delta/find_input_delta_proto.FileList
   optional android.find_input_delta_proto.FileList file_list = 1;
 }

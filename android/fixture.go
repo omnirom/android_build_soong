@@ -1048,7 +1048,7 @@ func (r *TestResult) Preparer() FixturePreparer {
 
 // Module returns the module with the specific name and of the specified variant.
 func (r *TestResult) Module(name string, variant string) Module {
-	return r.ModuleForTests(name, variant).Module()
+	return r.ModuleForTests(r.fixture.t, name, variant).Module()
 }
 
 // CollateErrs adds additional errors to the result and returns true if there is more than one

@@ -75,8 +75,6 @@ type DeapexerInfo struct {
 
 	// map from the name of an exported file from a prebuilt_apex to the path to that file. The
 	// exported file name is the apex relative path, e.g. javalib/core-libart.jar.
-	//
-	// See Prebuilt.ApexInfoMutator for more information.
 	exports map[string]WritablePath
 
 	// name of the java libraries exported from the apex

@@ -99,6 +99,7 @@ func (p *provenanceInfoSingleton) GenerateBuildActions(context android.Singleton
 	})
 
 	context.Phony("droidcore", android.PathForPhony(context, "provenance_metadata"))
+	context.DistForGoal("droidcore", p.mergedMetaDataFile)
 }
 
 func GenerateArtifactProvenanceMetaData(ctx android.ModuleContext, artifactPath android.Path, installedFile android.InstallPath) android.Path {
@@ -116,9 +117,3 @@ func GenerateArtifactProvenanceMetaData(ctx android.ModuleContext, artifactPath 
 
 	return artifactMetaDataFile
 }
-
-func (p *provenanceInfoSingleton) MakeVars(ctx android.MakeVarsContext) {
-	ctx.DistForGoal("droidcore", p.mergedMetaDataFile)
-}
-
-var _ android.SingletonMakeVarsProvider = (*provenanceInfoSingleton)(nil)

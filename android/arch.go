@@ -1553,7 +1553,7 @@ func determineBuildOS(config *config) {
 	config.BuildOS = func() OsType {
 		switch runtime.GOOS {
 		case "linux":
-			if Bool(config.productVariables.HostMusl) {
+			if Bool(config.productVariables.HostMusl) || runtime.GOARCH == "arm64" {
 				return LinuxMusl
 			}
 			return Linux
@@ -1565,11 +1565,25 @@ func determineBuildOS(config *config) {
 	}()
 
 	config.BuildArch = func() ArchType {
-		switch runtime.GOARCH {
-		case "amd64":
-			return X86_64
+		switch runtime.GOOS {
+		case "linux":
+			switch runtime.GOARCH {
+			case "amd64":
+				return X86_64
+			case "arm64":
+				return Arm64
+			default:
+				panic(fmt.Sprintf("unsupported arch: %s", runtime.GOARCH))
+			}
+		case "darwin":
+			switch runtime.GOARCH {
+			case "amd64":
+				return X86_64
+			default:
+				panic(fmt.Sprintf("unsupported arch: %s", runtime.GOARCH))
+			}
 		default:
-			panic(fmt.Sprintf("unsupported Arch: %s", runtime.GOARCH))
+			panic(fmt.Sprintf("unsupported OS: %s", runtime.GOOS))
 		}
 	}()
 

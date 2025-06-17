@@ -17,6 +17,7 @@ package java
 import "testing"
 
 func TestJacocoFilterToSpecs(t *testing.T) {
+	t.Parallel()
 	testCases := []struct {
 		name, in, out string
 	}{
@@ -54,6 +55,7 @@ func TestJacocoFilterToSpecs(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
 			got, err := jacocoFilterToSpec(testCase.in)
 			if err != nil {
 				t.Error(err)
@@ -66,6 +68,7 @@ func TestJacocoFilterToSpecs(t *testing.T) {
 }
 
 func TestJacocoFiltersToZipCommand(t *testing.T) {
+	t.Parallel()
 	testCases := []struct {
 		name               string
 		includes, excludes []string
@@ -96,6 +99,7 @@ func TestJacocoFiltersToZipCommand(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
 			got := jacocoFiltersToZipCommand(testCase.includes, testCase.excludes)
 			if got != testCase.out {
 				t.Errorf("expected %q got %q", testCase.out, got)

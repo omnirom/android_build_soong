@@ -132,7 +132,7 @@ func TestDataTests(t *testing.T) {
 			_, errs = ctx.PrepareBuildActions(config)
 			android.FailIfErrored(t, errs)
 
-			foo := ctx.ModuleForTests("foo", "")
+			foo := ctx.ModuleForTests(t, "foo", "")
 
 			got := foo.Module().(*testDataTest).data
 			if len(got) != len(test.data) {

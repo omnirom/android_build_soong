@@ -89,7 +89,7 @@ func (benchmark *benchmarkDecorator) autoDep(ctx android.BottomUpMutatorContext)
 	return rlibAutoDep
 }
 
-func (benchmark *benchmarkDecorator) stdLinkage(ctx *depsContext) RustLinkage {
+func (benchmark *benchmarkDecorator) stdLinkage(device bool) RustLinkage {
 	return RlibLinkage
 }
 
@@ -129,4 +129,25 @@ func (benchmark *benchmarkDecorator) install(ctx ModuleContext) {
 	}
 
 	benchmark.binaryDecorator.install(ctx)
+}
+
+func (benchmark *benchmarkDecorator) moduleInfoJSON(ctx ModuleContext, moduleInfoJSON *android.ModuleInfoJSON) {
+	benchmark.binaryDecorator.moduleInfoJSON(ctx, moduleInfoJSON)
+	moduleInfoJSON.Class = []string{"NATIVE_TESTS"}
+	if benchmark.testConfig != nil {
+		if _, ok := benchmark.testConfig.(android.WritablePath); ok {
+			moduleInfoJSON.AutoTestConfig = []string{"true"}
+		}
+		moduleInfoJSON.TestConfig = append(moduleInfoJSON.TestConfig, benchmark.testConfig.String())
+	}
+
+	if len(benchmark.Properties.Test_suites) > 0 {
+		moduleInfoJSON.CompatibilitySuites = append(moduleInfoJSON.CompatibilitySuites, benchmark.Properties.Test_suites...)
+	} else {
+		moduleInfoJSON.CompatibilitySuites = append(moduleInfoJSON.CompatibilitySuites, "null-suite")
+	}
+
+	android.SetProvider(ctx, android.TestSuiteInfoProvider, android.TestSuiteInfo{
+		TestSuites: benchmark.Properties.Test_suites,
+	})
 }

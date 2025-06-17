@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
-	"sort"
 	"strings"
 	"testing"
 
@@ -237,29 +236,6 @@ func FixtureWithPrebuiltApisAndExtensions(apiLevel2Modules map[string][]string, 
 	)
 }
 
-func FixtureWithPrebuiltIncrementalApis(apiLevel2Modules map[string][]string) android.FixturePreparer {
-	mockFS := android.MockFS{}
-	path := "prebuilts/sdk/Android.bp"
-
-	bp := fmt.Sprintf(`
-			prebuilt_apis {
-				name: "sdk",
-				api_dirs: ["%s"],
-				allow_incremental_platform_api: true,
-				imports_sdk_version: "none",
-				imports_compile_dex: true,
-			}
-		`, strings.Join(android.SortedKeys(apiLevel2Modules), `", "`))
-
-	for release, modules := range apiLevel2Modules {
-		mockFS.Merge(prebuiltApisFilesForModules([]string{release}, modules))
-	}
-	return android.GroupFixturePreparers(
-		android.FixtureAddTextFile(path, bp),
-		android.FixtureMergeMockFs(mockFS),
-	)
-}
-
 func prebuiltApisFilesForModules(apiLevels []string, modules []string) map[string][]byte {
 	libs := append([]string{"android"}, modules...)
 
@@ -378,7 +354,6 @@ func registerRequiredBuildComponentsForTest(ctx android.RegistrationContext) {
 	RegisterAppBuildComponents(ctx)
 	RegisterAppImportBuildComponents(ctx)
 	RegisterAppSetBuildComponents(ctx)
-	registerBootclasspathBuildComponents(ctx)
 	registerBootclasspathFragmentBuildComponents(ctx)
 	RegisterDexpreoptBootJarsComponents(ctx)
 	RegisterDocsBuildComponents(ctx)
@@ -611,19 +586,18 @@ func gatherRequiredDepsForTest() string {
 
 func getModuleDependencies(t *testing.T, ctx *android.TestContext, name, variant string) []string {
 	t.Helper()
-	module := ctx.ModuleForTests(name, variant).Module()
+	module := ctx.ModuleForTests(t, name, variant).Module()
 	deps := []string{}
 	ctx.VisitDirectDeps(module, func(m blueprint.Module) {
 		deps = append(deps, m.Name())
 	})
-	sort.Strings(deps)
-
-	return deps
+	return android.SortedUniqueStrings(deps)
 }
 
 // CheckModuleDependencies checks if the expected dependencies of the module are
 // identical to the actual dependencies.
 func CheckModuleDependencies(t *testing.T, ctx *android.TestContext, name, variant string, expected []string) {
+	t.Helper()
 	deps := getModuleDependencies(t, ctx, name, variant)
 
 	if actual := deps; !reflect.DeepEqual(expected, actual) {
@@ -643,7 +617,7 @@ func CheckModuleHasDependency(t *testing.T, ctx *android.TestContext, name, vari
 
 // CheckModuleHasDependency returns true if the module depends on the expected dependency.
 func CheckModuleHasDependencyWithTag(t *testing.T, ctx *android.TestContext, name, variant string, desiredTag blueprint.DependencyTag, expected string) bool {
-	module := ctx.ModuleForTests(name, variant).Module()
+	module := ctx.ModuleForTests(t, name, variant).Module()
 	found := false
 	ctx.VisitDirectDepsWithTags(module, func(m blueprint.Module, tag blueprint.DependencyTag) {
 		if tag == desiredTag && m.Name() == expected {
@@ -658,7 +632,7 @@ func CheckModuleHasDependencyWithTag(t *testing.T, ctx *android.TestContext, nam
 func CheckPlatformBootclasspathModules(t *testing.T, result *android.TestResult, name string, expected []string) {
 	t.Helper()
 	platformBootclasspath := result.Module(name, "android_common").(*platformBootclasspathModule)
-	pairs := ApexNamePairsFromModules(result.TestContext, platformBootclasspath.configuredModules)
+	pairs := apexNamePairsFromModules(result.TestContext, platformBootclasspath.configuredModules, platformBootclasspath.libraryToApex)
 	android.AssertDeepEquals(t, fmt.Sprintf("%s modules", "platform-bootclasspath"), expected, pairs)
 }
 
@@ -673,23 +647,54 @@ func CheckClasspathFragmentProtoContentInfoProvider(t *testing.T, result *androi
 	android.AssertPathRelativeToTopEquals(t, "install filepath", installDir, info.ClasspathFragmentProtoInstallDir)
 }
 
-// ApexNamePairsFromModules returns the apex:module pair for the supplied modules.
-func ApexNamePairsFromModules(ctx *android.TestContext, modules []android.Module) []string {
+// CheckPlatformBootclasspathDependencies checks the dependencies of the selected module against the expected list.
+//
+// The expected list must be a list of strings of the form "<apex>:<module>", where <apex> is the
+// name of the apex, or platform is it is not part of an apex and <module> is the module name.
+func CheckPlatformBootclasspathDependencies(t *testing.T, ctx *android.TestContext, name, variant string, expected []string) {
+	t.Helper()
+	platformBootclasspath := ctx.ModuleForTests(t, name, variant).Module().(*platformBootclasspathModule)
+	modules := []android.Module{}
+	ctx.VisitDirectDeps(platformBootclasspath, func(m blueprint.Module) {
+		modules = append(modules, m.(android.Module))
+	})
+
+	pairs := apexNamePairsFromModules(ctx, modules, platformBootclasspath.libraryToApex)
+	android.AssertDeepEquals(t, "module dependencies", expected, pairs)
+}
+
+// apexNamePairsFromModules returns the apex:module pair for the supplied modules.
+func apexNamePairsFromModules(ctx *android.TestContext, modules []android.Module, modulesToApex map[android.Module]string) []string {
 	pairs := []string{}
 	for _, module := range modules {
-		pairs = append(pairs, apexNamePairFromModule(ctx, module))
+		pairs = append(pairs, apexNamePairFromModule(ctx, module, modulesToApex))
 	}
 	return pairs
 }
 
-func apexNamePairFromModule(ctx *android.TestContext, module android.Module) string {
+// ApexFragmentPairsFromModules returns the apex:fragment pair for the supplied fragments.
+func ApexFragmentPairsFromModules(ctx *android.TestContext, fragments []android.Module, apexNameToFragment map[string]android.Module) []string {
+	pairs := []string{}
+	for _, fragment := range fragments {
+		found := false
+		for apex, apexFragment := range apexNameToFragment {
+			if apexFragment == fragment {
+				pairs = append(pairs, apex+":"+ctx.ModuleName(fragment))
+				found = true
+			}
+		}
+		if !found {
+			pairs = append(pairs, "platform:"+ctx.ModuleName(fragment))
+		}
+	}
+	return pairs
+}
+
+func apexNamePairFromModule(ctx *android.TestContext, module android.Module, modulesToApex map[android.Module]string) string {
 	name := module.Name()
-	var apex string
-	apexInfo, _ := android.OtherModuleProvider(ctx, module, android.ApexInfoProvider)
-	if apexInfo.IsForPlatform() {
+	apex := modulesToApex[module]
+	if apex == "" {
 		apex = "platform"
-	} else {
-		apex = apexInfo.InApexVariants[0]
 	}
 
 	return fmt.Sprintf("%s:%s", apex, name)
@@ -700,7 +705,7 @@ func apexNamePairFromModule(ctx *android.TestContext, module android.Module) str
 func CheckPlatformBootclasspathFragments(t *testing.T, result *android.TestResult, name string, expected []string) {
 	t.Helper()
 	platformBootclasspath := result.Module(name, "android_common").(*platformBootclasspathModule)
-	pairs := ApexNamePairsFromModules(result.TestContext, platformBootclasspath.fragments)
+	pairs := ApexFragmentPairsFromModules(result.TestContext, platformBootclasspath.fragments, platformBootclasspath.apexNameToFragment)
 	android.AssertDeepEquals(t, fmt.Sprintf("%s fragments", "platform-bootclasspath"), expected, pairs)
 }
 
@@ -723,7 +728,7 @@ func CheckHiddenAPIRuleInputs(t *testing.T, message string, expected string, hid
 
 // Check that the merged file create by platform_compat_config_singleton has the correct inputs.
 func CheckMergedCompatConfigInputs(t *testing.T, result *android.TestResult, message string, expectedPaths ...string) {
-	sourceGlobalCompatConfig := result.SingletonForTests("platform_compat_config_singleton")
+	sourceGlobalCompatConfig := result.SingletonForTests(t, "platform_compat_config_singleton")
 	allOutputs := sourceGlobalCompatConfig.AllOutputs()
 	android.AssertIntEquals(t, message+": output len", 1, len(allOutputs))
 	output := sourceGlobalCompatConfig.Output(allOutputs[0])
@@ -801,5 +806,3 @@ func FixtureSetBootImageInstallDirOnDevice(name string, installDir string) andro
 		config.installDir = installDir
 	})
 }
-
-var PrepareForTestWithTransitiveClasspathEnabled = android.PrepareForTestWithBuildFlag("RELEASE_USE_TRANSITIVE_JARS_IN_CLASSPATH", "true")

@@ -28,7 +28,7 @@ var (
 		"-fno-omit-frame-pointer",
 
 		"-U_FORTIFY_SOURCE",
-		"-D_FORTIFY_SOURCE=2",
+		"-D_FORTIFY_SOURCE=3",
 		"-fstack-protector-strong",
 
 		// From x86_64_device

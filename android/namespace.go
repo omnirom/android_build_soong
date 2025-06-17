@@ -335,7 +335,7 @@ func (r *NameResolver) MissingDependencyError(depender string, dependerNamespace
 	if isAbs {
 		// if the user gave a fully-qualified name, we don't need to look for other
 		// modules that they might have been referring to
-		return fmt.Errorf(text)
+		return fmt.Errorf("%s", text)
 	}
 
 	// determine which namespaces the module can be found in
@@ -371,7 +371,7 @@ func (r *NameResolver) MissingDependencyError(depender string, dependerNamespace
 		text += fmt.Sprintf("\nOr did you mean %q?", guess)
 	}
 
-	return fmt.Errorf(text)
+	return fmt.Errorf("%s", text)
 }
 
 func (r *NameResolver) GetNamespace(ctx blueprint.NamespaceContext) blueprint.Namespace {

@@ -133,8 +133,8 @@ func TestPrebuiltEtcDsts(t *testing.T) {
 	android.AssertStringEquals(t, "output file path", "different.name", p.outputFilePaths[1].Base())
 
 	expectedPaths := [...]string{
-		"out/soong/target/product/test_device/system/etc/foodir",
-		"out/soong/target/product/test_device/system/etc/bardir/extradir",
+		"out/target/product/test_device/system/etc/foodir",
+		"out/target/product/test_device/system/etc/bardir/extradir",
 	}
 	android.AssertPathRelativeToTopEquals(t, "install dir", expectedPaths[0], p.installDirPaths[0])
 	android.AssertPathRelativeToTopEquals(t, "install dir", expectedPaths[1], p.installDirPaths[1])
@@ -155,8 +155,8 @@ func TestPrebuiltEtcDstsPlusRelativeInstallPath(t *testing.T) {
 	android.AssertStringEquals(t, "output file path", "different.name", p.outputFilePaths[1].Base())
 
 	expectedPaths := [...]string{
-		"out/soong/target/product/test_device/system/etc/somewhere/foodir",
-		"out/soong/target/product/test_device/system/etc/somewhere/bardir/extradir",
+		"out/target/product/test_device/system/etc/somewhere/foodir",
+		"out/target/product/test_device/system/etc/somewhere/bardir/extradir",
 	}
 	android.AssertPathRelativeToTopEquals(t, "install dir", expectedPaths[0], p.installDirPaths[0])
 	android.AssertPathRelativeToTopEquals(t, "install dir", expectedPaths[1], p.installDirPaths[1])
@@ -271,7 +271,7 @@ func TestPrebuiltEtcRelativeInstallPathInstallDirPath(t *testing.T) {
 	`)
 
 	p := result.Module("foo.conf", "android_arm64_armv8-a").(*PrebuiltEtc)
-	expected := "out/soong/target/product/test_device/system/etc/bar"
+	expected := "out/target/product/test_device/system/etc/bar"
 	android.AssertPathRelativeToTopEquals(t, "install dir", expected, p.installDirPaths[0])
 }
 
@@ -324,7 +324,7 @@ func TestPrebuiltEtcAllowMissingDependencies(t *testing.T) {
 	`)
 
 	android.AssertStringEquals(t, "expected error rule", "android/soong/android.Error",
-		result.ModuleForTests("foo.conf", "android_arm64_armv8-a").Output("foo.conf").Rule.String())
+		result.ModuleForTests(t, "foo.conf", "android_arm64_armv8-a").Output("foo.conf").Rule.String())
 }
 
 func TestPrebuiltRootInstallDirPath(t *testing.T) {
@@ -337,7 +337,7 @@ func TestPrebuiltRootInstallDirPath(t *testing.T) {
 	`)
 
 	p := result.Module("foo.conf", "android_arm64_armv8-a").(*PrebuiltEtc)
-	expected := "out/soong/target/product/test_device/system"
+	expected := "out/target/product/test_device/system"
 	android.AssertPathRelativeToTopEquals(t, "install dir", expected, p.installDirPaths[0])
 }
 
@@ -362,7 +362,7 @@ func TestPrebuiltAvbInstallDirPath(t *testing.T) {
 	`)
 
 	p := result.Module("foo.conf", "android_arm64_armv8-a").(*PrebuiltEtc)
-	expected := "out/soong/target/product/test_device/root/avb"
+	expected := "out/target/product/test_device/root/avb"
 	android.AssertPathRelativeToTopEquals(t, "install dir", expected, p.installDirPaths[0])
 }
 
@@ -386,7 +386,7 @@ func TestPrebuiltUserShareInstallDirPath(t *testing.T) {
 	`)
 
 	p := result.Module("foo.conf", "android_arm64_armv8-a").(*PrebuiltEtc)
-	expected := "out/soong/target/product/test_device/system/usr/share/bar"
+	expected := "out/target/product/test_device/system/usr/share/bar"
 	android.AssertPathRelativeToTopEquals(t, "install dir", expected, p.installDirPaths[0])
 }
 
@@ -401,7 +401,7 @@ func TestPrebuiltUserShareHostInstallDirPath(t *testing.T) {
 
 	buildOS := result.Config.BuildOS.String()
 	p := result.Module("foo.conf", buildOS+"_common").(*PrebuiltEtc)
-	expected := filepath.Join("out/soong/host", result.Config.PrebuiltOS(), "usr", "share", "bar")
+	expected := filepath.Join("out/host", result.Config.PrebuiltOS(), "usr", "share", "bar")
 	android.AssertPathRelativeToTopEquals(t, "install dir", expected, p.installDirPaths[0])
 }
 
@@ -415,7 +415,7 @@ func TestPrebuiltPrebuiltUserHyphenDataInstallDirPath(t *testing.T) {
 	`)
 
 	p := result.Module("foo.conf", "android_arm64_armv8-a").(*PrebuiltEtc)
-	expected := "out/soong/target/product/test_device/system/usr/hyphen-data/bar"
+	expected := "out/target/product/test_device/system/usr/hyphen-data/bar"
 	android.AssertPathRelativeToTopEquals(t, "install dir", expected, p.installDirPaths[0])
 }
 
@@ -429,7 +429,7 @@ func TestPrebuiltPrebuiltUserKeyLayoutInstallDirPath(t *testing.T) {
 	`)
 
 	p := result.Module("foo.conf", "android_arm64_armv8-a").(*PrebuiltEtc)
-	expected := "out/soong/target/product/test_device/system/usr/keylayout/bar"
+	expected := "out/target/product/test_device/system/usr/keylayout/bar"
 	android.AssertPathRelativeToTopEquals(t, "install dir", expected, p.installDirPaths[0])
 }
 
@@ -443,7 +443,7 @@ func TestPrebuiltPrebuiltUserKeyCharsInstallDirPath(t *testing.T) {
 	`)
 
 	p := result.Module("foo.conf", "android_arm64_armv8-a").(*PrebuiltEtc)
-	expected := "out/soong/target/product/test_device/system/usr/keychars/bar"
+	expected := "out/target/product/test_device/system/usr/keychars/bar"
 	android.AssertPathRelativeToTopEquals(t, "install dir", expected, p.installDirPaths[0])
 }
 
@@ -457,7 +457,7 @@ func TestPrebuiltPrebuiltUserIdcInstallDirPath(t *testing.T) {
 	`)
 
 	p := result.Module("foo.conf", "android_arm64_armv8-a").(*PrebuiltEtc)
-	expected := "out/soong/target/product/test_device/system/usr/idc/bar"
+	expected := "out/target/product/test_device/system/usr/idc/bar"
 	android.AssertPathRelativeToTopEquals(t, "install dir", expected, p.installDirPaths[0])
 }
 
@@ -470,7 +470,7 @@ func TestPrebuiltFontInstallDirPath(t *testing.T) {
 	`)
 
 	p := result.Module("foo.conf", "android_common").(*PrebuiltEtc)
-	expected := "out/soong/target/product/test_device/system/fonts"
+	expected := "out/target/product/test_device/system/fonts"
 	android.AssertPathRelativeToTopEquals(t, "install dir", expected, p.installDirPaths[0])
 }
 
@@ -483,12 +483,12 @@ func TestPrebuiltOverlayInstallDirPath(t *testing.T) {
 	`)
 
 	p := result.Module("foo.conf", "android_arm64_armv8-a").(*PrebuiltEtc)
-	expected := "out/soong/target/product/test_device/system/overlay"
+	expected := "out/target/product/test_device/system/overlay"
 	android.AssertPathRelativeToTopEquals(t, "install dir", expected, p.installDirPaths[0])
 }
 
 func TestPrebuiltFirmwareDirPath(t *testing.T) {
-	targetPath := "out/soong/target/product/test_device"
+	targetPath := "out/target/product/test_device"
 	tests := []struct {
 		description  string
 		config       string
@@ -522,7 +522,7 @@ func TestPrebuiltFirmwareDirPath(t *testing.T) {
 }
 
 func TestPrebuiltDSPDirPath(t *testing.T) {
-	targetPath := "out/soong/target/product/test_device"
+	targetPath := "out/target/product/test_device"
 	tests := []struct {
 		description  string
 		config       string
@@ -556,7 +556,7 @@ func TestPrebuiltDSPDirPath(t *testing.T) {
 }
 
 func TestPrebuiltRFSADirPath(t *testing.T) {
-	targetPath := "out/soong/target/product/test_device"
+	targetPath := "out/target/product/test_device"
 	tests := []struct {
 		description  string
 		config       string
@@ -600,6 +600,6 @@ func TestPrebuiltMediaAutoDirPath(t *testing.T) {
 	`)
 
 	p := result.Module("foo", "android_common").(*PrebuiltEtc)
-	expected := "out/soong/target/product/test_device/product/media/alarms"
+	expected := "out/target/product/test_device/product/media/alarms"
 	android.AssertPathRelativeToTopEquals(t, "install dir", expected, p.installDirPaths[0])
 }

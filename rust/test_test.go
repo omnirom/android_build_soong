@@ -29,7 +29,7 @@ func TestRustTest(t *testing.T) {
 			data: ["data.txt"],
 		}`)
 
-	testingModule := ctx.ModuleForTests("my_test", "linux_glibc_x86_64")
+	testingModule := ctx.ModuleForTests(t, "my_test", "linux_glibc_x86_64")
 	expectedOut := "my_test/linux_glibc_x86_64/my_test"
 	outPath := testingModule.Output("my_test").Output.String()
 	if !strings.Contains(outPath, expectedOut) {
@@ -62,7 +62,7 @@ func TestRustTestLinkage(t *testing.T) {
 			crate_name: "bar",
 		}`)
 
-	testingModule := ctx.ModuleForTests("my_test", "android_arm64_armv8-a").Module().(*Module)
+	testingModule := ctx.ModuleForTests(t, "my_test", "android_arm64_armv8-a").Module().(*Module)
 
 	if !android.InList("libfoo.rlib-std", testingModule.Properties.AndroidMkRlibs) {
 		t.Errorf("rlib-std variant for libfoo not detected as a rustlib-defined rlib dependency for device rust_test module")
@@ -106,7 +106,7 @@ func TestDataLibs(t *testing.T) {
 
 	ctx := testRust(t, bp)
 
-	testingModule := ctx.ModuleForTests("main_test", "android_arm64_armv8-a")
+	testingModule := ctx.ModuleForTests(t, "main_test", "android_arm64_armv8-a")
 	testBinary := testingModule.Module().(*Module).compiler.(*testDecorator)
 	outputFiles := testingModule.OutputFiles(ctx, t, "")
 	if len(outputFiles) != 1 {
@@ -165,7 +165,7 @@ func TestDataLibsRelativeInstallPath(t *testing.T) {
  `
 
 	ctx := testRust(t, bp)
-	testingModule := ctx.ModuleForTests("main_test", "android_arm64_armv8-a")
+	testingModule := ctx.ModuleForTests(t, "main_test", "android_arm64_armv8-a")
 	module := testingModule.Module()
 	testBinary := module.(*Module).compiler.(*testDecorator)
 	outputFiles := testingModule.OutputFiles(ctx, t, "")

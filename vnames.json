@@ -1,5 +1,17 @@
 [
   {
+    "pattern": "out/(.*)/srcjars.xref/frameworks/base/services/core/(.*)/android/server/am/(.*)",
+    "vname": {
+      "path": "frameworks/base/services/core/@2@/android/server/am/@3@"
+    }
+  },
+  {
+    "pattern": "out/(.*)/srcjars.xref/frameworks/base/services/core/(.*)/android/server/wm/(.*)",
+    "vname": {
+      "path": "frameworks/base/services/core/@2@/android/server/wm/@3@"
+    }
+  },
+  {
     "pattern": "out/(.*)",
     "vname": {
       "root": "out",

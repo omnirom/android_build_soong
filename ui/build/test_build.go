@@ -76,8 +76,10 @@ func testForDanglingRules(ctx Context, config Config) {
 	// treated as an source file.
 	dexpreoptConfigFilePath := filepath.Join(outDir, "soong", "dexpreopt.config")
 
-	// out/build_date.txt is considered a "source file"
+	// out/build_(date|hostname|number).txt is considered a "source file"
 	buildDatetimeFilePath := filepath.Join(outDir, "build_date.txt")
+	buildHostnameFilePath := filepath.Join(outDir, "soong", "build_hostname.txt")
+	buildNumberFilePath := filepath.Join(outDir, "soong", "build_number.txt")
 
 	// release-config files are generated from the initial lunch or Kati phase
 	// before running soong and ninja.
@@ -102,6 +104,8 @@ func testForDanglingRules(ctx Context, config Config) {
 			line == extraVariablesFilePath ||
 			line == dexpreoptConfigFilePath ||
 			line == buildDatetimeFilePath ||
+			line == buildHostnameFilePath ||
+			line == buildNumberFilePath ||
 			strings.HasPrefix(line, releaseConfigDir) ||
 			buildFingerPrintFilePattern.MatchString(line) {
 			// Leaf node is in one of Soong's bootstrap directories, which do not have
@@ -151,7 +155,7 @@ func testForDanglingRules(ctx Context, config Config) {
 
 		ts.FinishAction(status.ActionResult{
 			Action: action,
-			Error:  fmt.Errorf(title),
+			Error:  fmt.Errorf("%s", title),
 			Output: sb.String(),
 		})
 		ctx.Fatal("stopping")

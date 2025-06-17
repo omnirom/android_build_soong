@@ -57,7 +57,7 @@ func runJavaAndroidMkTest(t *testing.T, bp string) {
 			}
 		`)
 
-	module := result.ModuleForTests("my_module", "android_common").Module()
+	module := result.ModuleForTests(t, "my_module", "android_common").Module()
 
 	entry := android.AndroidMkEntriesForTest(t, result.TestContext, module)[0]
 
@@ -189,7 +189,7 @@ func testCodegenMode(t *testing.T, bpMode string, ruleMode string) {
 			}
 		`, bpMode))
 
-	module := result.ModuleForTests("my_java_aconfig_library", "android_common")
+	module := result.ModuleForTests(t, "my_java_aconfig_library", "android_common")
 	rule := module.Rule("java_aconfig_library")
 	android.AssertStringEquals(t, "rule must contain test mode", rule.Args["mode"], ruleMode)
 }
@@ -260,7 +260,7 @@ func TestMkEntriesMatchedContainer(t *testing.T) {
 			aconfig_declarations {
 				name: "my_aconfig_declarations_bar",
 				package: "com.example.package.bar",
-				container: "vendor",
+				container: "system_ext",
 				srcs: ["bar.aconfig"],
 			}
 
@@ -282,7 +282,7 @@ func TestMkEntriesMatchedContainer(t *testing.T) {
 			}
 		`)
 
-	module := result.ModuleForTests("my_module", "android_common").Module()
+	module := result.ModuleForTests(t, "my_module", "android_common").Module()
 	entry := android.AndroidMkEntriesForTest(t, result.TestContext, module)[0]
 	makeVar := entry.EntryMap["LOCAL_ACONFIG_FILES"]
 	android.EnsureListContainsSuffix(t, makeVar, "my_aconfig_declarations_foo/intermediate.pb")

@@ -23,6 +23,7 @@ import (
 )
 
 func TestDroiddoc(t *testing.T) {
+	t.Parallel()
 	ctx, _ := testJavaWithFS(t, `
 		droiddoc_exported_dir {
 		    name: "droiddoc-templates-sdk",
@@ -69,13 +70,13 @@ func TestDroiddoc(t *testing.T) {
 			"bar-doc/a.java": nil,
 			"bar-doc/b.java": nil,
 		})
-	barStubsOutputs := ctx.ModuleForTests("bar-stubs", "android_common").OutputFiles(ctx, t, "")
+	barStubsOutputs := ctx.ModuleForTests(t, "bar-stubs", "android_common").OutputFiles(ctx, t, "")
 	if len(barStubsOutputs) != 1 {
 		t.Errorf("Expected one output from \"bar-stubs\" got %s", barStubsOutputs)
 	}
 
 	barStubsOutput := barStubsOutputs[0]
-	barDoc := ctx.ModuleForTests("bar-doc", "android_common")
+	barDoc := ctx.ModuleForTests(t, "bar-doc", "android_common")
 	javaDoc := barDoc.Rule("javadoc")
 	if g, w := android.PathsRelativeToTop(javaDoc.Implicits), android.PathRelativeToTop(barStubsOutput); !inList(w, g) {
 		t.Errorf("implicits of bar-doc must contain %q, but was %q.", w, g)
@@ -97,6 +98,7 @@ func TestDroiddoc(t *testing.T) {
 }
 
 func TestDroiddocArgsAndFlagsCausesError(t *testing.T) {
+	t.Parallel()
 	testJavaError(t, "flags is set. Cannot set args", `
 		droiddoc_exported_dir {
 		    name: "droiddoc-templates-sdk",

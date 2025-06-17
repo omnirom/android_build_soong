@@ -140,7 +140,7 @@ func (d *DeviceHostConverter) GenerateAndroidBuildActions(ctx android.ModuleCont
 		d.combinedHeaderJar = d.headerJars[0]
 	}
 
-	android.SetProvider(ctx, JavaInfoProvider, &JavaInfo{
+	javaInfo := &JavaInfo{
 		HeaderJars:                             d.headerJars,
 		LocalHeaderJars:                        d.headerJars,
 		TransitiveStaticLibsHeaderJars:         depset.New(depset.PREORDER, nil, transitiveHeaderJars),
@@ -154,7 +154,9 @@ func (d *DeviceHostConverter) GenerateAndroidBuildActions(ctx android.ModuleCont
 		StubsLinkType:                          Implementation,
 		// TODO: Not sure if aconfig flags that have been moved between device and host variants
 		// make sense.
-	})
+	}
+	setExtraJavaInfo(ctx, d, javaInfo)
+	android.SetProvider(ctx, JavaInfoProvider, javaInfo)
 
 }
 

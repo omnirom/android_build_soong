@@ -299,7 +299,7 @@ func TestProductVariablesDefaults(t *testing.T) {
 		FixtureWithRootAndroidBp(bp),
 	).RunTest(t)
 
-	foo := result.ModuleForTests("foo", "").Module().(*productVariablesDefaultsTestModule)
+	foo := result.ModuleForTests(t, "foo", "").Module().(*productVariablesDefaultsTestModule)
 
 	want := []string{"defaults", "module", "product_variable_defaults", "product_variable_module"}
 	AssertDeepEquals(t, "foo", want, foo.properties.Foo)
@@ -360,7 +360,7 @@ func TestProductVariablesArch(t *testing.T) {
 		FixtureWithRootAndroidBp(bp),
 	).RunTest(t)
 
-	foo := result.ModuleForTests("foo", "android_arm64_armv8-a").Module().(*productVariablesDefaultsTestModule)
+	foo := result.ModuleForTests(t, "foo", "android_arm64_armv8-a").Module().(*productVariablesDefaultsTestModule)
 
 	want := []string{"module", "arm64"}
 	AssertDeepEquals(t, "foo", want, foo.properties.Foo)

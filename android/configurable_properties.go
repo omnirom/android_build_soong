@@ -7,7 +7,8 @@ import "github.com/google/blueprint/proptools"
 // to indicate a "default" case.
 func CreateSelectOsToBool(cases map[string]*bool) proptools.Configurable[bool] {
 	var resultCases []proptools.ConfigurableCase[bool]
-	for pattern, value := range cases {
+	for _, pattern := range SortedKeys(cases) {
+		value := cases[pattern]
 		if pattern == "" {
 			resultCases = append(resultCases, proptools.NewConfigurableCase(
 				[]proptools.ConfigurablePattern{proptools.NewDefaultConfigurablePattern()},

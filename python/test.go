@@ -68,6 +68,11 @@ type TestProperties struct {
 	// device.
 	Device_common_data []string `android:"path_device_common"`
 
+	// Same as data, but will add dependencies on modules via a device os variation and the
+	// device's first supported arch's variation. Useful for a host test that wants to embed a
+	// module built for device.
+	Device_first_data []string `android:"path_device_first"`
+
 	// list of java modules that provide data that should be installed alongside the test.
 	Java_data []string
 
@@ -189,15 +194,18 @@ func (p *PythonTestModule) GenerateAndroidBuildActions(ctx android.ModuleContext
 	for _, dataSrcPath := range android.PathsForModuleSrc(ctx, p.testProperties.Device_common_data) {
 		p.data = append(p.data, android.DataPath{SrcPath: dataSrcPath})
 	}
+	for _, dataSrcPath := range android.PathsForModuleSrc(ctx, p.testProperties.Device_first_data) {
+		p.data = append(p.data, android.DataPath{SrcPath: dataSrcPath})
+	}
 
 	if p.isTestHost() && len(p.testProperties.Data_device_bins_both) > 0 {
-		ctx.VisitDirectDepsWithTag(dataDeviceBinsTag, func(dep android.Module) {
+		ctx.VisitDirectDepsProxyWithTag(dataDeviceBinsTag, func(dep android.ModuleProxy) {
 			p.data = append(p.data, android.DataPath{SrcPath: android.OutputFileForModule(ctx, dep, "")})
 		})
 	}
 
 	// Emulate the data property for java_data dependencies.
-	for _, javaData := range ctx.GetDirectDepsWithTag(javaDataTag) {
+	for _, javaData := range ctx.GetDirectDepsProxyWithTag(javaDataTag) {
 		for _, javaDataSrcPath := range android.OutputFilesForModule(ctx, javaData, "") {
 			p.data = append(p.data, android.DataPath{SrcPath: javaDataSrcPath})
 		}
@@ -206,6 +214,50 @@ func (p *PythonTestModule) GenerateAndroidBuildActions(ctx android.ModuleContext
 	installDir := installDir(ctx, "nativetest", "nativetest64", ctx.ModuleName())
 	installedData := ctx.InstallTestData(installDir, p.data)
 	p.installedDest = ctx.InstallFile(installDir, p.installSource.Base(), p.installSource, installedData...)
+
+	// TODO: Remove the special case for kati
+	if !ctx.Config().KatiEnabled() {
+		// Install the test config in testcases/ directory for atest.
+		// Install configs in the root of $PRODUCT_OUT/testcases/$module
+		testCases := android.PathForModuleInPartitionInstall(ctx, "testcases", ctx.ModuleName())
+		if ctx.PrimaryArch() {
+			if p.testConfig != nil {
+				ctx.InstallFile(testCases, ctx.ModuleName()+".config", p.testConfig)
+			}
+			dynamicConfig := android.ExistentPathForSource(ctx, ctx.ModuleDir(), "DynamicConfig.xml")
+			if dynamicConfig.Valid() {
+				ctx.InstallFile(testCases, ctx.ModuleName()+".dynamic", dynamicConfig.Path())
+			}
+		}
+		// Install tests and data in arch specific subdir $PRODUCT_OUT/testcases/$module/$arch
+		testCases = testCases.Join(ctx, ctx.Target().Arch.ArchType.String())
+		installedData := ctx.InstallTestData(testCases, p.data)
+		ctx.InstallFile(testCases, p.installSource.Base(), p.installSource, installedData...)
+	}
+
+	moduleInfoJSON := ctx.ModuleInfoJSON()
+	moduleInfoJSON.Class = []string{"NATIVE_TESTS"}
+	if len(p.binaryProperties.Test_suites) > 0 {
+		moduleInfoJSON.CompatibilitySuites = append(moduleInfoJSON.CompatibilitySuites, p.binaryProperties.Test_suites...)
+	} else {
+		moduleInfoJSON.CompatibilitySuites = append(moduleInfoJSON.CompatibilitySuites, "null-suite")
+	}
+	if p.testConfig != nil {
+		moduleInfoJSON.TestConfig = append(moduleInfoJSON.TestConfig, p.testConfig.String())
+	}
+	if _, ok := p.testConfig.(android.WritablePath); ok {
+		moduleInfoJSON.AutoTestConfig = []string{"true"}
+	}
+	moduleInfoJSON.TestOptionsTags = append(moduleInfoJSON.TestOptionsTags, p.testProperties.Test_options.Tags...)
+	moduleInfoJSON.Dependencies = append(moduleInfoJSON.Dependencies, p.androidMkSharedLibs...)
+	moduleInfoJSON.SharedLibs = append(moduleInfoJSON.Dependencies, p.androidMkSharedLibs...)
+	moduleInfoJSON.SystemSharedLibs = []string{"none"}
+	if proptools.Bool(p.testProperties.Test_options.Unit_test) {
+		moduleInfoJSON.IsUnitTest = "true"
+		if p.isTestHost() {
+			moduleInfoJSON.CompatibilitySuites = append(moduleInfoJSON.CompatibilitySuites, "host-unit-tests")
+		}
+	}
 }
 
 func (p *PythonTestModule) AndroidMkEntries() []android.AndroidMkEntries {

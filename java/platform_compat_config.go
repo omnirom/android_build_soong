@@ -43,6 +43,13 @@ func registerPlatformCompatConfigBuildComponents(ctx android.RegistrationContext
 	ctx.RegisterModuleType("global_compat_config", globalCompatConfigFactory)
 }
 
+type PlatformCompatConfigInfo struct {
+	CompatConfig android.OutputPath
+	SubDir       string
+}
+
+var PlatformCompatConfigInfoProvider = blueprint.NewProvider[PlatformCompatConfigInfo]()
+
 var PrepareForTestWithPlatformCompatConfig = android.FixtureRegisterWithContext(registerPlatformCompatConfigBuildComponents)
 
 func platformCompatConfigPath(ctx android.PathContext) android.OutputPath {
@@ -51,6 +58,10 @@ func platformCompatConfigPath(ctx android.PathContext) android.OutputPath {
 
 type platformCompatConfigProperties struct {
 	Src *string `android:"path"`
+
+	// If true, we include it in the "merged" XML (merged_compat_config.xml).
+	// Default is true.
+	Include_in_merged_xml *bool
 }
 
 type platformCompatConfig struct {
@@ -60,12 +71,17 @@ type platformCompatConfig struct {
 	installDirPath android.InstallPath
 	configFile     android.OutputPath
 	metadataFile   android.OutputPath
+	doMerge        bool
 
 	installConfigFile android.InstallPath
 }
 
 func (p *platformCompatConfig) compatConfigMetadata() android.Path {
 	return p.metadataFile
+}
+
+func (p *platformCompatConfig) includeInMergedXml() bool {
+	return p.doMerge
 }
 
 func (p *platformCompatConfig) CompatConfig() android.OutputPath {
@@ -78,7 +94,18 @@ func (p *platformCompatConfig) SubDir() string {
 
 type platformCompatConfigMetadataProvider interface {
 	compatConfigMetadata() android.Path
+
+	// Whether to include it in the "merged" XML (merged_compat_config.xml) or not.
+	includeInMergedXml() bool
 }
+
+type PlatformCompatConfigMetadataInfo struct {
+	CompatConfigMetadata android.Path
+	// Whether to include it in the "merged" XML (merged_compat_config.xml) or not.
+	IncludeInMergedXml bool
+}
+
+var PlatformCompatConfigMetadataInfoProvider = blueprint.NewProvider[PlatformCompatConfigMetadataInfo]()
 
 type PlatformCompatConfigIntf interface {
 	android.Module
@@ -98,6 +125,7 @@ func (p *platformCompatConfig) GenerateAndroidBuildActions(ctx android.ModuleCon
 	metadataFileName := p.Name() + "_meta.xml"
 	p.configFile = android.PathForModuleOut(ctx, configFileName).OutputPath
 	p.metadataFile = android.PathForModuleOut(ctx, metadataFileName).OutputPath
+	p.doMerge = proptools.BoolDefault(p.properties.Include_in_merged_xml, true)
 	path := android.PathForModuleSrc(ctx, String(p.properties.Src))
 
 	rule.Command().
@@ -111,6 +139,16 @@ func (p *platformCompatConfig) GenerateAndroidBuildActions(ctx android.ModuleCon
 	rule.Build(configFileName, "Extract compat/compat_config.xml and install it")
 	ctx.InstallFile(p.installDirPath, p.configFile.Base(), p.configFile)
 	ctx.SetOutputFiles(android.Paths{p.configFile}, "")
+
+	android.SetProvider(ctx, PlatformCompatConfigInfoProvider, PlatformCompatConfigInfo{
+		CompatConfig: p.CompatConfig(),
+		SubDir:       p.SubDir(),
+	})
+
+	android.SetProvider(ctx, PlatformCompatConfigMetadataInfoProvider, PlatformCompatConfigMetadataInfo{
+		CompatConfigMetadata: p.compatConfigMetadata(),
+		IncludeInMergedXml:   p.includeInMergedXml(),
+	})
 }
 
 func (p *platformCompatConfig) AndroidMkEntries() []android.AndroidMkEntries {
@@ -201,6 +239,10 @@ func (module *prebuiltCompatConfigModule) compatConfigMetadata() android.Path {
 	return module.metadataFile
 }
 
+func (module *prebuiltCompatConfigModule) includeInMergedXml() bool {
+	return true // Always include in merged.xml
+}
+
 func (module *prebuiltCompatConfigModule) BaseModuleName() string {
 	return proptools.StringDefault(module.properties.Source_module_name, module.ModuleBase.Name())
 }
@@ -209,6 +251,11 @@ var _ platformCompatConfigMetadataProvider = (*prebuiltCompatConfigModule)(nil)
 
 func (module *prebuiltCompatConfigModule) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	module.metadataFile = module.prebuilt.SingleSourcePath(ctx)
+
+	android.SetProvider(ctx, PlatformCompatConfigMetadataInfoProvider, PlatformCompatConfigMetadataInfo{
+		CompatConfigMetadata: module.compatConfigMetadata(),
+		IncludeInMergedXml:   module.includeInMergedXml(),
+	})
 }
 
 // A prebuilt version of platform_compat_config that provides the metadata.
@@ -229,15 +276,18 @@ func (p *platformCompatConfigSingleton) GenerateBuildActions(ctx android.Singlet
 
 	var compatConfigMetadata android.Paths
 
-	ctx.VisitAllModules(func(module android.Module) {
-		if !module.Enabled(ctx) {
+	ctx.VisitAllModuleProxies(func(module android.ModuleProxy) {
+		if !android.OtherModulePointerProviderOrDefault(ctx, module, android.CommonModuleInfoProvider).Enabled {
 			return
 		}
-		if c, ok := module.(platformCompatConfigMetadataProvider); ok {
-			if !android.IsModulePreferred(module) {
+		if c, ok := android.OtherModuleProvider(ctx, module, PlatformCompatConfigMetadataInfoProvider); ok {
+			if !android.IsModulePreferredProxy(ctx, module) {
 				return
 			}
-			metadata := c.compatConfigMetadata()
+			if !c.IncludeInMergedXml {
+				return
+			}
+			metadata := c.CompatConfigMetadata
 			compatConfigMetadata = append(compatConfigMetadata, metadata)
 		}
 	})
@@ -258,12 +308,7 @@ func (p *platformCompatConfigSingleton) GenerateBuildActions(ctx android.Singlet
 	rule.Build("merged-compat-config", "Merge compat config")
 
 	p.metadata = outputPath
-}
-
-func (p *platformCompatConfigSingleton) MakeVars(ctx android.MakeVarsContext) {
-	if p.metadata != nil {
-		ctx.DistForGoal("droidcore", p.metadata)
-	}
+	ctx.DistForGoal("droidcore", p.metadata)
 }
 
 func platformCompatConfigSingletonFactory() android.Singleton {

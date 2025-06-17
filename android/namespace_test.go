@@ -683,7 +683,7 @@ func numDeps(result *TestResult, module TestingModule) int {
 }
 
 func getModule(result *TestResult, moduleName string) TestingModule {
-	return result.ModuleForTests(moduleName, "")
+	return result.ModuleForTests(result.fixture.t, moduleName, "")
 }
 
 func findModuleById(result *TestResult, id string) (module TestingModule) {
@@ -691,7 +691,7 @@ func findModuleById(result *TestResult, id string) (module TestingModule) {
 		testModule, ok := candidate.(*testModule)
 		if ok {
 			if testModule.properties.Id == id {
-				module = newTestingModule(result.config, testModule)
+				module = newTestingModule(result.fixture.t, result.config, testModule)
 			}
 		}
 	}

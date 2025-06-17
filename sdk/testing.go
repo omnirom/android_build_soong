@@ -128,12 +128,11 @@ func ensureListContains(t *testing.T, result []string, expected string) {
 // generated, etc.
 func getSdkSnapshotBuildInfo(t *testing.T, result *android.TestResult, sdk *sdk) *snapshotBuildInfo {
 	info := &snapshotBuildInfo{
-		t:                          t,
-		r:                          result,
-		androidBpContents:          sdk.GetAndroidBpContentsForTests(),
-		infoContents:               sdk.GetInfoContentsForTests(),
-		snapshotTestCustomizations: map[snapshotTest]*snapshotTestCustomization{},
-		targetBuildRelease:         sdk.builderForTests.targetBuildRelease,
+		t:                  t,
+		r:                  result,
+		androidBpContents:  sdk.GetAndroidBpContentsForTests(),
+		infoContents:       sdk.GetInfoContentsForTests(),
+		targetBuildRelease: sdk.builderForTests.targetBuildRelease,
 	}
 
 	buildParams := sdk.BuildParamsForTests()
@@ -144,7 +143,7 @@ func getSdkSnapshotBuildInfo(t *testing.T, result *android.TestResult, sdk *sdk)
 	seenBuildNumberFile := false
 	for _, bp := range buildParams {
 		switch bp.Rule.String() {
-		case android.Cp.String():
+		case android.Cp.String(), android.CpWithBash.String():
 			output := bp.Output
 			// Get destination relative to the snapshot root
 			dest := output.Rel()
@@ -282,7 +281,7 @@ func CheckSnapshot(t *testing.T, result *android.TestResult, name string, dir st
 
 		// Run the snapshot with the snapshot preparer and the extra preparer, which must come after as
 		// it may need to modify parts of the MockFS populated by the snapshot preparer.
-		result := android.GroupFixturePreparers(snapshotPreparer, extraPreparer, customizedPreparers).
+		result := android.GroupFixturePreparers(snapshotPreparer, customizedPreparers, extraPreparer).
 			ExtendWithErrorHandler(customization.errorHandler).
 			RunTest(t)
 
@@ -293,6 +292,7 @@ func CheckSnapshot(t *testing.T, result *android.TestResult, name string, dir st
 	}
 
 	t.Run("snapshot without source", func(t *testing.T) {
+		t.Parallel()
 		// Remove the source Android.bp file to make sure it works without.
 		removeSourceAndroidBp := android.FixtureModifyMockFS(func(fs android.MockFS) {
 			delete(fs, "Android.bp")
@@ -302,16 +302,23 @@ func CheckSnapshot(t *testing.T, result *android.TestResult, name string, dir st
 	})
 
 	t.Run("snapshot with source preferred", func(t *testing.T) {
+		t.Parallel()
 		runSnapshotTestWithCheckers(t, checkSnapshotWithSourcePreferred, android.NullFixturePreparer)
 	})
 
 	t.Run("snapshot preferred with source", func(t *testing.T) {
+		t.Parallel()
 		// Replace the snapshot/Android.bp file with one where "prefer: false," has been replaced with
 		// "prefer: true,"
 		preferPrebuilts := android.FixtureModifyMockFS(func(fs android.MockFS) {
 			snapshotBpFile := filepath.Join(snapshotSubDir, "Android.bp")
 			unpreferred := string(fs[snapshotBpFile])
 			fs[snapshotBpFile] = []byte(strings.ReplaceAll(unpreferred, "prefer: false,", "prefer: true,"))
+
+			prebuiltApexBpFile := "prebuilts/apex/Android.bp"
+			if prebuiltApexBp, ok := fs[prebuiltApexBpFile]; ok {
+				fs[prebuiltApexBpFile] = []byte(strings.ReplaceAll(string(prebuiltApexBp), "prefer: false,", "prefer: true,"))
+			}
 		})
 
 		runSnapshotTestWithCheckers(t, checkSnapshotPreferredWithSource, preferPrebuilts)
@@ -469,19 +476,40 @@ type snapshotBuildInfo struct {
 	targetBuildRelease *buildRelease
 
 	// The test specific customizations for each snapshot test.
-	snapshotTestCustomizations map[snapshotTest]*snapshotTestCustomization
+	snapshotTestCustomizations snapshotTestCustomizationSet
+}
+
+type snapshotTestCustomizationSet struct {
+	snapshotWithoutSource       *snapshotTestCustomization
+	snapshotWithSourcePreferred *snapshotTestCustomization
+	snapshotPreferredWithSource *snapshotTestCustomization
+}
+
+func (s *snapshotTestCustomizationSet) customization(snapshotTest snapshotTest) **snapshotTestCustomization {
+	var customization **snapshotTestCustomization
+	switch snapshotTest {
+	case checkSnapshotWithoutSource:
+
+		customization = &s.snapshotWithoutSource
+	case checkSnapshotWithSourcePreferred:
+		customization = &s.snapshotWithSourcePreferred
+	case checkSnapshotPreferredWithSource:
+		customization = &s.snapshotPreferredWithSource
+	default:
+		panic(fmt.Errorf("unsupported snapshotTest %v", snapshotTest))
+	}
+	return customization
 }
 
 // snapshotTestCustomization gets the test specific customization for the specified snapshotTest.
 //
 // If no customization was created previously then it creates a default customization.
 func (i *snapshotBuildInfo) snapshotTestCustomization(snapshotTest snapshotTest) *snapshotTestCustomization {
-	customization := i.snapshotTestCustomizations[snapshotTest]
-	if customization == nil {
-		customization = &snapshotTestCustomization{
+	customization := i.snapshotTestCustomizations.customization(snapshotTest)
+	if *customization == nil {
+		*customization = &snapshotTestCustomization{
 			errorHandler: android.FixtureExpectsNoErrors,
 		}
-		i.snapshotTestCustomizations[snapshotTest] = customization
 	}
-	return customization
+	return *customization
 }

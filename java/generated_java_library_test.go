@@ -52,6 +52,7 @@ func testGenLib(t *testing.T, errorHandler android.FixtureErrorHandler, bp strin
 }
 
 func TestGenLib(t *testing.T) {
+	t.Parallel()
 	bp := `
 				test_java_gen_lib {
 					name: "javagenlibtest",
@@ -60,6 +61,6 @@ func TestGenLib(t *testing.T) {
 			`
 	result := testGenLib(t, android.FixtureExpectsNoErrors, bp)
 
-	javagenlibtest := result.ModuleForTests("javagenlibtest", "android_common").Module().(*GeneratedJavaLibraryModule)
+	javagenlibtest := result.ModuleForTests(t, "javagenlibtest", "android_common").Module().(*GeneratedJavaLibraryModule)
 	android.AssertPathsEndWith(t, "Generated_srcjars", []string{"/blah.srcjar"}, javagenlibtest.Library.properties.Generated_srcjars)
 }

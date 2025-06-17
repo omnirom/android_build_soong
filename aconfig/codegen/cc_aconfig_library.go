@@ -22,7 +22,6 @@ import (
 	"github.com/google/blueprint/proptools"
 
 	"fmt"
-	"strconv"
 	"strings"
 )
 
@@ -31,8 +30,6 @@ type ccDeclarationsTagType struct {
 }
 
 var ccDeclarationsTag = ccDeclarationsTagType{}
-
-const baseLibDep = "server_configurable_flags"
 
 const libBaseDep = "libbase"
 const libLogDep = "liblog"
@@ -86,14 +83,10 @@ func (this *CcAconfigLibraryCallbacks) GeneratorDeps(ctx cc.DepsContext, deps cc
 
 	// Add a dependency for the aconfig flags base library if it is not forced read only
 	if mode != "force-read-only" {
-		deps.SharedLibs = append(deps.SharedLibs, baseLibDep)
-
+		deps.SharedLibs = append(deps.SharedLibs, libAconfigStorageReadApiCcDep)
+		deps.SharedLibs = append(deps.SharedLibs, libBaseDep)
+		deps.SharedLibs = append(deps.SharedLibs, libLogDep)
 	}
-
-	// TODO: after storage migration is over, don't add these in force-read-only-mode.
-	deps.SharedLibs = append(deps.SharedLibs, libAconfigStorageReadApiCcDep)
-	deps.SharedLibs = append(deps.SharedLibs, libBaseDep)
-	deps.SharedLibs = append(deps.SharedLibs, libLogDep)
 
 	// TODO: It'd be really nice if we could reexport this library and not make everyone do it.
 
@@ -104,7 +97,7 @@ func (this *CcAconfigLibraryCallbacks) GeneratorSources(ctx cc.ModuleContext) cc
 	result := cc.GeneratedSource{}
 
 	// Get the values that came from the global RELEASE_ACONFIG_VALUE_SETS flag
-	declarationsModules := ctx.GetDirectDepsWithTag(ccDeclarationsTag)
+	declarationsModules := ctx.GetDirectDepsProxyWithTag(ccDeclarationsTag)
 	if len(declarationsModules) != 1 {
 		panic(fmt.Errorf("Exactly one aconfig_declarations property required"))
 	}
@@ -134,7 +127,7 @@ func (this *CcAconfigLibraryCallbacks) GeneratorFlags(ctx cc.ModuleContext, flag
 
 func (this *CcAconfigLibraryCallbacks) GeneratorBuildActions(ctx cc.ModuleContext, flags cc.Flags, deps cc.PathDeps) {
 	// Get the values that came from the global RELEASE_ACONFIG_VALUE_SETS flag
-	declarationsModules := ctx.GetDirectDepsWithTag(ccDeclarationsTag)
+	declarationsModules := ctx.GetDirectDepsProxyWithTag(ccDeclarationsTag)
 	if len(declarationsModules) != 1 {
 		panic(fmt.Errorf("Exactly one aconfig_declarations property required"))
 	}
@@ -156,7 +149,6 @@ func (this *CcAconfigLibraryCallbacks) GeneratorBuildActions(ctx cc.ModuleContex
 		Args: map[string]string{
 			"gendir": this.generatedDir.String(),
 			"mode":   mode,
-			"debug":  strconv.FormatBool(ctx.Config().ReleaseReadFromNewStorage()),
 		},
 	})
 

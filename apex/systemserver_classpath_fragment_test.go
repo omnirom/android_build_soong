@@ -108,6 +108,7 @@ func TestSystemserverclasspathFragmentContents(t *testing.T) {
 	})
 
 	java.CheckModuleDependencies(t, ctx, "myapex", "android_common_myapex", []string{
+		`all_apex_contributions`,
 		`dex2oatd`,
 		`myapex.key`,
 		`mysystemserverclasspathfragment`,
@@ -166,6 +167,7 @@ func TestSystemserverclasspathFragmentNoGeneratedProto(t *testing.T) {
 	})
 
 	java.CheckModuleDependencies(t, result.TestContext, "myapex", "android_common_myapex", []string{
+		`all_apex_contributions`,
 		`dex2oatd`,
 		`myapex.key`,
 		`mysystemserverclasspathfragment`,
@@ -278,19 +280,19 @@ func TestPrebuiltSystemserverclasspathFragmentContents(t *testing.T) {
 
 	ctx := result.TestContext
 
-	java.CheckModuleDependencies(t, ctx, "myapex", "android_common_myapex", []string{
+	java.CheckModuleDependencies(t, ctx, "myapex", "android_common_prebuilt_myapex", []string{
 		`all_apex_contributions`,
 		`dex2oatd`,
 		`prebuilt_mysystemserverclasspathfragment`,
 	})
 
-	java.CheckModuleDependencies(t, ctx, "mysystemserverclasspathfragment", "android_common_myapex", []string{
+	java.CheckModuleDependencies(t, ctx, "mysystemserverclasspathfragment", "android_common_prebuilt_myapex", []string{
 		`all_apex_contributions`,
 		`prebuilt_bar`,
 		`prebuilt_foo`,
 	})
 
-	ensureExactDeapexedContents(t, ctx, "myapex", "android_common_myapex", []string{
+	ensureExactDeapexedContents(t, ctx, "myapex", "android_common_prebuilt_myapex", []string{
 		"javalib/foo.jar",
 		"javalib/bar.jar",
 		"javalib/bar.jar.prof",
@@ -438,13 +440,13 @@ func TestPrebuiltStandaloneSystemserverclasspathFragmentContents(t *testing.T) {
 
 	ctx := result.TestContext
 
-	java.CheckModuleDependencies(t, ctx, "mysystemserverclasspathfragment", "android_common_myapex", []string{
+	java.CheckModuleDependencies(t, ctx, "mysystemserverclasspathfragment", "android_common_prebuilt_myapex", []string{
 		`all_apex_contributions`,
 		`prebuilt_bar`,
 		`prebuilt_foo`,
 	})
 
-	ensureExactDeapexedContents(t, ctx, "myapex", "android_common_myapex", []string{
+	ensureExactDeapexedContents(t, ctx, "myapex", "android_common_prebuilt_myapex", []string{
 		"javalib/foo.jar",
 		"javalib/bar.jar",
 		"javalib/bar.jar.prof",
@@ -455,7 +457,7 @@ func TestPrebuiltStandaloneSystemserverclasspathFragmentContents(t *testing.T) {
 }
 
 func assertProfileGuided(t *testing.T, ctx *android.TestContext, moduleName string, variant string, expected bool) {
-	dexpreopt := ctx.ModuleForTests(moduleName, variant).Rule("dexpreopt")
+	dexpreopt := ctx.ModuleForTests(t, moduleName, variant).Rule("dexpreopt")
 	actual := strings.Contains(dexpreopt.RuleParams.Command, "--profile-file=")
 	if expected != actual {
 		t.Fatalf("Expected profile-guided to be %v, got %v", expected, actual)
@@ -463,9 +465,126 @@ func assertProfileGuided(t *testing.T, ctx *android.TestContext, moduleName stri
 }
 
 func assertProfileGuidedPrebuilt(t *testing.T, ctx *android.TestContext, apexName string, moduleName string, expected bool) {
-	dexpreopt := ctx.ModuleForTests(apexName, "android_common_"+apexName).Rule("dexpreopt." + moduleName)
+	dexpreopt := ctx.ModuleForTests(t, apexName, "android_common_prebuilt_"+apexName).Rule("dexpreopt." + moduleName)
 	actual := strings.Contains(dexpreopt.RuleParams.Command, "--profile-file=")
 	if expected != actual {
 		t.Fatalf("Expected profile-guided to be %v, got %v", expected, actual)
 	}
+}
+
+func TestCheckSystemServerOrderWithArtApex(t *testing.T) {
+	preparers := android.GroupFixturePreparers(
+		java.PrepareForTestWithDexpreopt,
+		java.PrepareForTestWithJavaSdkLibraryFiles,
+		PrepareForTestWithApexBuildComponents,
+		prepareForTestWithArtApex,
+		java.FixtureConfigureBootJars("com.android.art:framework-art"),
+		dexpreopt.FixtureSetApexSystemServerJars("com.android.apex1:service-apex1", "com.android.art:service-art"),
+		java.FixtureWithLastReleaseApis("baz"),
+	)
+
+	// Creates a com.android.art apex with a bootclasspath fragment and a systemserverclasspath fragment, and a
+	// com.android.apex1 prebuilt whose bootclasspath fragment depends on the com.android.art bootclasspath fragment.
+	// Verifies that the checkSystemServerOrder doesn't get confused by the bootclasspath dependencies and report
+	// that service-apex1 depends on service-art.
+	result := preparers.RunTestWithBp(t, `
+		apex {
+			name: "com.android.art",
+			key: "com.android.art.key",
+			bootclasspath_fragments: ["art-bootclasspath-fragment"],
+			systemserverclasspath_fragments: ["art-systemserverclasspath-fragment"],
+			updatable: false,
+		}
+
+		apex_key {
+			name: "com.android.art.key",
+			public_key: "com.android.art.avbpubkey",
+			private_key: "com.android.art.pem",
+		}
+
+		bootclasspath_fragment {
+			name: "art-bootclasspath-fragment",
+			image_name: "art",
+			contents: ["framework-art"],
+			apex_available: [
+				"com.android.art",
+			],
+			hidden_api: {
+				split_packages: ["*"],
+			},
+		}
+
+		java_library {
+			name: "framework-art",
+			apex_available: ["com.android.art"],
+			srcs: ["a.java"],
+			compile_dex: true,
+		}
+
+		systemserverclasspath_fragment {
+			name: "art-systemserverclasspath-fragment",
+			apex_available: ["com.android.art"],
+			contents: ["service-art"],
+		}
+
+		java_library {
+			name: "service-art",
+			srcs: ["a.java"],
+			apex_available: ["com.android.art"],
+			compile_dex: true,
+		}
+
+		prebuilt_apex {
+			name: "com.android.apex1",
+			arch: {
+				arm64: {
+					src: "myapex-arm64.apex",
+				},
+				arm: {
+					src: "myapex-arm.apex",
+				},
+			},
+			exported_bootclasspath_fragments: ["com.android.apex1-bootclasspath-fragment"],
+			exported_systemserverclasspath_fragments: ["com.android.apex1-systemserverclasspath-fragment"],
+		}
+
+		prebuilt_bootclasspath_fragment {
+			name: "com.android.apex1-bootclasspath-fragment",
+			visibility: ["//visibility:public"],
+			apex_available: ["com.android.apex1"],
+			contents: ["framework-apex1"],
+			fragments: [
+				{
+					apex: "com.android.art",
+					module: "art-bootclasspath-fragment",
+				},
+			],
+			hidden_api: {
+				annotation_flags: "hiddenapi/annotation-flags.csv",
+				metadata: "hiddenapi/metadata.csv",
+				index: "hiddenapi/index.csv",
+				stub_flags: "hiddenapi/stub-flags.csv",
+				all_flags: "hiddenapi/all-flags.csv",
+			},
+		}
+
+		java_import {
+			name: "framework-apex1",
+			apex_available: ["com.android.apex1"],
+		}
+
+		prebuilt_systemserverclasspath_fragment {
+			name: "com.android.apex1-systemserverclasspath-fragment",
+			apex_available: ["com.android.apex1"],
+			contents: ["service-apex1"],
+		}
+
+		java_import {
+			name: "service-apex1",
+			installable: true,
+			apex_available: ["com.android.apex1"],
+			sdk_version: "current",
+		}`)
+
+	_ = result
 }

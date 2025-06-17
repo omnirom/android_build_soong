@@ -58,7 +58,7 @@ func TestShTestSubDir(t *testing.T) {
 		}
 	`)
 
-	mod := result.ModuleForTests("foo", "android_arm64_armv8-a").Module().(*ShTest)
+	mod := result.ModuleForTests(t, "foo", "android_arm64_armv8-a").Module().(*ShTest)
 
 	entries := android.AndroidMkEntriesForTest(t, result.TestContext, mod)[0]
 
@@ -83,7 +83,7 @@ func TestShTest(t *testing.T) {
 		}
 	`)
 
-	mod := result.ModuleForTests("foo", "android_arm64_armv8-a").Module().(*ShTest)
+	mod := result.ModuleForTests(t, "foo", "android_arm64_armv8-a").Module().(*ShTest)
 
 	entries := android.AndroidMkEntriesForTest(t, result.TestContext, mod)[0]
 
@@ -129,7 +129,7 @@ func TestShTest_dataModules(t *testing.T) {
 	buildOS := config.BuildOS.String()
 	arches := []string{"android_arm64_armv8-a", buildOS + "_x86_64"}
 	for _, arch := range arches {
-		variant := ctx.ModuleForTests("foo", arch)
+		variant := ctx.ModuleForTests(t, "foo", arch)
 
 		libExt := ".so"
 		if arch == "darwin_x86_64" {
@@ -167,7 +167,7 @@ func TestShTestHost(t *testing.T) {
 	`)
 
 	buildOS := ctx.Config().BuildOS.String()
-	mod := ctx.ModuleForTests("foo", buildOS+"_x86_64").Module().(*ShTest)
+	mod := ctx.ModuleForTests(t, "foo", buildOS+"_x86_64").Module().(*ShTest)
 	if !mod.Host() {
 		t.Errorf("host bit is not set for a sh_test_host module.")
 	}
@@ -186,7 +186,7 @@ func TestShTestExtraTestConfig(t *testing.T) {
 		}
 	`)
 
-	mod := result.ModuleForTests("foo", "android_arm64_armv8-a").Module().(*ShTest)
+	mod := result.ModuleForTests(t, "foo", "android_arm64_armv8-a").Module().(*ShTest)
 	entries := android.AndroidMkEntriesForTest(t, result, mod)[0]
 	actualData := entries.EntryMap["LOCAL_EXTRA_FULL_TEST_CONFIGS"]
 	android.AssertStringPathsRelativeToTopEquals(t, "extra_configs", result.Config(), []string{"config1.xml", "config2.xml"}, actualData)
@@ -221,7 +221,7 @@ func TestShTestHost_dataDeviceModules(t *testing.T) {
 
 	buildOS := config.BuildOS.String()
 	variant := buildOS + "_x86_64"
-	foo := ctx.ModuleForTests("foo", variant)
+	foo := ctx.ModuleForTests(t, "foo", variant)
 
 	relocated := foo.Output(filepath.Join("out/soong/.intermediates/foo", variant, "relocated/lib64/libbar.so"))
 	expectedInput := "out/soong/.intermediates/libbar/android_arm64_armv8-a_shared/libbar.so"
@@ -266,7 +266,7 @@ func TestShTestHost_dataDeviceModulesAutogenTradefedConfig(t *testing.T) {
 	`)
 
 	buildOS := config.BuildOS.String()
-	fooModule := ctx.ModuleForTests("foo", buildOS+"_x86_64")
+	fooModule := ctx.ModuleForTests(t, "foo", buildOS+"_x86_64")
 
 	expectedBinAutogenConfig := `<option name="push-file" key="bar" value="/data/local/tests/unrestricted/foo/bar" />`
 	autogen := fooModule.Rule("autogen")
@@ -296,7 +296,7 @@ func TestShTestHost_javaData(t *testing.T) {
 		}
 	`)
 	buildOS := ctx.Config().BuildOS.String()
-	mod := ctx.ModuleForTests("foo", buildOS+"_x86_64").Module().(*ShTest)
+	mod := ctx.ModuleForTests(t, "foo", buildOS+"_x86_64").Module().(*ShTest)
 	if !mod.Host() {
 		t.Errorf("host bit is not set for a sh_test_host module.")
 	}
@@ -345,7 +345,7 @@ func TestDefaultsForTests(t *testing.T) {
 
 	`)
 	buildOS := ctx.Config().BuildOS.String()
-	mod := ctx.ModuleForTests("foo", buildOS+"_x86_64").Module().(*ShTest)
+	mod := ctx.ModuleForTests(t, "foo", buildOS+"_x86_64").Module().(*ShTest)
 	if !mod.Host() {
 		t.Errorf("host bit is not set for a sh_test_host module.")
 	}
@@ -365,7 +365,7 @@ func TestDefaultsForTests(t *testing.T) {
 		":testdata/data1",
 		":testdata/sub/data2",
 	}
-	mod = ctx.ModuleForTests("sh-test", "android_arm64_armv8-a").Module().(*ShTest)
+	mod = ctx.ModuleForTests(t, "sh-test", "android_arm64_armv8-a").Module().(*ShTest)
 	entries = android.AndroidMkEntriesForTest(t, ctx, mod)[0]
 	actualData = entries.EntryMap["LOCAL_TEST_DATA"]
 	android.AssertStringPathsRelativeToTopEquals(t, "LOCAL_TEST_DATA", config, expectedData, actualData)
@@ -388,7 +388,7 @@ func TestDefaultsForBinaries(t *testing.T) {
 		}
 	`)
 	buildOS := ctx.Config().BuildOS.String()
-	mod := ctx.ModuleForTests("the-host-binary", buildOS+"_x86_64").Module().(*ShBinary)
+	mod := ctx.ModuleForTests(t, "the-host-binary", buildOS+"_x86_64").Module().(*ShBinary)
 	if !mod.Host() {
 		t.Errorf("host bit is not set for a sh_binary_host module.")
 	}
@@ -396,6 +396,6 @@ func TestDefaultsForBinaries(t *testing.T) {
 	expectedFilename := "test.sh"
 	android.AssertStringEquals(t, "Filename", expectedFilename, *mod.properties.Filename)
 
-	mod = ctx.ModuleForTests("the-binary", "android_arm64_armv8-a").Module().(*ShBinary)
+	mod = ctx.ModuleForTests(t, "the-binary", "android_arm64_armv8-a").Module().(*ShBinary)
 	android.AssertStringEquals(t, "Filename", expectedFilename, *mod.properties.Filename)
 }

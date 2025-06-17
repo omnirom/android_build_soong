@@ -52,7 +52,7 @@ func TestBuildTestList(t *testing.T) {
 		}
 	`)
 
-	config := ctx.SingletonForTests("testsuites")
+	config := ctx.SingletonForTests(t, "testsuites")
 	allOutputs := config.AllOutputs()
 
 	wantContents := map[string]string{
@@ -108,8 +108,13 @@ var prepareForFakeTestSuite = GroupFixturePreparers(
 
 func (f *fake_module) GenerateAndroidBuildActions(ctx ModuleContext) {
 	for _, output := range f.props.Outputs {
-		ctx.InstallFile(pathForTestCases(ctx), output, nil)
+		f := PathForModuleOut(ctx, output)
+		ctx.InstallFile(pathForTestCases(ctx), output, f)
 	}
+
+	SetProvider(ctx, TestSuiteInfoProvider, TestSuiteInfo{
+		TestSuites: f.TestSuites(),
+	})
 }
 
 func (f *fake_module) TestSuites() []string {

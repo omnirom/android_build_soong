@@ -38,6 +38,11 @@ if [[ ${OS} = linux ]]; then
     CLANG_VERSION=$(build/soong/scripts/get_clang_version.py)
     export CC="${TOP}/prebuilts/clang/host/${OS}-x86/${CLANG_VERSION}/bin/clang"
     export CXX="${TOP}/prebuilts/clang/host/${OS}-x86/${CLANG_VERSION}/bin/clang++"
+    glibc_dir="${TOP}/prebuilts/gcc/linux-x86/host/x86_64-linux-glibc2.17-4.8"
+    export CGO_CFLAGS="--sysroot ${glibc_dir}/sysroot/"
+    export CGO_CPPFLAGS="--sysroot ${glibc_dir}/sysroot/"
+    export CGO_CXXFLAGS="--sysroot ${glibc_dir}/sysroot/"
+    export CGO_LDFLAGS="--sysroot ${glibc_dir}/sysroot/ -B ${glibc_dir}/lib/gcc/x86_64-linux/4.8.3 -L ${glibc_dir}/lib/gcc/x86_64-linux/4.8.3 -L ${glibc_dir}/x86_64-linux/lib64"
 fi
 
 # androidmk_test.go gets confused if ANDROID_BUILD_TOP is set.

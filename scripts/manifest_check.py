@@ -132,7 +132,7 @@ def enforce_uses_libraries(manifest, required, optional, missing_optional, relax
 
     #pylint: disable=line-too-long
     errmsg = ''.join([
-        'mismatch in the <uses-library> tags between the build system and the '
+        'mismatch or misordering in the <uses-library> tags between the build system and the '
         'manifest:\n',
         '\t- required libraries in build system: %s[%s]%s\n' % (C_RED, ', '.join(required), C_OFF),
         '\t                 vs. in the manifest: %s[%s]%s\n' % (C_RED, ', '.join(manifest_required), C_OFF),

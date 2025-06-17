@@ -67,10 +67,10 @@ func TestRustBindgen(t *testing.T) {
 			cflags: ["--default-flag"],
 		}
 	`)
-	libbindgen := ctx.ModuleForTests("libbindgen", "android_arm64_armv8-a_source").Output("bindings.rs")
-	libbindgenStatic := ctx.ModuleForTests("libbindgen_staticlib", "android_arm64_armv8-a_source").Output("bindings.rs")
-	libbindgenHeader := ctx.ModuleForTests("libbindgen_headerlib", "android_arm64_armv8-a_source").Output("bindings.rs")
-	libbindgenHeaderModule := ctx.ModuleForTests("libbindgen_headerlib", "android_arm64_armv8-a_source").Module().(*Module)
+	libbindgen := ctx.ModuleForTests(t, "libbindgen", "android_arm64_armv8-a_source").Output("bindings.rs")
+	libbindgenStatic := ctx.ModuleForTests(t, "libbindgen_staticlib", "android_arm64_armv8-a_source").Output("bindings.rs")
+	libbindgenHeader := ctx.ModuleForTests(t, "libbindgen_headerlib", "android_arm64_armv8-a_source").Output("bindings.rs")
+	libbindgenHeaderModule := ctx.ModuleForTests(t, "libbindgen_headerlib", "android_arm64_armv8-a_source").Module().(*Module)
 	// Ensure that the flags are present and escaped
 	if !strings.Contains(libbindgen.Args["flags"], "'--bindgen-flag.*'") {
 		t.Errorf("missing bindgen flags in rust_bindgen rule: flags %#v", libbindgen.Args["flags"])
@@ -113,7 +113,7 @@ func TestRustBindgenCustomBindgen(t *testing.T) {
 		}
 	`)
 
-	libbindgen := ctx.ModuleForTests("libbindgen", "android_arm64_armv8-a_source").Output("bindings.rs")
+	libbindgen := ctx.ModuleForTests(t, "libbindgen", "android_arm64_armv8-a_source").Output("bindings.rs")
 
 	// The rule description should contain the custom binary name rather than bindgen, so checking the description
 	// should be sufficient.
@@ -155,8 +155,8 @@ func TestRustBindgenStdVersions(t *testing.T) {
 		}
 	`)
 
-	libbindgen_cstd := ctx.ModuleForTests("libbindgen_cstd", "android_arm64_armv8-a_source").Output("bindings.rs")
-	libbindgen_cppstd := ctx.ModuleForTests("libbindgen_cppstd", "android_arm64_armv8-a_source").Output("bindings.rs")
+	libbindgen_cstd := ctx.ModuleForTests(t, "libbindgen_cstd", "android_arm64_armv8-a_source").Output("bindings.rs")
+	libbindgen_cppstd := ctx.ModuleForTests(t, "libbindgen_cppstd", "android_arm64_armv8-a_source").Output("bindings.rs")
 
 	if !strings.Contains(libbindgen_cstd.Args["cflags"], "-std=foo") {
 		t.Errorf("c_std value not passed in to rust_bindgen as a clang flag")
@@ -216,7 +216,7 @@ func TestBindgenFlagFile(t *testing.T) {
 			],
 		}
 	`)
-	libbindgen := ctx.ModuleForTests("libbindgen", "android_arm64_armv8-a_source").Output("bindings.rs")
+	libbindgen := ctx.ModuleForTests(t, "libbindgen", "android_arm64_armv8-a_source").Output("bindings.rs")
 
 	if !strings.Contains(libbindgen.Args["flagfiles"], "/dev/null") {
 		t.Errorf("missing /dev/null in rust_bindgen rule: flags %#v", libbindgen.Args["flagfiles"])
@@ -246,7 +246,7 @@ func TestBindgenHandleStaticInlining(t *testing.T) {
 			include_dirs: ["src/"],
 		}
 	`)
-	libbindgen := ctx.ModuleForTests("libbindgen", "android_arm64_armv8-a_source").Output("bindings.rs")
+	libbindgen := ctx.ModuleForTests(t, "libbindgen", "android_arm64_armv8-a_source").Output("bindings.rs")
 	// Make sure the flag to support `static inline` functions is present
 	if !strings.Contains(libbindgen.Args["flags"], "--wrap-static-fns") {
 		t.Errorf("missing flag to handle static inlining in rust_bindgen rule: flags %#v", libbindgen.Args["flags"])

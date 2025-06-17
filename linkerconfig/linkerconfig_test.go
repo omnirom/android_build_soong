@@ -46,7 +46,7 @@ func TestBaseLinkerConfig(t *testing.T) {
 		"LOCAL_INSTALLED_MODULE_STEM": {"linker.config.pb"},
 	}
 
-	p := result.ModuleForTests("linker-config-base", "android_arm64_armv8-a").Module().(*linkerConfig)
+	p := result.ModuleForTests(t, "linker-config-base", "android_arm64_armv8-a").Module().(*linkerConfig)
 
 	if p.outputFilePath.Base() != "linker.config.pb" {
 		t.Errorf("expected linker.config.pb, got %q", p.outputFilePath.Base())
@@ -79,7 +79,7 @@ func TestUninstallableLinkerConfig(t *testing.T) {
 
 	expected := []string{"true"}
 
-	p := result.ModuleForTests("linker-config-base", "android_arm64_armv8-a").Module().(*linkerConfig)
+	p := result.ModuleForTests(t, "linker-config-base", "android_arm64_armv8-a").Module().(*linkerConfig)
 	entries := android.AndroidMkEntriesForTest(t, result.TestContext, p)[0]
 	if value, ok := entries.EntryMap["LOCAL_UNINSTALLABLE_MODULE"]; ok {
 		if !reflect.DeepEqual(value, expected) {

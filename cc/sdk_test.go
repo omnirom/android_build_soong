@@ -81,16 +81,16 @@ func TestSdkMutator(t *testing.T) {
 
 	ctx := testCc(t, bp)
 
-	libsdkNDK := ctx.ModuleForTests("libsdk", "android_arm64_armv8-a_sdk_shared")
-	libsdkPlatform := ctx.ModuleForTests("libsdk", "android_arm64_armv8-a_shared")
-	libsdkdepNDK := ctx.ModuleForTests("libsdkdep", "android_arm64_armv8-a_sdk_shared")
-	libsdkdepPlatform := ctx.ModuleForTests("libsdkdep", "android_arm64_armv8-a_shared")
-	libplatform := ctx.ModuleForTests("libplatform", "android_arm64_armv8-a_shared")
-	platformbinary := ctx.ModuleForTests("platformbinary", "android_arm64_armv8-a")
-	sdkbinary := ctx.ModuleForTests("sdkbinary", "android_arm64_armv8-a_sdk")
+	libsdkNDK := ctx.ModuleForTests(t, "libsdk", "android_arm64_armv8-a_sdk_shared")
+	libsdkPlatform := ctx.ModuleForTests(t, "libsdk", "android_arm64_armv8-a_shared")
+	libsdkdepNDK := ctx.ModuleForTests(t, "libsdkdep", "android_arm64_armv8-a_sdk_shared")
+	libsdkdepPlatform := ctx.ModuleForTests(t, "libsdkdep", "android_arm64_armv8-a_shared")
+	libplatform := ctx.ModuleForTests(t, "libplatform", "android_arm64_armv8-a_shared")
+	platformbinary := ctx.ModuleForTests(t, "platformbinary", "android_arm64_armv8-a")
+	sdkbinary := ctx.ModuleForTests(t, "sdkbinary", "android_arm64_armv8-a_sdk")
 
-	libcxxNDK := ctx.ModuleForTests("ndk_libc++_shared", "android_arm64_armv8-a_sdk_shared")
-	libcxxPlatform := ctx.ModuleForTests("libc++", "android_arm64_armv8-a_shared")
+	libcxxNDK := ctx.ModuleForTests(t, "ndk_libc++_shared", "android_arm64_armv8-a_sdk_shared")
+	libcxxPlatform := ctx.ModuleForTests(t, "libc++", "android_arm64_armv8-a_shared")
 
 	assertDep(t, libsdkNDK, libsdkdepNDK)
 	assertDep(t, libsdkPlatform, libsdkdepPlatform)

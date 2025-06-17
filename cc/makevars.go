@@ -100,15 +100,7 @@ func makeVarsProvider(ctx android.MakeVarsContext) {
 
 	// Filter vendor_public_library that are exported to make
 	var exportedVendorPublicLibraries []string
-	var warningsAllowed []string
-	var usingWnoErrors []string
-	var missingProfiles []string
 	ctx.VisitAllModules(func(module android.Module) {
-		if v, ok := android.OtherModuleProvider(ctx, module, CcMakeVarsInfoProvider); ok {
-			warningsAllowed = android.AppendIfNotZero(warningsAllowed, v.WarningsAllowed)
-			usingWnoErrors = android.AppendIfNotZero(usingWnoErrors, v.UsingWnoError)
-			missingProfiles = android.AppendIfNotZero(missingProfiles, v.MissingProfile)
-		}
 		if ccModule, ok := module.(*Module); ok {
 			baseName := ccModule.BaseModuleName()
 			if ccModule.IsVendorPublicLibrary() && module.ExportedToMake() {
@@ -123,9 +115,6 @@ func makeVarsProvider(ctx android.MakeVarsContext) {
 	ctx.Strict("LSDUMP_PATHS", strings.Join(lsdumpPaths, " "))
 
 	ctx.Strict("ANDROID_WARNING_ALLOWED_PROJECTS", makeStringOfWarningAllowedProjects())
-	ctx.Strict("SOONG_MODULES_WARNINGS_ALLOWED", makeVarsString(warningsAllowed))
-	ctx.Strict("SOONG_MODULES_USING_WNO_ERROR", makeVarsString(usingWnoErrors))
-	ctx.Strict("SOONG_MODULES_MISSING_PGO_PROFILE_FILE", makeVarsString(missingProfiles))
 
 	ctx.Strict("CLANG_COVERAGE_CONFIG_CFLAGS", strings.Join(clangCoverageCFlags, " "))
 	ctx.Strict("CLANG_COVERAGE_CONFIG_COMMFLAGS", strings.Join(clangCoverageCommonFlags, " "))
@@ -175,19 +164,19 @@ func makeVarsProvider(ctx android.MakeVarsContext) {
 	sort.Strings(ndkKnownLibs)
 	ctx.Strict("NDK_KNOWN_LIBS", strings.Join(ndkKnownLibs, " "))
 
-	hostTargets := ctx.Config().Targets[ctx.Config().BuildOS]
-	makeVarsToolchain(ctx, "", hostTargets[0])
-	if len(hostTargets) > 1 {
-		makeVarsToolchain(ctx, "2ND_", hostTargets[1])
+	if hostTargets := ctx.Config().Targets[ctx.Config().BuildOS]; len(hostTargets) > 0 {
+		makeVarsToolchain(ctx, "", hostTargets[0])
+		if len(hostTargets) > 1 {
+			makeVarsToolchain(ctx, "2ND_", hostTargets[1])
+		}
 	}
 
-	deviceTargets := ctx.Config().Targets[android.Android]
-	makeVarsToolchain(ctx, "", deviceTargets[0])
-	if len(deviceTargets) > 1 {
-		makeVarsToolchain(ctx, "2ND_", deviceTargets[1])
+	if deviceTargets := ctx.Config().Targets[android.Android]; len(deviceTargets) > 0 {
+		makeVarsToolchain(ctx, "", deviceTargets[0])
+		if len(deviceTargets) > 1 {
+			makeVarsToolchain(ctx, "2ND_", deviceTargets[1])
+		}
 	}
-
-	makeLlndkVars(ctx)
 }
 
 func makeVarsToolchain(ctx android.MakeVarsContext, secondPrefix string,

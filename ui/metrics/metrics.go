@@ -161,7 +161,7 @@ func (m *Metrics) ExpConfigFetcher(b *soong_metrics_proto.ExpConfigFetcher) {
 }
 
 // SetMetadataMetrics sets information about the build such as the target
-// product, host architecture and out directory.
+// product, host architecture and out directory.  May be called multiple times.
 func (m *Metrics) SetMetadataMetrics(metadata map[string]string) {
 	for k, v := range metadata {
 		switch k {
@@ -171,6 +171,8 @@ func (m *Metrics) SetMetadataMetrics(metadata map[string]string) {
 			m.metrics.PlatformVersionCodename = proto.String(v)
 		case "TARGET_PRODUCT":
 			m.metrics.TargetProduct = proto.String(v)
+		case "TARGET_RELEASE":
+			m.metrics.TargetRelease = proto.String(v)
 		case "TARGET_BUILD_VARIANT":
 			switch v {
 			case "user":

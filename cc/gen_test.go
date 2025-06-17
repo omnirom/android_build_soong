@@ -33,8 +33,8 @@ func TestGen(t *testing.T) {
 			],
 		}`)
 
-		aidl := ctx.ModuleForTests("libfoo", "android_arm_armv7-a-neon_shared").Rule("aidl")
-		libfoo := ctx.ModuleForTests("libfoo", "android_arm_armv7-a-neon_shared").Module().(*Module)
+		aidl := ctx.ModuleForTests(t, "libfoo", "android_arm_armv7-a-neon_shared").Rule("aidl")
+		libfoo := ctx.ModuleForTests(t, "libfoo", "android_arm_armv7-a-neon_shared").Module().(*Module)
 
 		expected := "-I" + filepath.Dir(aidl.Output.String())
 		actual := android.StringsRelativeToTop(ctx.Config(), libfoo.flags.Local.CommonFlags)
@@ -59,9 +59,9 @@ func TestGen(t *testing.T) {
 			],
 		}`)
 
-		aidl := ctx.ModuleForTests("libfoo", "android_arm_armv7-a-neon_shared").Rule("aidl")
-		aidlManifest := ctx.ModuleForTests("libfoo", "android_arm_armv7-a-neon_shared").Output("aidl.sbox.textproto")
-		libfoo := ctx.ModuleForTests("libfoo", "android_arm_armv7-a-neon_shared").Module().(*Module)
+		aidl := ctx.ModuleForTests(t, "libfoo", "android_arm_armv7-a-neon_shared").Rule("aidl")
+		aidlManifest := ctx.ModuleForTests(t, "libfoo", "android_arm_armv7-a-neon_shared").Output("aidl.sbox.textproto")
+		libfoo := ctx.ModuleForTests(t, "libfoo", "android_arm_armv7-a-neon_shared").Module().(*Module)
 
 		if !inList("-I"+filepath.Dir(aidl.Output.String()), android.StringsRelativeToTop(ctx.Config(), libfoo.flags.Local.CommonFlags)) {
 			t.Errorf("missing aidl includes in global flags")
@@ -84,7 +84,7 @@ func TestGen(t *testing.T) {
 		}`)
 
 		outDir := "out/soong/.intermediates/libsysprop/android_arm64_armv8-a_static/gen"
-		syspropBuildParams := ctx.ModuleForTests("libsysprop", "android_arm64_armv8-a_static").Rule("sysprop")
+		syspropBuildParams := ctx.ModuleForTests(t, "libsysprop", "android_arm64_armv8-a_static").Rule("sysprop")
 
 		android.AssertStringEquals(t, "header output directory does not match", outDir+"/sysprop/include/path/to", syspropBuildParams.Args["headerOutDir"])
 		android.AssertStringEquals(t, "public output directory does not match", outDir+"/sysprop/public/include/path/to", syspropBuildParams.Args["publicOutDir"])

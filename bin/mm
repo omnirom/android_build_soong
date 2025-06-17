@@ -19,6 +19,6 @@ source $(cd $(dirname $BASH_SOURCE) &> /dev/null && pwd)/../../make/shell_utils.
 
 require_top
 
-_wrap_build "$TOP/build/soong/soong_ui.bash" --build-mode --modules-in-a-dir-no-deps --dir="$(pwd)" "$@"
+_wrap_build "$TOP/build/soong/soong_ui.bash" --build-mode --modules-in-a-dir --dir="$(pwd)" "$@"
 
 exit $?

@@ -20,6 +20,8 @@ import (
 
 	"android/soong/android"
 	"android/soong/genrule"
+
+	"github.com/google/blueprint/proptools"
 )
 
 var (
@@ -39,6 +41,11 @@ type javaSystemFeaturesSrcs struct {
 	properties struct {
 		// The fully qualified class name for the generated code, e.g., com.android.Foo
 		Full_class_name string
+		// Whether to generate only a simple metadata class with details about the full API surface.
+		// This is useful for tools that rely on the mapping from feature names to their generated
+		// method names, but don't want the fully generated API class (e.g., for linting).
+
+		Metadata_only *bool
 	}
 	outputFiles android.WritablePaths
 }
@@ -72,6 +79,7 @@ func (m *javaSystemFeaturesSrcs) GenerateAndroidBuildActions(ctx android.ModuleC
 		Flag(m.properties.Full_class_name).
 		FlagForEachArg("--feature=", features).
 		FlagWithArg("--readonly=", fmt.Sprint(ctx.Config().ReleaseUseSystemFeatureBuildFlags())).
+		FlagWithArg("--metadata-only=", fmt.Sprint(proptools.Bool(m.properties.Metadata_only))).
 		FlagWithOutput(" > ", outputFile)
 	rule.Build(ctx.ModuleName(), "Generating systemfeatures srcs filegroup")
 
@@ -97,6 +105,7 @@ func (m *javaSystemFeaturesSrcs) GeneratedHeaderDirs() android.Paths {
 func JavaSystemFeaturesSrcsFactory() android.Module {
 	module := &javaSystemFeaturesSrcs{}
 	module.AddProperties(&module.properties)
+	module.properties.Metadata_only = proptools.BoolPtr(false)
 	android.InitAndroidModule(module)
 	return module
 }

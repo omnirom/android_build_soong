@@ -18,10 +18,6 @@ import (
 	"android/soong/android"
 )
 
-func init() {
-	android.RegisterModuleType("python_defaults", DefaultsFactory)
-}
-
 type Defaults struct {
 	android.ModuleBase
 	android.DefaultsModuleBase

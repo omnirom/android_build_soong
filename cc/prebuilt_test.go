@@ -116,21 +116,21 @@ func TestPrebuilt(t *testing.T) {
 	})
 
 	// Verify that all the modules exist and that their dependencies were connected correctly
-	liba := ctx.ModuleForTests("liba", "android_arm64_armv8-a_shared").Module()
-	libb := ctx.ModuleForTests("libb", "android_arm64_armv8-a_static").Module()
-	libd := ctx.ModuleForTests("libd", "android_arm64_armv8-a_shared").Module()
-	libe := ctx.ModuleForTests("libe", "android_arm64_armv8-a_static").Module()
-	libfStatic := ctx.ModuleForTests("libf", "android_arm64_armv8-a_static").Module()
-	libfShared := ctx.ModuleForTests("libf", "android_arm64_armv8-a_shared").Module()
-	crtx := ctx.ModuleForTests("crtx", "android_arm64_armv8-a").Module()
+	liba := ctx.ModuleForTests(t, "liba", "android_arm64_armv8-a_shared").Module()
+	libb := ctx.ModuleForTests(t, "libb", "android_arm64_armv8-a_static").Module()
+	libd := ctx.ModuleForTests(t, "libd", "android_arm64_armv8-a_shared").Module()
+	libe := ctx.ModuleForTests(t, "libe", "android_arm64_armv8-a_static").Module()
+	libfStatic := ctx.ModuleForTests(t, "libf", "android_arm64_armv8-a_static").Module()
+	libfShared := ctx.ModuleForTests(t, "libf", "android_arm64_armv8-a_shared").Module()
+	crtx := ctx.ModuleForTests(t, "crtx", "android_arm64_armv8-a").Module()
 
-	prebuiltLiba := ctx.ModuleForTests("prebuilt_liba", "android_arm64_armv8-a_shared").Module()
-	prebuiltLibb := ctx.ModuleForTests("prebuilt_libb", "android_arm64_armv8-a_static").Module()
-	prebuiltLibd := ctx.ModuleForTests("prebuilt_libd", "android_arm64_armv8-a_shared").Module()
-	prebuiltLibe := ctx.ModuleForTests("prebuilt_libe", "android_arm64_armv8-a_static").Module()
-	prebuiltLibfStatic := ctx.ModuleForTests("prebuilt_libf", "android_arm64_armv8-a_static").Module()
-	prebuiltLibfShared := ctx.ModuleForTests("prebuilt_libf", "android_arm64_armv8-a_shared").Module()
-	prebuiltCrtx := ctx.ModuleForTests("prebuilt_crtx", "android_arm64_armv8-a").Module()
+	prebuiltLiba := ctx.ModuleForTests(t, "prebuilt_liba", "android_arm64_armv8-a_shared").Module()
+	prebuiltLibb := ctx.ModuleForTests(t, "prebuilt_libb", "android_arm64_armv8-a_static").Module()
+	prebuiltLibd := ctx.ModuleForTests(t, "prebuilt_libd", "android_arm64_armv8-a_shared").Module()
+	prebuiltLibe := ctx.ModuleForTests(t, "prebuilt_libe", "android_arm64_armv8-a_static").Module()
+	prebuiltLibfStatic := ctx.ModuleForTests(t, "prebuilt_libf", "android_arm64_armv8-a_static").Module()
+	prebuiltLibfShared := ctx.ModuleForTests(t, "prebuilt_libf", "android_arm64_armv8-a_shared").Module()
+	prebuiltCrtx := ctx.ModuleForTests(t, "prebuilt_crtx", "android_arm64_armv8-a").Module()
 
 	hasDep := func(m android.Module, wantDep android.Module) bool {
 		t.Helper()
@@ -190,7 +190,7 @@ func TestPrebuiltLibraryShared(t *testing.T) {
 		"libf.so": nil,
 	})
 
-	shared := ctx.ModuleForTests("libtest", "android_arm64_armv8-a_shared").Module().(*Module)
+	shared := ctx.ModuleForTests(t, "libtest", "android_arm64_armv8-a_shared").Module().(*Module)
 	assertString(t, shared.OutputFile().Path().Base(), "libtest.so")
 }
 
@@ -204,7 +204,7 @@ func TestPrebuiltLibraryStatic(t *testing.T) {
 		"libf.a": nil,
 	})
 
-	static := ctx.ModuleForTests("libtest", "android_arm64_armv8-a_static").Module().(*Module)
+	static := ctx.ModuleForTests(t, "libtest", "android_arm64_armv8-a_static").Module().(*Module)
 	assertString(t, static.OutputFile().Path().Base(), "libf.a")
 }
 
@@ -227,10 +227,10 @@ func TestPrebuiltLibrary(t *testing.T) {
 		"libf.so": nil,
 	})
 
-	shared := ctx.ModuleForTests("libtest", "android_arm64_armv8-a_shared").Module().(*Module)
+	shared := ctx.ModuleForTests(t, "libtest", "android_arm64_armv8-a_shared").Module().(*Module)
 	assertString(t, shared.OutputFile().Path().Base(), "libtest.so")
 
-	static := ctx.ModuleForTests("libtest", "android_arm64_armv8-a_static").Module().(*Module)
+	static := ctx.ModuleForTests(t, "libtest", "android_arm64_armv8-a_static").Module().(*Module)
 	assertString(t, static.OutputFile().Path().Base(), "libf.a")
 }
 
@@ -254,10 +254,10 @@ func TestPrebuiltLibraryStem(t *testing.T) {
 		"libfoo.so": nil,
 	})
 
-	static := ctx.ModuleForTests("libfoo", "android_arm64_armv8-a_static").Module().(*Module)
+	static := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_static").Module().(*Module)
 	assertString(t, static.OutputFile().Path().Base(), "libfoo.a")
 
-	shared := ctx.ModuleForTests("libfoo", "android_arm64_armv8-a_shared").Module().(*Module)
+	shared := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_shared").Module().(*Module)
 	assertString(t, shared.OutputFile().Path().Base(), "libbar.so")
 }
 
@@ -275,7 +275,7 @@ func TestPrebuiltLibrarySharedStem(t *testing.T) {
 		"libfoo.so": nil,
 	})
 
-	shared := ctx.ModuleForTests("libfoo", "android_arm64_armv8-a_shared").Module().(*Module)
+	shared := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_shared").Module().(*Module)
 	assertString(t, shared.OutputFile().Path().Base(), "libbar.so")
 }
 
@@ -312,7 +312,7 @@ func TestPrebuiltSymlinkedHostBinary(t *testing.T) {
 		"foo":       nil,
 	})
 
-	fooRule := ctx.ModuleForTests("foo", "linux_glibc_x86_64").Rule("Symlink")
+	fooRule := ctx.ModuleForTests(t, "foo", "linux_glibc_x86_64").Rule("Symlink")
 	assertString(t, fooRule.Output.String(), "out/soong/.intermediates/foo/linux_glibc_x86_64/foo")
 	assertString(t, fooRule.Args["fromPath"], "$$PWD/linux_glibc_x86_64/bin/foo")
 
@@ -355,16 +355,16 @@ func TestPrebuiltLibrarySanitized(t *testing.T) {
 	// Without SANITIZE_TARGET.
 	ctx := testPrebuilt(t, bp, fs)
 
-	shared_rule := ctx.ModuleForTests("libtest", "android_arm64_armv8-a_shared").Rule("android/soong/cc.strip")
+	shared_rule := ctx.ModuleForTests(t, "libtest", "android_arm64_armv8-a_shared").Rule("android/soong/cc.strip")
 	assertString(t, shared_rule.Input.String(), "libf.so")
 
-	static := ctx.ModuleForTests("libtest", "android_arm64_armv8-a_static").Module().(*Module)
+	static := ctx.ModuleForTests(t, "libtest", "android_arm64_armv8-a_static").Module().(*Module)
 	assertString(t, static.OutputFile().Path().Base(), "libf.a")
 
-	shared_rule2 := ctx.ModuleForTests("libtest_shared", "android_arm64_armv8-a_shared").Rule("android/soong/cc.strip")
+	shared_rule2 := ctx.ModuleForTests(t, "libtest_shared", "android_arm64_armv8-a_shared").Rule("android/soong/cc.strip")
 	assertString(t, shared_rule2.Input.String(), "libf.so")
 
-	static2 := ctx.ModuleForTests("libtest_static", "android_arm64_armv8-a_static").Module().(*Module)
+	static2 := ctx.ModuleForTests(t, "libtest_static", "android_arm64_armv8-a_static").Module().(*Module)
 	assertString(t, static2.OutputFile().Path().Base(), "libf.a")
 
 	// With SANITIZE_TARGET=hwaddress
@@ -374,16 +374,16 @@ func TestPrebuiltLibrarySanitized(t *testing.T) {
 		}),
 	)
 
-	shared_rule = ctx.ModuleForTests("libtest", "android_arm64_armv8-a_shared_hwasan").Rule("android/soong/cc.strip")
+	shared_rule = ctx.ModuleForTests(t, "libtest", "android_arm64_armv8-a_shared_hwasan").Rule("android/soong/cc.strip")
 	assertString(t, shared_rule.Input.String(), "hwasan/libf.so")
 
-	static = ctx.ModuleForTests("libtest", "android_arm64_armv8-a_static_hwasan").Module().(*Module)
+	static = ctx.ModuleForTests(t, "libtest", "android_arm64_armv8-a_static_hwasan").Module().(*Module)
 	assertString(t, static.OutputFile().Path().Base(), "libf.hwasan.a")
 
-	shared_rule2 = ctx.ModuleForTests("libtest_shared", "android_arm64_armv8-a_shared_hwasan").Rule("android/soong/cc.strip")
+	shared_rule2 = ctx.ModuleForTests(t, "libtest_shared", "android_arm64_armv8-a_shared_hwasan").Rule("android/soong/cc.strip")
 	assertString(t, shared_rule2.Input.String(), "hwasan/libf.so")
 
-	static2 = ctx.ModuleForTests("libtest_static", "android_arm64_armv8-a_static_hwasan").Module().(*Module)
+	static2 = ctx.ModuleForTests(t, "libtest_static", "android_arm64_armv8-a_static_hwasan").Module().(*Module)
 	assertString(t, static2.OutputFile().Path().Base(), "libf.hwasan.a")
 }
 
@@ -394,7 +394,7 @@ cc_prebuilt_binary {
 	srcs: [],
 }`
 	ctx := testPrebuilt(t, bp, map[string][]byte{})
-	mod := ctx.ModuleForTests("bintest", "android_arm64_armv8-a").Module().(*Module)
+	mod := ctx.ModuleForTests(t, "bintest", "android_arm64_armv8-a").Module().(*Module)
 	android.AssertBoolEquals(t, `expected no srcs to yield no output file`, false, mod.OutputFile().Valid())
 }
 
@@ -484,8 +484,8 @@ func TestMultiplePrebuilts(t *testing.T) {
 			"libbar.so": nil,
 			"crtx.o":    nil,
 		}, preparer)
-		libfoo := ctx.ModuleForTests("libfoo", "android_arm64_armv8-a_shared").Module()
-		expectedDependency := ctx.ModuleForTests(tc.expectedDependencyName, "android_arm64_armv8-a_shared").Module()
+		libfoo := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_shared").Module()
+		expectedDependency := ctx.ModuleForTests(t, tc.expectedDependencyName, "android_arm64_armv8-a_shared").Module()
 		android.AssertBoolEquals(t, fmt.Sprintf("expected dependency from %s to %s\n", libfoo.Name(), tc.expectedDependencyName), true, hasDep(ctx, libfoo, expectedDependency))
 		// check that LOCAL_SHARED_LIBRARIES contains libbar and not libbar.v<N>
 		entries := android.AndroidMkInfoForTest(t, ctx, libfoo).PrimaryInfo
@@ -493,7 +493,7 @@ func TestMultiplePrebuilts(t *testing.T) {
 
 		// check installation rules
 		// the selected soong module should be exported to make
-		libbar := ctx.ModuleForTests(tc.expectedDependencyName, "android_arm64_armv8-a_shared").Module()
+		libbar := ctx.ModuleForTests(t, tc.expectedDependencyName, "android_arm64_armv8-a_shared").Module()
 		android.AssertBoolEquals(t, fmt.Sprintf("dependency %s should be exported to make\n", expectedDependency), true, !libbar.IsHideFromMake())
 
 		// check LOCAL_MODULE of the selected module name
@@ -585,8 +585,8 @@ func TestMultiplePrebuiltsPreferredUsingLegacyFlags(t *testing.T) {
 		if tc.expectedErr != "" {
 			return // the fixture will assert that the excepted err has been raised
 		}
-		libfoo := ctx.ModuleForTests("libfoo", "android_arm64_armv8-a_shared").Module()
-		expectedDependency := ctx.ModuleForTests(tc.expectedDependencyName, "android_arm64_armv8-a_shared").Module()
+		libfoo := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_shared").Module()
+		expectedDependency := ctx.ModuleForTests(t, tc.expectedDependencyName, "android_arm64_armv8-a_shared").Module()
 		android.AssertBoolEquals(t, fmt.Sprintf("expected dependency from %s to %s\n", libfoo.Name(), tc.expectedDependencyName), true, hasDep(ctx, libfoo, expectedDependency))
 	}
 }
@@ -638,8 +638,8 @@ func TestMissingVariantInModuleSdk(t *testing.T) {
 		"libbar.so": nil,
 		"crtx.o":    nil,
 	}, preparer)
-	libfoo := ctx.ModuleForTests("libfoo", "android_arm64_armv8-a_shared").Module()
-	sourceLibBar := ctx.ModuleForTests("libbar", "android_arm64_armv8-a_static").Module()
+	libfoo := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_shared").Module()
+	sourceLibBar := ctx.ModuleForTests(t, "libbar", "android_arm64_armv8-a_static").Module()
 	// Even though the prebuilt is listed in apex_contributions, the prebuilt does not have a static variant.
 	// Therefore source of libbar should be used.
 	android.AssertBoolEquals(t, fmt.Sprintf("expected dependency from libfoo to source libbar"), true, hasDep(ctx, libfoo, sourceLibBar))

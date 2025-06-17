@@ -41,7 +41,7 @@ func TestRustFuzz(t *testing.T) {
 	`)
 
 	// Check that appropriate dependencies are added and that the rustlib linkage is correct.
-	fuzz_libtest_mod := ctx.ModuleForTests("fuzz_libtest", "android_arm64_armv8-a_fuzzer").Module().(*Module)
+	fuzz_libtest_mod := ctx.ModuleForTests(t, "fuzz_libtest", "android_arm64_armv8-a_fuzzer").Module().(*Module)
 	if !android.InList("liblibfuzzer_sys.rlib-std", fuzz_libtest_mod.Properties.AndroidMkRlibs) {
 		t.Errorf("liblibfuzzer_sys rlib library dependency missing for rust_fuzz module. %#v", fuzz_libtest_mod.Properties.AndroidMkRlibs)
 	}
@@ -50,21 +50,21 @@ func TestRustFuzz(t *testing.T) {
 	}
 
 	// Check that compiler flags are set appropriately .
-	fuzz_libtest := ctx.ModuleForTests("fuzz_libtest", "android_arm64_armv8-a_fuzzer").Rule("rustc")
+	fuzz_libtest := ctx.ModuleForTests(t, "fuzz_libtest", "android_arm64_armv8-a_fuzzer").Rule("rustc")
 	if !strings.Contains(fuzz_libtest.Args["rustcFlags"], "-C passes='sancov-module'") ||
 		!strings.Contains(fuzz_libtest.Args["rustcFlags"], "--cfg fuzzing") {
 		t.Errorf("rust_fuzz module does not contain the expected flags (sancov-module, cfg fuzzing).")
 	}
 
 	// Check that host modules support fuzzing.
-	host_fuzzer := ctx.ModuleForTests("fuzz_libtest", "android_arm64_armv8-a_fuzzer").Rule("rustc")
+	host_fuzzer := ctx.ModuleForTests(t, "fuzz_libtest", "android_arm64_armv8-a_fuzzer").Rule("rustc")
 	if !strings.Contains(host_fuzzer.Args["rustcFlags"], "-C passes='sancov-module'") ||
 		!strings.Contains(host_fuzzer.Args["rustcFlags"], "--cfg fuzzing") {
 		t.Errorf("rust_fuzz_host module does not contain the expected flags (sancov-module, cfg fuzzing).")
 	}
 
 	// Check that dependencies have 'fuzzer' variants produced for them as well.
-	libtest_fuzzer := ctx.ModuleForTests("libtest_fuzzing", "android_arm64_armv8-a_rlib_rlib-std_fuzzer").Output("libtest_fuzzing.rlib")
+	libtest_fuzzer := ctx.ModuleForTests(t, "libtest_fuzzing", "android_arm64_armv8-a_rlib_rlib-std_fuzzer").Output("libtest_fuzzing.rlib")
 	if !strings.Contains(libtest_fuzzer.Args["rustcFlags"], "-C passes='sancov-module'") ||
 		!strings.Contains(libtest_fuzzer.Args["rustcFlags"], "--cfg fuzzing") {
 		t.Errorf("rust_fuzz dependent library does not contain the expected flags (sancov-module, cfg fuzzing).")
@@ -93,7 +93,7 @@ func TestRustFuzzDepBundling(t *testing.T) {
 			}
 	`)
 
-	fuzz_libtest := ctx.ModuleForTests("fuzz_libtest", "android_arm64_armv8-a_fuzzer").Module().(*Module)
+	fuzz_libtest := ctx.ModuleForTests(t, "fuzz_libtest", "android_arm64_armv8-a_fuzzer").Module().(*Module)
 
 	if !strings.Contains(fuzz_libtest.FuzzSharedLibraries().String(), ":libcc_direct_dep.so") {
 		t.Errorf("rust_fuzz does not contain the expected bundled direct shared libs ('libcc_direct_dep'): %#v", fuzz_libtest.FuzzSharedLibraries().String())
@@ -134,17 +134,24 @@ func TestCCFuzzDepBundling(t *testing.T) {
 			}
 	`)
 
-	fuzz_shared_libtest := ctx.ModuleForTests("fuzz_shared_libtest", "android_arm64_armv8-a_fuzzer").Module().(cc.LinkableInterface)
-	fuzz_static_libtest := ctx.ModuleForTests("fuzz_static_libtest", "android_arm64_armv8-a_fuzzer").Module().(cc.LinkableInterface)
-	fuzz_staticffi_libtest := ctx.ModuleForTests("fuzz_staticffi_libtest", "android_arm64_armv8-a_fuzzer").Module().(cc.LinkableInterface)
+	fuzz_shared_libtest := ctx.ModuleForTests(t, "fuzz_shared_libtest", "android_arm64_armv8-a_fuzzer").Module()
+	fuzz_static_libtest := ctx.ModuleForTests(t, "fuzz_static_libtest", "android_arm64_armv8-a_fuzzer").Module()
+	fuzz_staticffi_libtest := ctx.ModuleForTests(t, "fuzz_staticffi_libtest", "android_arm64_armv8-a_fuzzer").Module()
 
-	if !strings.Contains(fuzz_shared_libtest.FuzzSharedLibraries().String(), ":libcc_transitive_dep.so") {
-		t.Errorf("cc_fuzz does not contain the expected bundled transitive shared libs from rust_ffi_shared ('libcc_transitive_dep'): %#v", fuzz_shared_libtest.FuzzSharedLibraries().String())
+	fuzzSharedLibraries := func(module android.Module) string {
+		if info, ok := android.OtherModuleProvider(ctx, module, cc.LinkableInfoProvider); ok {
+			return info.FuzzSharedLibraries.String()
+		}
+		return ""
 	}
-	if !strings.Contains(fuzz_static_libtest.FuzzSharedLibraries().String(), ":libcc_transitive_dep.so") {
-		t.Errorf("cc_fuzz does not contain the expected bundled transitive shared libs from rust_ffi_static ('libcc_transitive_dep'): %#v", fuzz_static_libtest.FuzzSharedLibraries().String())
+
+	if libs := fuzzSharedLibraries(fuzz_shared_libtest); !strings.Contains(libs, ":libcc_transitive_dep.so") {
+		t.Errorf("cc_fuzz does not contain the expected bundled transitive shared libs from rust_ffi_shared ('libcc_transitive_dep'): %#v", libs)
 	}
-	if !strings.Contains(fuzz_staticffi_libtest.FuzzSharedLibraries().String(), ":libcc_transitive_dep.so") {
-		t.Errorf("cc_fuzz does not contain the expected bundled transitive shared libs from rust_ffi_rlib ('libcc_transitive_dep'): %#v", fuzz_staticffi_libtest.FuzzSharedLibraries().String())
+	if libs := fuzzSharedLibraries(fuzz_static_libtest); !strings.Contains(libs, ":libcc_transitive_dep.so") {
+		t.Errorf("cc_fuzz does not contain the expected bundled transitive shared libs from rust_ffi_static ('libcc_transitive_dep'): %#v", libs)
+	}
+	if libs := fuzzSharedLibraries(fuzz_staticffi_libtest); !strings.Contains(libs, ":libcc_transitive_dep.so") {
+		t.Errorf("cc_fuzz does not contain the expected bundled transitive shared libs from rust_ffi_static ('libcc_transitive_dep'): %#v", libs)
 	}
 }

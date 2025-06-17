@@ -65,8 +65,8 @@ func (afdo *afdo) isAfdoCompile(ctx ModuleContext) bool {
 }
 
 func getFdoProfilePathFromDep(ctx ModuleContext) string {
-	fdoProfileDeps := ctx.GetDirectDepsWithTag(FdoProfileTag)
-	if len(fdoProfileDeps) > 0 && fdoProfileDeps[0] != nil {
+	fdoProfileDeps := ctx.GetDirectDepsProxyWithTag(FdoProfileTag)
+	if len(fdoProfileDeps) > 0 {
 		if info, ok := android.OtherModuleProvider(ctx, fdoProfileDeps[0], FdoProfileProvider); ok {
 			return info.Path.String()
 		}
@@ -96,13 +96,20 @@ func (afdo *afdo) flags(ctx ModuleContext, flags Flags) Flags {
 		flags.Local.CFlags = append([]string{"-funique-internal-linkage-names"}, flags.Local.CFlags...)
 		// Flags for Flow Sensitive AutoFDO
 		flags.Local.CFlags = append([]string{"-mllvm", "-enable-fs-discriminator=true"}, flags.Local.CFlags...)
+		flags.Local.LdFlags = append([]string{"-Wl,-mllvm,-enable-fs-discriminator=true"}, flags.Local.LdFlags...)
 		// TODO(b/266595187): Remove the following feature once it is enabled in LLVM by default.
 		flags.Local.CFlags = append([]string{"-mllvm", "-improved-fs-discriminator=true"}, flags.Local.CFlags...)
+		flags.Local.LdFlags = append([]string{"-Wl,-mllvm,-improved-fs-discriminator=true"}, flags.Local.LdFlags...)
 	}
 	if fdoProfilePath := getFdoProfilePathFromDep(ctx); fdoProfilePath != "" {
 		// The flags are prepended to allow overriding.
 		profileUseFlag := fmt.Sprintf(afdoFlagsFormat, fdoProfilePath)
 		flags.Local.CFlags = append([]string{profileUseFlag}, flags.Local.CFlags...)
+		// Salvage stale profile by fuzzy matching and use the remapped location for sample profile query.
+		flags.Local.CFlags = append([]string{"-mllvm", "--salvage-stale-profile=true"}, flags.Local.CFlags...)
+		flags.Local.CFlags = append([]string{"-mllvm", "--salvage-stale-profile-max-callsites=2000"}, flags.Local.CFlags...)
+		// Salvage stale profile by fuzzy matching renamed functions.
+		flags.Local.CFlags = append([]string{"-mllvm", "--salvage-unused-profile=true"}, flags.Local.CFlags...)
 		flags.Local.LdFlags = append([]string{profileUseFlag, "-Wl,-mllvm,-no-warn-sample-unused=true"}, flags.Local.LdFlags...)
 
 		// Update CFlagsDeps and LdFlagsDeps so the module is rebuilt
@@ -163,7 +170,7 @@ func (a *afdoTransitionMutator) OutgoingTransition(ctx android.OutgoingTransitio
 		}
 
 		// TODO(b/324141705): this is designed to prevent propagating AFDO from static libraries that have afdo: true set, but
-		//  it should be m.static() && !m.staticBinary() so that static binaries use AFDO variants of dependencies.
+		//  it should be m.staticLibrary() so that static binaries use AFDO variants of dependencies.
 		if m.static() {
 			return ""
 		}
@@ -188,7 +195,7 @@ func (a *afdoTransitionMutator) Mutate(ctx android.BottomUpMutatorContext, varia
 		if variation == "" {
 			// The empty variation is either a module that has enabled AFDO for itself, or the non-AFDO
 			// variant of a dependency.
-			if m.afdo.afdoEnabled() && !(m.static() && !m.staticBinary()) && !m.Host() {
+			if m.afdo.afdoEnabled() && !m.staticLibrary() && !m.Host() {
 				m.afdo.addDep(ctx, ctx.ModuleName())
 			}
 		} else {

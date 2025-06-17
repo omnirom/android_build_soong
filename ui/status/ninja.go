@@ -46,6 +46,7 @@ func NewNinjaReader(ctx logger.Logger, status ToolStatus, fifo string) *NinjaRea
 		forceClose: make(chan bool),
 		done:       make(chan bool),
 		cancelOpen: make(chan bool),
+		running:    make(map[uint32]*Action),
 	}
 
 	go n.run()
@@ -59,6 +60,7 @@ type NinjaReader struct {
 	forceClose chan bool
 	done       chan bool
 	cancelOpen chan bool
+	running    map[uint32]*Action
 }
 
 const NINJA_READER_CLOSE_TIMEOUT = 5 * time.Second
@@ -68,32 +70,47 @@ func (n *NinjaReader) Close() {
 	// Signal the goroutine to stop if it is blocking opening the fifo.
 	close(n.cancelOpen)
 
+	closed := false
+
 	// Ninja should already have exited or been killed, wait 5 seconds for the FIFO to be closed and any
 	// remaining messages to be processed through the NinjaReader.run goroutine.
 	timeoutCh := time.After(NINJA_READER_CLOSE_TIMEOUT)
 	select {
 	case <-n.done:
-		return
+		closed = true
 	case <-timeoutCh:
 		// Channel is not closed yet
 	}
 
-	n.status.Error(fmt.Sprintf("ninja fifo didn't finish after %s", NINJA_READER_CLOSE_TIMEOUT.String()))
+	if !closed {
+		n.status.Error(fmt.Sprintf("ninja fifo didn't finish after %s", NINJA_READER_CLOSE_TIMEOUT.String()))
 
-	// Force close the reader even if the FIFO didn't close.
-	close(n.forceClose)
+		// Force close the reader even if the FIFO didn't close.
+		close(n.forceClose)
 
-	// Wait again for the reader thread to acknowledge the close before giving up and assuming it isn't going
-	// to send anything else.
-	timeoutCh = time.After(NINJA_READER_CLOSE_TIMEOUT)
-	select {
-	case <-n.done:
-		return
-	case <-timeoutCh:
-		// Channel is not closed yet
+		// Wait again for the reader thread to acknowledge the close before giving up and assuming it isn't going
+		// to send anything else.
+		timeoutCh = time.After(NINJA_READER_CLOSE_TIMEOUT)
+		select {
+		case <-n.done:
+			closed = true
+		case <-timeoutCh:
+			// Channel is not closed yet
+		}
 	}
 
-	n.status.Verbose(fmt.Sprintf("ninja fifo didn't finish even after force closing after %s", NINJA_READER_CLOSE_TIMEOUT.String()))
+	if !closed {
+		n.status.Verbose(fmt.Sprintf("ninja fifo didn't finish even after force closing after %s", NINJA_READER_CLOSE_TIMEOUT.String()))
+	}
+
+	err := fmt.Errorf("error: action cancelled when ninja exited")
+	for _, action := range n.running {
+		n.status.FinishAction(ActionResult{
+			Action: action,
+			Output: err.Error(),
+			Error:  err,
+		})
+	}
 }
 
 func (n *NinjaReader) run() {
@@ -124,8 +141,6 @@ func (n *NinjaReader) run() {
 	defer f.Close()
 
 	r := bufio.NewReader(f)
-
-	running := map[uint32]*Action{}
 
 	msgChan := make(chan *ninja_frontend.Status)
 
@@ -213,11 +228,11 @@ func (n *NinjaReader) run() {
 				ChangedInputs: msg.EdgeStarted.ChangedInputs,
 			}
 			n.status.StartAction(action)
-			running[msg.EdgeStarted.GetId()] = action
+			n.running[msg.EdgeStarted.GetId()] = action
 		}
 		if msg.EdgeFinished != nil {
-			if started, ok := running[msg.EdgeFinished.GetId()]; ok {
-				delete(running, msg.EdgeFinished.GetId())
+			if started, ok := n.running[msg.EdgeFinished.GetId()]; ok {
+				delete(n.running, msg.EdgeFinished.GetId())
 
 				var err error
 				exitCode := int(msg.EdgeFinished.GetStatus())

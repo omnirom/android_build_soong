@@ -27,6 +27,8 @@ func getSdkVersionOfVendorApiLevel(apiLevel int) (int, bool) {
 		sdkVersion = 35
 	case 202504:
 		sdkVersion = 36
+	case 202604:
+		sdkVersion = 37
 	default:
 		ok = false
 	}
