@@ -44,6 +44,12 @@ type superImage struct {
 type SuperImageProperties struct {
 	// the size of the super partition
 	Size *int64
+	// Maximum allowed sum of logical partition sizes.
+	// Can be set by OEMs to cause a build failure when the sum
+	// of sizes of logical partitions exceeds the same.
+	Size_error_limit *int64
+	Size_warn_limit  *int64
+
 	// the block device where metadata for dynamic partitions is stored
 	Metadata_device *string
 	// the super partition block device list
@@ -82,6 +88,8 @@ type SuperImageProperties struct {
 	Super_image_in_update_package *bool
 	// Whether a super_empty.img should be created
 	Create_super_empty *bool
+	// This is used for generating dynamic config, in soong we need the super.img being processed for dynamic config, will use this to overwrite the build_super_partition for dynamic config.
+	Build_super_partition *bool
 }
 
 type PartitionGroupsInfo struct {
@@ -240,8 +248,8 @@ func (s *superImage) buildMiscInfo(ctx android.ModuleContext, superEmpty bool) (
 			missingPartitionErrorMessage += fmt.Sprintf("%s image listed in partition groups, but its module was not specified. ", partitionType)
 			return
 		}
-		mod := ctx.GetDirectDepWithTag(*name, subImageDepTag)
-		if mod == nil {
+		mod := ctx.GetDirectDepProxyWithTag(*name, subImageDepTag)
+		if mod.IsNil() {
 			ctx.ModuleErrorf("Could not get dep %q", *name)
 			return
 		}
@@ -301,13 +309,7 @@ func (s *superImage) buildMiscInfo(ctx android.ModuleContext, superEmpty bool) (
 	// BOARD_GOOGLE_DYNAMIC_PARTITIONS_PARTITION_LIST.
 	missingPartitionErrorMessageFile := android.PathForModuleOut(ctx, "missing_partition_error.txt")
 	if missingPartitionErrorMessage != "" {
-		ctx.Build(pctx, android.BuildParams{
-			Rule:   android.ErrorRule,
-			Output: missingPartitionErrorMessageFile,
-			Args: map[string]string{
-				"error": missingPartitionErrorMessage,
-			},
-		})
+		android.ErrorRule(ctx, missingPartitionErrorMessageFile, missingPartitionErrorMessage)
 	} else {
 		ctx.Build(pctx, android.BuildParams{
 			Rule:   android.Touch,
@@ -318,6 +320,45 @@ func (s *superImage) buildMiscInfo(ctx android.ModuleContext, superEmpty bool) (
 	miscInfo := android.PathForModuleOut(ctx, "misc_info.txt")
 	android.WriteFileRule(ctx, miscInfo, miscInfoString.String(), missingPartitionErrorMessageFile)
 	return miscInfo, deps, subImageInfo
+}
+
+func (s *superImage) filterMissingPartitions(ctx android.ModuleContext, partitionList []string) []string {
+	ret := []string{}
+	// In make it will only filter out not existing partitions for vendor, vendor_dlkm, odm, odm_dlkm, and system_dlkm.
+	// https://cs.android.com/android/platform/superproject/main/+/main:build/make/core/Makefile;l=6192
+	for _, p := range partitionList {
+		switch p {
+		case "system":
+			ret = append(ret, p)
+		case "system_dlkm":
+			if s.partitionProps.System_dlkm_partition != nil {
+				ret = append(ret, p)
+			}
+		case "system_ext":
+			ret = append(ret, p)
+		case "product":
+			ret = append(ret, p)
+		case "vendor":
+			if s.partitionProps.Vendor_partition != nil {
+				ret = append(ret, p)
+			}
+		case "vendor_dlkm":
+			if s.partitionProps.Vendor_dlkm_partition != nil {
+				ret = append(ret, p)
+			}
+		case "odm":
+			if s.partitionProps.Odm_partition != nil {
+				ret = append(ret, p)
+			}
+		case "odm_dlkm":
+			if s.partitionProps.Odm_dlkm_partition != nil {
+				ret = append(ret, p)
+			}
+		default:
+			ctx.ModuleErrorf("partition %q is not a super image supported partition", p)
+		}
+	}
+	return ret
 }
 
 func (s *superImage) dumpDynamicPartitionInfo(ctx android.ModuleContext, sb *strings.Builder) []string {
@@ -333,7 +374,9 @@ func (s *superImage) dumpDynamicPartitionInfo(ctx android.ModuleContext, sb *str
 		addStr("dynamic_partition_retrofit", "true")
 	}
 	addStr("lpmake", "lpmake")
-	addStr("build_super_partition", "true")
+	if proptools.BoolDefault(s.properties.Build_super_partition, true) {
+		addStr("build_super_partition", "true")
+	}
 	if proptools.Bool(s.properties.Create_super_empty) {
 		addStr("build_super_empty_partition", "true")
 	}
@@ -348,7 +391,9 @@ func (s *superImage) dumpDynamicPartitionInfo(ctx android.ModuleContext, sb *str
 		groups = append(groups, groupInfo.Name)
 		partitionList = append(partitionList, groupInfo.PartitionList...)
 	}
-	addStr("dynamic_partition_list", strings.Join(android.SortedUniqueStrings(partitionList), " "))
+
+	partitionListFiltered := s.filterMissingPartitions(ctx, partitionList)
+	addStr("dynamic_partition_list", strings.Join(android.SortedUniqueStrings(partitionListFiltered), " "))
 	addStr("super_partition_groups", strings.Join(groups, " "))
 	initialPartitionListLen := len(partitionList)
 	partitionList = android.SortedUniqueStrings(partitionList)
@@ -358,13 +403,19 @@ func (s *superImage) dumpDynamicPartitionInfo(ctx android.ModuleContext, sb *str
 	// Add Partition group info after adding `super_partition_groups` and `dynamic_partition_list`
 	for _, groupInfo := range s.properties.Partition_groups {
 		addStr("super_"+groupInfo.Name+"_group_size", groupInfo.GroupSize)
-		addStr("super_"+groupInfo.Name+"_partition_list", strings.Join(groupInfo.PartitionList, " "))
+		addStr("super_"+groupInfo.Name+"_partition_list", strings.Join(s.filterMissingPartitions(ctx, groupInfo.PartitionList), " "))
 	}
 
 	if proptools.Bool(s.properties.Super_image_in_update_package) {
 		addStr("super_image_in_update_package", "true")
 	}
 	addStr("super_partition_size", strconv.Itoa(proptools.Int(s.properties.Size)))
+	if s.properties.Size_warn_limit != nil {
+		addStr("super_partition_warn_limit", strconv.Itoa(proptools.Int(s.properties.Size_warn_limit)))
+	}
+	if s.properties.Size_error_limit != nil {
+		addStr("super_partition_error_limit", strconv.Itoa(proptools.Int(s.properties.Size_error_limit)))
+	}
 
 	if proptools.Bool(s.properties.Virtual_ab.Enable) {
 		addStr("virtual_ab", "true")
@@ -401,7 +452,7 @@ func (s *superImage) dumpDynamicPartitionInfo(ctx android.ModuleContext, sb *str
 		}
 	}
 
-	return partitionList
+	return partitionListFiltered
 }
 
 func (s *superImage) generateDynamicPartitionsInfo(ctx android.ModuleContext) android.Path {

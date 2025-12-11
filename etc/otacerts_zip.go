@@ -63,6 +63,10 @@ var _ android.ImageInterface = (*otacertsZipModule)(nil)
 
 func (m *otacertsZipModule) ImageMutatorBegin(ctx android.ImageInterfaceContext) {}
 
+func (m *otacertsZipModule) ImageMutatorSupported() bool {
+	return true
+}
+
 func (m *otacertsZipModule) VendorVariantNeeded(ctx android.ImageInterfaceContext) bool {
 	return false
 }

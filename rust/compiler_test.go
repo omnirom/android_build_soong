@@ -24,7 +24,7 @@ import (
 // Test that feature flags are being correctly generated.
 func TestFeaturesToFlags(t *testing.T) {
 	ctx := testRust(t, `
-		rust_library_host_dylib {
+		rust_library_dylib {
 			name: "libfoo",
 			srcs: ["foo.rs"],
 			crate_name: "foo",
@@ -34,7 +34,7 @@ func TestFeaturesToFlags(t *testing.T) {
 			],
 		}`)
 
-	libfooDylib := ctx.ModuleForTests(t, "libfoo", "linux_glibc_x86_64_dylib").Rule("rustc")
+	libfooDylib := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_dylib").Rule("rustc")
 
 	if !strings.Contains(libfooDylib.Args["rustcFlags"], "cfg 'feature=\"fizz\"'") ||
 		!strings.Contains(libfooDylib.Args["rustcFlags"], "cfg 'feature=\"buzz\"'") {
@@ -45,7 +45,7 @@ func TestFeaturesToFlags(t *testing.T) {
 // Test that cfgs flags are being correctly generated.
 func TestCfgsToFlags(t *testing.T) {
 	ctx := testRust(t, `
-		rust_library_host {
+		rust_library {
 			name: "libfoo",
 			srcs: ["foo.rs"],
 			crate_name: "foo",
@@ -55,7 +55,7 @@ func TestCfgsToFlags(t *testing.T) {
 			],
 		}`)
 
-	libfooDylib := ctx.ModuleForTests(t, "libfoo", "linux_glibc_x86_64_dylib").Rule("rustc")
+	libfooDylib := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_dylib").Rule("rustc")
 
 	if !strings.Contains(libfooDylib.Args["rustcFlags"], "cfg 'std'") ||
 		!strings.Contains(libfooDylib.Args["rustcFlags"], "cfg 'cfg1=\"one\"'") {
@@ -65,7 +65,7 @@ func TestCfgsToFlags(t *testing.T) {
 
 func TestLtoFlag(t *testing.T) {
 	ctx := testRust(t, `
-		rust_library_host {
+		rust_library {
 			name: "libfoo",
 			srcs: ["foo.rs"],
 			crate_name: "foo",
@@ -74,15 +74,15 @@ func TestLtoFlag(t *testing.T) {
 			}
 		}
 
-		rust_library_host {
+		rust_library {
 			name: "libfoo_lto",
 			srcs: ["foo.rs"],
 			crate_name: "foo",
 		}
 		`)
 
-	libfoo := ctx.ModuleForTests(t, "libfoo", "linux_glibc_x86_64_dylib").Rule("rustc")
-	libfooLto := ctx.ModuleForTests(t, "libfoo_lto", "linux_glibc_x86_64_dylib").Rule("rustc")
+	libfoo := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_dylib").Rule("rustc")
+	libfooLto := ctx.ModuleForTests(t, "libfoo_lto", "android_arm64_armv8-a_dylib").Rule("rustc")
 
 	if strings.Contains(libfoo.Args["rustcFlags"], "-C lto=thin") {
 		t.Fatalf("libfoo expected to disable lto -- rustcFlags: %#v", libfoo.Args["rustcFlags"])

@@ -44,10 +44,10 @@ func TestAconfigDeclarations(t *testing.T) {
 	android.AssertStringEquals(t, "package", depData.Package, "com.example.package")
 	android.AssertStringEquals(t, "container", depData.Container, "com.android.foo")
 	android.AssertBoolEquals(t, "exportable", depData.Exportable, true)
-	if !strings.HasSuffix(depData.IntermediateCacheOutputPath.String(), "/intermediate.pb") {
+	if !strings.HasSuffix(depData.IntermediateCacheOutputPath.String(), "/aconfig-cache.pb") {
 		t.Errorf("Missing intermediates proto path in provider: %s", depData.IntermediateCacheOutputPath.String())
 	}
-	if !strings.HasSuffix(depData.IntermediateDumpOutputPath.String(), "/intermediate.txt") {
+	if !strings.HasSuffix(depData.IntermediateDumpOutputPath.String(), "/aconfig-flags.txt") {
 		t.Errorf("Missing intermediates text path in provider: %s", depData.IntermediateDumpOutputPath.String())
 	}
 }
@@ -212,17 +212,17 @@ func TestGenerateAndroidBuildActions(t *testing.T) {
 		}
 		slices.Sort(expectedKeys)
 		actualKeys := []string{}
-		for rc := range depData {
+		for rc := range depData.Data {
 			actualKeys = append(actualKeys, rc)
 		}
 		slices.Sort(actualKeys)
 		android.AssertStringEquals(t, "provider keys", strings.Join(expectedKeys, " "), strings.Join(actualKeys, " "))
 		for _, rc := range actualKeys {
-			if !strings.HasSuffix(depData[rc].IntermediateCacheOutputPath.String(), assembleFileName(rc, "/intermediate.pb")) {
-				t.Errorf("Incorrect intermediates proto path in provider for release config %s: %s", rc, depData[rc].IntermediateCacheOutputPath.String())
+			if !strings.HasSuffix(depData.Data[rc].IntermediateCacheOutputPath.String(), assembleFileName(rc, "/aconfig-cache.pb")) {
+				t.Errorf("Incorrect intermediates proto path in provider for release config %s: %s", rc, depData.Data[rc].IntermediateCacheOutputPath.String())
 			}
-			if !strings.HasSuffix(depData[rc].IntermediateDumpOutputPath.String(), assembleFileName(rc, "/intermediate.txt")) {
-				t.Errorf("Incorrect intermediates text path in provider for release config %s: %s", rc, depData[rc].IntermediateDumpOutputPath.String())
+			if !strings.HasSuffix(depData.Data[rc].IntermediateDumpOutputPath.String(), assembleFileName(rc, "/aconfig-flags.txt")) {
+				t.Errorf("Incorrect intermediates text path in provider for release config %s: %s", rc, depData.Data[rc].IntermediateDumpOutputPath.String())
 			}
 		}
 	}

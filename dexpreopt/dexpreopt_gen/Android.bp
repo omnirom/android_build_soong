@@ -8,8 +8,10 @@ blueprint_go_binary {
         "dexpreopt_gen.go",
     ],
     deps: [
-        "soong-dexpreopt",
+        "blueprint",
         "blueprint-pathtools",
         "blueprint-proptools",
+        "soong-android",
+        "soong-dexpreopt",
     ],
 }

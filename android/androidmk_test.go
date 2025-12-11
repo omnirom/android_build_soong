@@ -19,6 +19,7 @@ import (
 	"io"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -171,7 +172,7 @@ func TestGenerateDistContributionsForMake(t *testing.T) {
 	dc := &distContributions{
 		copiesForGoals: []*copiesForGoals{
 			{
-				goals: "my_goal",
+				goals: []string{"my_goal"},
 				copies: []distCopy{
 					distCopyForTest("one.out", "one.out"),
 					distCopyForTest("two.out", "other.out"),
@@ -297,7 +298,7 @@ func TestGetDistContributions(t *testing.T) {
 
 		for i, copies1 := range d1.copiesForGoals {
 			copies2 := d2.copiesForGoals[i]
-			if expected, actual := copies1.goals, copies2.goals; expected != actual {
+			if expected, actual := copies1.goals, copies2.goals; !slices.Equal(expected, actual) {
 				return fmt.Errorf("goals mismatch at position %d: expected %q found %q", i, expected, actual)
 			}
 
@@ -326,7 +327,7 @@ func TestGetDistContributions(t *testing.T) {
 			fmt.Fprint(buf, "nil")
 		} else {
 			for _, copiesForGoals := range d.copiesForGoals {
-				fmt.Fprintf(buf, "    Goals: %q {\n", copiesForGoals.goals)
+				fmt.Fprintf(buf, "    Goals: %q {\n", strings.Join(copiesForGoals.goals, " "))
 				for _, c := range copiesForGoals.copies {
 					fmt.Fprintf(buf, "        %s -> %s\n", NormalizePathForTesting(c.from), c.dest)
 				}
@@ -368,7 +369,7 @@ func TestGetDistContributions(t *testing.T) {
 		&distContributions{
 			copiesForGoals: []*copiesForGoals{
 				{
-					goals: "my_goal",
+					goals: []string{"my_goal"},
 					copies: []distCopy{
 						distCopyForTest("one.out", "one.out"),
 					},
@@ -388,7 +389,7 @@ func TestGetDistContributions(t *testing.T) {
 		&distContributions{
 			copiesForGoals: []*copiesForGoals{
 				{
-					goals: "my_goal",
+					goals: []string{"my_goal"},
 					copies: []distCopy{
 						distCopyForTest("another.out", "another.out"),
 					},
@@ -407,7 +408,7 @@ func TestGetDistContributions(t *testing.T) {
 `, &distContributions{
 		copiesForGoals: []*copiesForGoals{
 			{
-				goals: "my_goal",
+				goals: []string{"my_goal"},
 				copies: []distCopy{
 					distCopyForTest("one.out", "one_bar.out"),
 				},
@@ -429,7 +430,7 @@ func TestGetDistContributions(t *testing.T) {
 		&distContributions{
 			copiesForGoals: []*copiesForGoals{
 				{
-					goals: "my_goal",
+					goals: []string{"my_goal"},
 					copies: []distCopy{
 						distCopyForTest("another.out", "another.out"),
 					},
@@ -453,13 +454,13 @@ func TestGetDistContributions(t *testing.T) {
 		&distContributions{
 			copiesForGoals: []*copiesForGoals{
 				{
-					goals: "my_goal",
+					goals: []string{"my_goal"},
 					copies: []distCopy{
 						distCopyForTest("one.out", "one.out"),
 					},
 				},
 				{
-					goals: "my_second_goal my_third_goal",
+					goals: []string{"my_second_goal", "my_third_goal"},
 					copies: []distCopy{
 						distCopyForTest("one.out", "one.out"),
 					},
@@ -483,13 +484,13 @@ func TestGetDistContributions(t *testing.T) {
 		&distContributions{
 			copiesForGoals: []*copiesForGoals{
 				{
-					goals: "my_second_goal my_third_goal",
+					goals: []string{"my_second_goal", "my_third_goal"},
 					copies: []distCopy{
 						distCopyForTest("one.out", "one.out"),
 					},
 				},
 				{
-					goals: "my_goal",
+					goals: []string{"my_goal"},
 					copies: []distCopy{
 						distCopyForTest("one.out", "one.out"),
 					},
@@ -533,38 +534,38 @@ func TestGetDistContributions(t *testing.T) {
 		&distContributions{
 			copiesForGoals: []*copiesForGoals{
 				{
-					goals: "my_second_goal",
+					goals: []string{"my_second_goal"},
 					copies: []distCopy{
 						distCopyForTest("two.out", "two.out"),
 						distCopyForTest("three/four.out", "four.out"),
 					},
 				},
 				{
-					goals: "my_third_goal",
+					goals: []string{"my_third_goal"},
 					copies: []distCopy{
 						distCopyForTest("one.out", "test/dir/one.out"),
 					},
 				},
 				{
-					goals: "my_fourth_goal",
+					goals: []string{"my_fourth_goal"},
 					copies: []distCopy{
 						distCopyForTest("one.out", "one.suffix.out"),
 					},
 				},
 				{
-					goals: "my_fifth_goal",
+					goals: []string{"my_fifth_goal"},
 					copies: []distCopy{
 						distCopyForTest("one.out", "new-name"),
 					},
 				},
 				{
-					goals: "my_sixth_goal",
+					goals: []string{"my_sixth_goal"},
 					copies: []distCopy{
 						distCopyForTest("one.out", "some/dir/new-name.suffix"),
 					},
 				},
 				{
-					goals: "my_goal my_other_goal",
+					goals: []string{"my_goal", "my_other_goal"},
 					copies: []distCopy{
 						distCopyForTest("two.out", "two.out"),
 						distCopyForTest("three/four.out", "four.out"),
@@ -594,13 +595,13 @@ func TestGetDistContributions(t *testing.T) {
 `, &distContributions{
 		copiesForGoals: []*copiesForGoals{
 			{
-				goals: "my_goal",
+				goals: []string{"my_goal"},
 				copies: []distCopy{
 					distCopyForTest("one.out", "one.out"),
 				},
 			},
 			{
-				goals: "my_goal",
+				goals: []string{"my_goal"},
 				copies: []distCopy{
 					distCopyForTest("two.out", "two.out"),
 					distCopyForTest("three/four.out", "four.out"),
@@ -627,13 +628,13 @@ func TestGetDistContributions(t *testing.T) {
 `, &distContributions{
 		copiesForGoals: []*copiesForGoals{
 			{
-				goals: "my_goal",
+				goals: []string{"my_goal"},
 				copies: []distCopy{
 					distCopyForTest("default-dist.out", "default-dist.out"),
 				},
 			},
 			{
-				goals: "my_goal",
+				goals: []string{"my_goal"},
 				copies: []distCopy{
 					distCopyForTest("two.out", "two.out"),
 					distCopyForTest("three/four.out", "four.out"),
@@ -662,13 +663,13 @@ func TestGetDistContributions(t *testing.T) {
 `, &distContributions{
 		copiesForGoals: []*copiesForGoals{
 			{
-				goals: "my_goal",
+				goals: []string{"my_goal"},
 				copies: []distCopy{
 					distCopyForTest("one.out", "one.out"),
 				},
 			},
 			{
-				goals: "my_goal",
+				goals: []string{"my_goal"},
 				copies: []distCopy{
 					distCopyForTest("two.out", "two.out"),
 					distCopyForTest("three/four.out", "four.out"),
@@ -695,13 +696,13 @@ func TestGetDistContributions(t *testing.T) {
 `, &distContributions{
 		copiesForGoals: []*copiesForGoals{
 			{
-				goals: "my_goal",
+				goals: []string{"my_goal"},
 				copies: []distCopy{
 					distCopyForTest("one.out", "one.out"),
 				},
 			},
 			{
-				goals: "my_goal",
+				goals: []string{"my_goal"},
 				copies: []distCopy{
 					distCopyForTest("two.out", "two.out"),
 					distCopyForTest("three/four.out", "four.out"),
@@ -728,13 +729,13 @@ func TestGetDistContributions(t *testing.T) {
 `, &distContributions{
 		copiesForGoals: []*copiesForGoals{
 			{
-				goals: "my_goal",
+				goals: []string{"my_goal"},
 				copies: []distCopy{
 					distCopyForTest("default-dist.out", "default-dist.out"),
 				},
 			},
 			{
-				goals: "my_goal",
+				goals: []string{"my_goal"},
 				copies: []distCopy{
 					distCopyForTest("two.out", "two.out"),
 					distCopyForTest("three/four.out", "four.out"),
@@ -761,13 +762,13 @@ func TestGetDistContributions(t *testing.T) {
 `, &distContributions{
 		copiesForGoals: []*copiesForGoals{
 			{
-				goals: "my_goal",
+				goals: []string{"my_goal"},
 				copies: []distCopy{
 					distCopyForTest("dist-output-file.out", "dist-output-file.out"),
 				},
 			},
 			{
-				goals: "my_goal",
+				goals: []string{"my_goal"},
 				copies: []distCopy{
 					distCopyForTest("two.out", "two.out"),
 					distCopyForTest("three/four.out", "four.out"),

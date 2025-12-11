@@ -21,7 +21,13 @@ import (
 )
 
 var (
-	LinuxRustFlags     = []string{}
+	LinuxRustFlags = []string{
+		// These flags are no strictly necessary but included so RBE can discover dependencies.
+		"-L${cc_config.LinuxGccRoot}/${cc_config.LinuxGccTriple}/lib32",
+		"-L${cc_config.LinuxGccRoot}/${cc_config.LinuxGccTriple}/lib64",
+		"-L${cc_config.LinuxGccRoot}/lib/gcc/${cc_config.LinuxGccTriple}/${cc_config.LinuxGccVersion}",
+		"-L${cc_config.LinuxGccRoot}/sysroot/usr/lib",
+	}
 	LinuxMuslRustFlags = []string{
 		// disable rustc's builtin fallbacks for crt objects
 		"-C link_self_contained=no",
@@ -87,7 +93,7 @@ func (t *toolchainLinuxX8664) Name() string {
 
 func (t *toolchainLinuxX8664) ToolchainLinkFlags() string {
 	// Prepend the lld flags from cc_config so we stay in sync with cc
-	return "${cc_config.LinuxLldflags} ${cc_config.LinuxX8664Lldflags} " +
+	return "${cc_config.LinuxLdflags} ${cc_config.LinuxX8664Ldflags} " +
 		"${config.LinuxToolchainLinkFlags} ${config.LinuxToolchainX8664LinkFlags}"
 }
 
@@ -103,6 +109,10 @@ type toolchainLinuxGlibcX8664 struct {
 
 func (t *toolchainLinuxX8664) RustTriple() string {
 	return "x86_64-unknown-linux-gnu"
+}
+
+func (t *toolchainLinuxGlibcX8664) Glibc() bool {
+	return true
 }
 
 func (t *toolchainLinuxGlibcX8664) ToolchainLinkFlags() string {
@@ -135,6 +145,10 @@ func linuxMuslX8664ToolchainFactory(arch android.Arch) Toolchain {
 	return toolchainLinuxMuslX8664Singleton
 }
 
+func (t *toolchainLinuxMuslX8664) Musl() bool {
+	return true
+}
+
 // Base 32-bit linux rust toolchain
 type toolchainLinuxX86 struct {
 	toolchain32Bit
@@ -162,7 +176,7 @@ func (toolchainLinuxX8664) LibclangRuntimeLibraryArch() string {
 
 func (t *toolchainLinuxX86) ToolchainLinkFlags() string {
 	// Prepend the lld flags from cc_config so we stay in sync with cc
-	return "${cc_config.LinuxLldflags} ${cc_config.LinuxX86Lldflags} " +
+	return "${cc_config.LinuxLdflags} ${cc_config.LinuxX86Ldflags} " +
 		"${config.LinuxToolchainLinkFlags} ${config.LinuxToolchainX86LinkFlags}"
 }
 
@@ -178,6 +192,10 @@ type toolchainLinuxGlibcX86 struct {
 
 func (t *toolchainLinuxGlibcX86) RustTriple() string {
 	return "i686-unknown-linux-gnu"
+}
+
+func (t *toolchainLinuxGlibcX86) Glibc() bool {
+	return true
 }
 
 func (t *toolchainLinuxGlibcX86) ToolchainLinkFlags() string {
@@ -204,6 +222,10 @@ func (t *toolchainLinuxMuslX86) ToolchainLinkFlags() string {
 
 func (t *toolchainLinuxMuslX86) ToolchainRustFlags() string {
 	return t.toolchainLinuxX86.ToolchainRustFlags() + " " + "${config.LinuxMuslToolchainRustFlags}"
+}
+
+func (t *toolchainLinuxMuslX86) Musl() bool {
+	return true
 }
 
 func linuxMuslX86ToolchainFactory(arch android.Arch) Toolchain {

@@ -21,11 +21,13 @@ bootstrap_go_package {
     pkgPath: "android/soong/ui/execution_metrics",
     deps: [
         "golang-protobuf-proto",
+        "golang-protobuf-encoding-protowire",
+        "soong-cmd-find_input_delta-proto",
         "soong-shared",
         "soong-ui-logger",
         "soong-ui-execution_metrics_proto",
+        "soong-ui-metrics",
         "soong-ui-metrics_proto",
-        "soong-cmd-find_input_delta-proto",
     ],
     srcs: [
         "execution_metrics.go",

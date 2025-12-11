@@ -30,6 +30,7 @@ blueprint_go_binary {
     ],
     deps: [
         "androidmk-lib",
+        "bpfix-lib",
         "partner-bpfix-extensions",
     ],
 }
@@ -41,6 +42,7 @@ blueprint_go_binary {
     ],
     deps: [
         "bpfix-cmd",
+        "bpfix-lib",
         "partner-bpfix-extensions",
     ],
 }
@@ -49,5 +51,8 @@ bootstrap_go_package {
     name: "partner-bpfix-extensions",
     pkgPath: "android/soong/partner/bpfix/extensions",
     srcs: ["bpfix/extensions/headers.go"],
-    deps: ["bpfix-lib"],
+    deps: [
+        "blueprint-parser",
+        "bpfix-lib",
+    ],
 }

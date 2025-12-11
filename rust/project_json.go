@@ -17,6 +17,9 @@ package rust
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
+
+	"github.com/google/blueprint/proptools"
 
 	"android/soong/android"
 	"android/soong/rust/config"
@@ -28,12 +31,14 @@ import (
 // called.  This singleton is enabled only if SOONG_GEN_RUST_PROJECT is set.
 // For example,
 //
-//   $ SOONG_GEN_RUST_PROJECT=1 m nothing
+//   $ SOONG_GEN_RUST_PROJECT=1 SOONG_LINK_RUST_PROJECT_TO=${ANDROID_BUILD_TOP} m nothing
 
 const (
 	// Environment variables used to control the behavior of this singleton.
 	envVariableCollectRustDeps = "SOONG_GEN_RUST_PROJECT"
+	envVariableUseKythe        = "XREF_CORPUS"
 	rustProjectJsonFileName    = "rust-project.json"
+	rustTargetMappingFileName  = "rust-target-mapping.json"
 )
 
 // The format of rust-project.json is not yet finalized. A current description is available at:
@@ -45,19 +50,37 @@ type rustProjectDep struct {
 }
 
 type rustProjectCrate struct {
-	DisplayName    string            `json:"display_name"`
-	RootModule     string            `json:"root_module"`
-	Edition        string            `json:"edition,omitempty"`
-	Deps           []rustProjectDep  `json:"deps"`
-	Cfg            []string          `json:"cfg"`
-	Env            map[string]string `json:"env"`
-	ProcMacro      bool              `json:"is_proc_macro"`
-	ProcMacroDylib *string           `json:"proc_macro_dylib_path"`
+	DisplayName    string                 `json:"display_name"`
+	RootModule     string                 `json:"root_module"`
+	Edition        string                 `json:"edition,omitempty"`
+	Deps           []rustProjectDep       `json:"deps"`
+	Cfg            []string               `json:"cfg"`
+	Env            map[string]string      `json:"env"`
+	ProcMacro      bool                   `json:"is_proc_macro"`
+	ProcMacroDylib *string                `json:"proc_macro_dylib_path"`
+	Source         rustProjectIncludeDirs `json:"source"`
 }
 
 type rustProjectJson struct {
 	Sysroot string             `json:"sysroot"`
 	Crates  []rustProjectCrate `json:"crates"`
+}
+
+type rustTargetMappingsJson []rustTargetMappingJson
+
+type rustTargetMappingJson struct {
+	Name               string `json:"name"`
+	BuildTarget        string `json:"build_target"`
+	CheckTarget        string `json:"check_target"`
+	SourceDir          string `json:"source_dir"`
+	TargetProduct      string `json:"TARGET_PRODUCT"`
+	TargetRelease      string `json:"TARGET_RELEASE"`
+	TargetBuildVariant string `json:"TARGET_BUILD_VARIANT"`
+}
+
+type rustProjectIncludeDirs struct {
+	Include_dirs []string `json:"include_dirs"`
+	Exclude_dirs []string `json:"exclude_dirs"`
 }
 
 // crateInfo is used during the processing to keep track of the known crates.
@@ -68,8 +91,9 @@ type crateInfo struct {
 }
 
 type projectGeneratorSingleton struct {
-	project     rustProjectJson
-	knownCrates map[string]crateInfo // Keys are module names.
+	project        rustProjectJson
+	targetMappings rustTargetMappingsJson
+	knownCrates    map[string]crateInfo // Keys are module names.
 }
 
 func rustProjectGeneratorSingleton() android.Singleton {
@@ -83,23 +107,23 @@ func init() {
 // mergeDependencies visits all the dependencies for module and updates crate and deps
 // with any new dependency.
 func (singleton *projectGeneratorSingleton) mergeDependencies(ctx android.SingletonContext,
-	module *Module, crate *rustProjectCrate, deps map[string]int) {
+	module android.ModuleProxy, crate *rustProjectCrate, deps map[string]int) {
 
-	ctx.VisitDirectDeps(module, func(child android.Module) {
+	ctx.VisitDirectDepsProxies(module, func(child android.ModuleProxy) {
 		// Skip intra-module dependencies (i.e., generated-source library depending on the source variant).
 		if module.Name() == child.Name() {
 			return
 		}
 		// Skip unsupported modules.
-		rChild, ok := isModuleSupported(ctx, child)
+		rustInfo, commonInfo, ok := isModuleSupported(ctx, child)
 		if !ok {
 			return
 		}
 		// For unknown dependency, add it first.
 		var childId int
-		cInfo, known := singleton.knownCrates[rChild.Name()]
+		cInfo, known := singleton.knownCrates[child.Name()]
 		if !known {
-			childId, ok = singleton.addCrate(ctx, rChild)
+			childId, ok = singleton.addCrate(ctx, child, rustInfo, commonInfo)
 			if !ok {
 				return
 			}
@@ -110,105 +134,140 @@ func (singleton *projectGeneratorSingleton) mergeDependencies(ctx android.Single
 		if _, ok = deps[child.Name()]; ok {
 			return
 		}
-		crate.Deps = append(crate.Deps, rustProjectDep{Crate: childId, Name: rChild.CrateName()})
+		crate.Deps = append(crate.Deps, rustProjectDep{Crate: childId, Name: rustInfo.CompilerInfo.CrateName})
 		deps[child.Name()] = childId
 	})
 }
 
 // isModuleSupported returns the RustModule if the module
 // should be considered for inclusion in rust-project.json.
-func isModuleSupported(ctx android.SingletonContext, module android.Module) (*Module, bool) {
-	rModule, ok := module.(*Module)
+func isModuleSupported(ctx android.SingletonContext, module android.ModuleProxy) (*RustInfo, *android.CommonModuleInfo, bool) {
+	info, ok := android.OtherModuleProvider(ctx, module, RustInfoProvider)
 	if !ok {
-		return nil, false
+		return nil, nil, false
 	}
-	if !rModule.Enabled(ctx) {
-		return nil, false
+	commonInfo := android.OtherModuleProviderOrDefault(ctx, module, android.CommonModuleInfoProvider)
+	if !commonInfo.Enabled {
+		return nil, nil, false
 	}
-	return rModule, true
+	return info, commonInfo, true
 }
 
 // addCrate adds a crate to singleton.project.Crates ensuring that required
 // dependencies are also added. It returns the index of the new crate in
 // singleton.project.Crates
-func (singleton *projectGeneratorSingleton) addCrate(ctx android.SingletonContext, rModule *Module) (int, bool) {
+func (singleton *projectGeneratorSingleton) addCrate(ctx android.SingletonContext, module android.ModuleProxy, rustInfo *RustInfo,
+	commonInfo *android.CommonModuleInfo) (int, bool) {
+
 	deps := make(map[string]int)
-	rootModule, err := rModule.compiler.checkedCrateRootPath()
-	if err != nil {
-		return 0, false
-	}
 
 	var procMacroDylib *string = nil
-	if procDec, procMacro := rModule.compiler.(*procMacroDecorator); procMacro {
-		procMacroDylib = new(string)
-		*procMacroDylib = procDec.baseCompiler.unstrippedOutputFilePath().String()
+
+	if procMacro := rustInfo.ProcMacroInfo; procMacro != nil {
+		procMacroDylib = proptools.StringPtr(procMacro.Dylib.String())
 	}
 
 	crate := rustProjectCrate{
-		DisplayName:    rModule.Name(),
-		RootModule:     rootModule.String(),
-		Edition:        rModule.compiler.edition(),
+		DisplayName:    module.Name(),
+		RootModule:     rustInfo.CompilerInfo.CrateRootPath.String(),
+		Edition:        rustInfo.CompilerInfo.Edition,
 		Deps:           make([]rustProjectDep, 0),
 		Cfg:            make([]string, 0),
 		Env:            make(map[string]string),
 		ProcMacro:      procMacroDylib != nil,
 		ProcMacroDylib: procMacroDylib,
+		Source: rustProjectIncludeDirs{
+			Include_dirs: []string{ctx.ModuleDir(module)},
+			Exclude_dirs: []string{},
+		}, // TODO: What should this value be?
 	}
 
-	if rModule.compiler.cargoOutDir().Valid() {
-		crate.Env["OUT_DIR"] = rModule.compiler.cargoOutDir().String()
+	if cargoOutDir := rustInfo.CompilerInfo.CargoOutDir; cargoOutDir.Valid() {
+		crate.Env["OUT_DIR"] = cargoOutDir.String()
 	}
 
-	for _, feature := range rModule.compiler.features(ctx, rModule) {
+	for _, feature := range rustInfo.CompilerInfo.Features {
 		crate.Cfg = append(crate.Cfg, "feature=\""+feature+"\"")
 	}
 
-	singleton.mergeDependencies(ctx, rModule, &crate, deps)
+	singleton.mergeDependencies(ctx, module, &crate, deps)
 
 	var idx int
-	if cInfo, ok := singleton.knownCrates[rModule.Name()]; ok {
+	if cInfo, ok := singleton.knownCrates[module.Name()]; ok {
 		idx = cInfo.Idx
 		singleton.project.Crates[idx] = crate
 	} else {
 		idx = len(singleton.project.Crates)
 		singleton.project.Crates = append(singleton.project.Crates, crate)
 	}
-	singleton.knownCrates[rModule.Name()] = crateInfo{Idx: idx, Deps: deps, Device: rModule.Device()}
+	singleton.knownCrates[module.Name()] = crateInfo{Idx: idx, Deps: deps, Device: commonInfo.Target.Os.Class == android.Device}
+	outputfiles := android.OutputFilesForModule(ctx, module, "")
+	// Count the number of output files that should be used for mapping
+	numberValidOutputFiles := 0
+	validOutputIndex := 0
+	for ix, item := range outputfiles {
+		if !(strings.HasSuffix(item.String(), ".rs") || strings.HasSuffix(item.String(), ".c") || strings.HasSuffix(item.String(), ".d")) {
+			validOutputIndex = ix
+			numberValidOutputFiles += 1
+		}
+	}
+
+	buildVariant := "user"
+	if ctx.Config().Eng() {
+		buildVariant = "eng"
+	} else if ctx.Config().Debuggable() {
+		buildVariant = "userdebug"
+	}
+	if numberValidOutputFiles == 1 {
+		outputFileName := outputfiles[validOutputIndex].String()
+		mapping := rustTargetMappingJson{
+			Name:               module.Name(),
+			BuildTarget:        outputFileName,
+			CheckTarget:        outputFileName + ".checkJson",
+			SourceDir:          ctx.ModuleDir(module),
+			TargetProduct:      ctx.Config().DeviceProduct(),
+			TargetRelease:      "trunk_staging",
+			TargetBuildVariant: buildVariant,
+		}
+		singleton.targetMappings = append(singleton.targetMappings, mapping)
+	} else if numberValidOutputFiles > 1 {
+		ctx.ModuleErrorf(module, "%s", "More than one file for an output in the module")
+	}
 	return idx, true
 }
 
 // appendCrateAndDependencies creates a rustProjectCrate for the module argument and appends it to singleton.project.
 // It visits the dependencies of the module depth-first so the dependency ID can be added to the current module. If the
 // current module is already in singleton.knownCrates, its dependencies are merged.
-func (singleton *projectGeneratorSingleton) appendCrateAndDependencies(ctx android.SingletonContext, module android.Module) {
-	rModule, ok := isModuleSupported(ctx, module)
+func (singleton *projectGeneratorSingleton) appendCrateAndDependencies(ctx android.SingletonContext, module android.ModuleProxy) {
+	rustInfo, commonInfo, ok := isModuleSupported(ctx, module)
 	if !ok {
 		return
 	}
 	// If we have seen this crate already; merge any new dependencies.
 	if cInfo, ok := singleton.knownCrates[module.Name()]; ok {
 		// If we have a new device variant, override the old one
-		if !cInfo.Device && rModule.Device() {
-			singleton.addCrate(ctx, rModule)
+		if !cInfo.Device && commonInfo.Target.Os.Class == android.Device {
+			singleton.addCrate(ctx, module, rustInfo, commonInfo)
 			return
 		}
 		crate := singleton.project.Crates[cInfo.Idx]
-		singleton.mergeDependencies(ctx, rModule, &crate, cInfo.Deps)
+		singleton.mergeDependencies(ctx, module, &crate, cInfo.Deps)
 		singleton.project.Crates[cInfo.Idx] = crate
 		return
 	}
-	singleton.addCrate(ctx, rModule)
+	singleton.addCrate(ctx, module, rustInfo, commonInfo)
 }
 
 func (singleton *projectGeneratorSingleton) GenerateBuildActions(ctx android.SingletonContext) {
-	if !ctx.Config().IsEnvTrue(envVariableCollectRustDeps) {
+	if !(ctx.Config().IsEnvTrue(envVariableCollectRustDeps) || ctx.Config().Getenv(envVariableUseKythe) != "") {
 		return
 	}
 
 	singleton.project.Sysroot = config.RustPath(ctx)
 
 	singleton.knownCrates = make(map[string]crateInfo)
-	ctx.VisitAllModules(func(module android.Module) {
+	ctx.VisitAllModuleProxies(func(module android.ModuleProxy) {
 		singleton.appendCrateAndDependencies(ctx, module)
 	})
 
@@ -216,16 +275,38 @@ func (singleton *projectGeneratorSingleton) GenerateBuildActions(ctx android.Sin
 	err := createJsonFile(singleton.project, path)
 	if err != nil {
 		ctx.Errorf(err.Error())
+
 	}
+	if ctx.Config().XrefCorpusName() != "" {
+		rule := android.NewRuleBuilder(pctx, ctx)
+		jsonPath := android.PathForOutput(ctx, "rust-project.json")
+		kzipPath := android.PathForOutput(ctx, "rust-project.kzip")
+		vnames := android.PathForSource(ctx, "build/soong/vnames.json")
+		rule.Command().PrebuiltBuildTool(ctx, "rust_project_to_kzip").
+			FlagWithInput("-project_json ", jsonPath).
+			FlagWithOutput("-output ", kzipPath).
+			FlagWithArg("-corpus ", ctx.Config().XrefCorpusName()).
+			FlagWithArg("-root ", ".").
+			FlagWithInput("-vnames_json_path ", vnames)
+		ruleName := "rust3-extraction"
+		rule.Build(ruleName, "Turning Rust project into kzips")
+		ctx.Phony("xref_rust", kzipPath)
+	}
+
+	rustTargetMappingPath := android.PathForOutput(ctx, rustTargetMappingFileName)
+	if err := createJsonFile(singleton.targetMappings, rustTargetMappingPath); err != nil {
+		ctx.Errorf(err.Error())
+	}
+
 }
 
-func createJsonFile(project rustProjectJson, rustProjectPath android.WritablePath) error {
+func createJsonFile(project any, rustProjectPath android.WritablePath) error {
 	buf, err := json.MarshalIndent(project, "", "  ")
 	if err != nil {
-		return fmt.Errorf("JSON marshal of rustProjectJson failed: %s", err)
+		return fmt.Errorf("JSON marshal failed: %s", err)
 	}
-	err = android.WriteFileToOutputDir(rustProjectPath, buf, 0666)
-	if err != nil {
+
+	if err := android.WriteFileToOutputDir(rustProjectPath, buf, 0666); err != nil {
 		return fmt.Errorf("Writing rust-project to %s failed: %s", rustProjectPath.String(), err)
 	}
 	return nil

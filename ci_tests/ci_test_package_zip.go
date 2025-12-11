@@ -15,11 +15,15 @@
 package ci_tests
 
 import (
+	"cmp"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"android/soong/android"
+	"android/soong/cc"
+	"android/soong/java"
 
 	"github.com/google/blueprint"
 	"github.com/google/blueprint/proptools"
@@ -56,6 +60,10 @@ type CITestPackageProperties struct {
 	Tests_if_exist_common proptools.Configurable[[]string] `android:"arch_variant"`
 	// git-main only test modules. Will only be added as dependencies based on both 32bit and 64bit arch variant and the device os variant if exists.
 	Tests_if_exist_device_both proptools.Configurable[[]string] `android:"arch_variant"`
+	// git-main only test modules. Will only be added as dependencies based on the first supported arch variant and the device os variant if exists.
+	Tests_if_exist_device_first proptools.Configurable[[]string] `android:"arch_variant"`
+	// git-main only test modules. Will only be added as dependencies based on host if exists.
+	Tests_if_exist_host proptools.Configurable[[]string] `android:"arch_variant"`
 }
 
 type testPackageZipDepTagType struct {
@@ -66,9 +74,6 @@ var testPackageZipDepTag testPackageZipDepTagType
 
 var (
 	pctx = android.NewPackageContext("android/soong/ci_tests")
-	// test_package module type should only be used for the following modules.
-	// TODO: remove "_soong" from the module names inside when eliminating the corresponding make modules
-	moduleNamesAllowed = []string{"continuous_instrumentation_tests_soong", "continuous_instrumentation_metric_tests_soong", "continuous_native_tests_soong", "continuous_native_metric_tests_soong", "platform_tests"}
 )
 
 func (p *testPackageZip) DepsMutator(ctx android.BottomUpMutatorContext) {
@@ -89,11 +94,22 @@ func (p *testPackageZip) DepsMutator(ctx android.BottomUpMutatorContext) {
 	for _, t := range p.properties.Host_tests.GetOrDefault(ctx, nil) {
 		ctx.AddVariationDependencies(ctx.Config().BuildOSTarget.Variations(), testPackageZipDepTag, t)
 	}
+	// adding Tests_if_exist_host property deps
+	for _, t := range p.properties.Tests_if_exist_host.GetOrDefault(ctx, nil) {
+		if ctx.OtherModuleExists(t) {
+			ctx.AddVariationDependencies(ctx.Config().BuildOSTarget.Variations(), testPackageZipDepTag, t)
+		}
+	}
 
 	// adding Tests_if_exist_* property deps
 	for _, t := range p.properties.Tests_if_exist_common.GetOrDefault(ctx, nil) {
 		if ctx.OtherModuleExists(t) {
 			ctx.AddVariationDependencies(ctx.Config().AndroidCommonTarget.Variations(), testPackageZipDepTag, t)
+		}
+	}
+	for _, t := range p.properties.Tests_if_exist_device_first.GetOrDefault(ctx, nil) {
+		if ctx.OtherModuleExists(t) {
+			ctx.AddVariationDependencies(ctx.Config().AndroidFirstDeviceTarget.Variations(), testPackageZipDepTag, t)
 		}
 	}
 	p.addDeviceBothDeps(ctx, true)
@@ -139,21 +155,51 @@ func TestPackageZipFactory() android.Module {
 	return module
 }
 
+// We need to implement IsNativeCoverageNeeded so that in coverage builds we depend on the coverage
+// variants of the tests. The non-coverage variants will have PreventInstall called on them,
+// so they won't be able to be packaged into this test zip.
+func (p *testPackageZip) IsNativeCoverageNeeded(ctx cc.IsNativeCoverageNeededContext) bool {
+	return ctx.DeviceConfig().NativeCoverageEnabled()
+}
+
+var _ cc.UseCoverage = (*testPackageZip)(nil)
+
 func (p *testPackageZip) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	// Never install this test package, it's for disting only
 	p.SkipInstall()
-
-	if !android.InList(ctx.ModuleName(), moduleNamesAllowed) {
-		ctx.ModuleErrorf("%s is not allowed to use module type test_package")
-	}
 
 	p.output = createOutput(ctx, pctx)
 
 	ctx.SetOutputFiles(android.Paths{p.output}, "")
 }
 
+func getAllTestModules(ctx android.ModuleContext) []android.ModuleProxy {
+	var ret []android.ModuleProxy
+	ctx.WalkDepsProxy(func(child, parent android.ModuleProxy) bool {
+		if info, ok := android.OtherModuleProvider(ctx, child, android.CommonModuleInfoProvider); !ok || !info.Enabled {
+			return false
+		}
+		if android.EqualModules(parent, ctx.Module()) && ctx.OtherModuleDependencyTag(child) == testPackageZipDepTag {
+			// handle direct deps
+			ret = append(ret, child)
+			return true
+		} else if !android.EqualModules(parent, ctx.Module()) && ctx.OtherModuleDependencyTag(child) == android.RequiredDepTag {
+			// handle the "required" from deps
+			ret = append(ret, child)
+			return true
+		} else {
+			return false
+		}
+	})
+	ret = android.FirstUniqueInPlace(ret)
+	slices.SortFunc(ret, func(a, b android.ModuleProxy) int {
+		return cmp.Compare(a.String(), b.String())
+	})
+	return ret
+}
+
 func createOutput(ctx android.ModuleContext, pctx android.PackageContext) android.ModuleOutPath {
-	productOut := filepath.Join(ctx.Config().OutDir(), "target", "product", ctx.Config().DeviceName())
+	productOut := android.PathForModuleInPartitionInstall(ctx, "").String()
 	stagingDir := android.PathForModuleOut(ctx, "STAGING")
 	productVariables := ctx.Config().ProductVariables()
 	arch := proptools.String(productVariables.DeviceArch)
@@ -163,22 +209,14 @@ func createOutput(ctx android.ModuleContext, pctx android.PackageContext) androi
 	builder.Command().Text("rm").Flag("-rf").Text(stagingDir.String())
 	builder.Command().Text("mkdir").Flag("-p").Output(stagingDir)
 	builder.Temporary(stagingDir)
-	ctx.WalkDeps(func(child, parent android.Module) bool {
-		if !child.Enabled(ctx) {
-			return false
-		}
-		if android.EqualModules(parent, ctx.Module()) && ctx.OtherModuleDependencyTag(child) == testPackageZipDepTag {
-			// handle direct deps
-			extendBuilderCommand(ctx, child, builder, stagingDir, productOut, arch, secondArch)
-			return true
-		} else if !android.EqualModules(parent, ctx.Module()) && ctx.OtherModuleDependencyTag(child) == android.RequiredDepTag {
-			// handle the "required" from deps
-			extendBuilderCommand(ctx, child, builder, stagingDir, productOut, arch, secondArch)
-			return true
-		} else {
-			return false
-		}
-	})
+
+	allTestModules := getAllTestModules(ctx)
+	for _, dep := range allTestModules {
+		extendBuilderCommand(ctx, dep, builder, stagingDir, productOut, arch, secondArch)
+	}
+
+	createSymbolsZip(ctx, allTestModules)
+	createJacocoJar(ctx, allTestModules)
 
 	output := android.PathForModuleOut(ctx, ctx.ModuleName()+".zip")
 	builder.Command().
@@ -191,16 +229,33 @@ func createOutput(ctx android.ModuleContext, pctx android.PackageContext) androi
 	return output
 }
 
-func extendBuilderCommand(ctx android.ModuleContext, m android.Module, builder *android.RuleBuilder, stagingDir android.ModuleOutPath, productOut, arch, secondArch string) {
+func createSymbolsZip(ctx android.ModuleContext, allModules []android.ModuleProxy) {
+	symbolsZipFile := android.PathForModuleOut(ctx, "symbols.zip")
+	symbolsMappingFile := android.PathForModuleOut(ctx, "symbols-mapping.textproto")
+	android.BuildSymbolsZip(ctx, allModules, nil, symbolsZipFile, symbolsMappingFile)
+
+	ctx.SetOutputFiles(android.Paths{symbolsZipFile}, ".symbols")
+	ctx.SetOutputFiles(android.Paths{symbolsMappingFile}, ".elf_mapping")
+}
+
+func createJacocoJar(ctx android.ModuleContext, allModules []android.ModuleProxy) {
+	if ctx.Config().JavaCoverageEnabled() {
+		jacocoJar := android.PathForModuleOut(ctx, ctx.ModuleName()+"_jacoco_report_classes.jar")
+		java.BuildJacocoZip(ctx, allModules, jacocoJar)
+		ctx.SetOutputFiles(android.Paths{jacocoJar}, ".jacoco")
+	}
+}
+
+func extendBuilderCommand(ctx android.ModuleContext, m android.ModuleProxy, builder *android.RuleBuilder, stagingDir android.ModuleOutPath, productOut, arch, secondArch string) {
 	info, ok := android.OtherModuleProvider(ctx, m, android.ModuleInfoJSONProvider)
 	if !ok {
 		ctx.OtherModuleErrorf(m, "doesn't set ModuleInfoJSON provider")
-	} else if len(info) != 1 {
+	} else if len(info.Data) != 1 {
 		ctx.OtherModuleErrorf(m, "doesn't provide exactly one ModuleInfoJSON")
 	}
 
-	classes := info[0].GetClass()
-	if len(info[0].Class) != 1 {
+	classes := info.Data[0].GetClass()
+	if len(info.Data[0].Class) != 1 {
 		ctx.OtherModuleErrorf(m, "doesn't have exactly one class in its ModuleInfoJSON")
 	}
 	class := strings.ToLower(classes[0])
@@ -234,8 +289,11 @@ func extendBuilderCommand(ctx android.ModuleContext, m android.Module, builder *
 		}
 		name := removeFileExtension(installedFile.Base())
 		// some apks have other apk as installed files, these additional files shouldn't be included
+		// But due to for override_android_test or override_android_app it will have OtherModuleName deps for the module
+		// it wants to override, to prevent it being ignored only skip this deps if it not the direct dependency of the
+		// test_packages.
 		isAppOrFramework := class == "app" || class == "framework"
-		if isAppOrFramework && name != ctx.OtherModuleName(m) {
+		if ctx.OtherModuleDependencyTag(m) != testPackageZipDepTag && isAppOrFramework && name != ctx.OtherModuleName(m) {
 			continue
 		}
 

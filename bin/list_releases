@@ -14,6 +14,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Fail if anything in the pipe fails.
+set -euo pipefail
+
 if [[ $# -eq 1 ]]; then
     # Override anything that's already set
     export TARGET_PRODUCT=$1
@@ -39,7 +42,4 @@ require_top
 # exists everwhere, so we don't trigger the unspecified TARGET_RELEASE error.
 
 # We also unset TARGET_BUILD_APPS, so it doesn't interfere.
-
 TARGET_RELEASE=trunk_staging TARGET_BUILD_APPS= $TOP/build/soong/soong_ui.bash --dumpvar-mode ALL_RELEASE_CONFIGS_FOR_PRODUCT | sed 's/ /\n/g'
-
-exit $?

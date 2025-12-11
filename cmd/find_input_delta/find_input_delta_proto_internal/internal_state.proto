@@ -21,6 +21,14 @@ option go_package = "android/soong/find_input_delta/find_input_delta_proto_inter
 message PartialCompileInputs {
   // The status of each file.
   repeated PartialCompileInput input_files = 1;
+
+  // The version string.  If this is different from the prior version, all
+  // inputs are marked as needing to be recompiled.
+  optional string version = 2;
+
+  // The tools checked.  If this is different from the prior version, all inputs
+  // are marked as needing to be recompiled.
+  repeated PartialCompileInput tools = 3;
 }
 
 // The state of one input.

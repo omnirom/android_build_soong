@@ -20,7 +20,6 @@ import (
 
 	"github.com/google/blueprint"
 	"github.com/google/blueprint/proptools"
-	"strconv"
 )
 
 type declarationsTagType struct {
@@ -78,14 +77,19 @@ func (callbacks *JavaAconfigDeclarationsLibraryCallbacks) DepsMutator(module *ja
 
 func (callbacks *JavaAconfigDeclarationsLibraryCallbacks) GenerateSourceJarBuildActions(module *java.GeneratedJavaLibraryModule, ctx android.ModuleContext) (android.Path, android.Path) {
 	// Get the values that came from the global RELEASE_ACONFIG_VALUE_SETS flag
-	declarationsModules := ctx.GetDirectDepsWithTag(declarationsTag)
+	declarationsModules := ctx.GetDirectDepsProxyWithTag(declarationsTag)
+	srcJarPath := android.PathForModuleGen(ctx, ctx.ModuleName()+".srcjar")
 	if len(declarationsModules) != 1 {
-		panic("Exactly one aconfig_declarations property required")
+		if ctx.Config().AllowMissingDependencies() {
+			ctx.AddMissingDependencies([]string{"exactly_one_aconfig_declarations_required"})
+			return srcJarPath, android.PathForModuleOut(ctx, "missing_declarations")
+		} else {
+			panic("Exactly one aconfig_declarations property required")
+		}
 	}
 	declarations, _ := android.OtherModuleProvider(ctx, declarationsModules[0], android.AconfigDeclarationsProviderKey)
 
 	// Generate the action to build the srcjar
-	srcJarPath := android.PathForModuleGen(ctx, ctx.ModuleName()+".srcjar")
 
 	mode := proptools.StringDefault(callbacks.properties.Mode, "production")
 	if !isModeSupported(mode) {
@@ -98,28 +102,17 @@ func (callbacks *JavaAconfigDeclarationsLibraryCallbacks) GenerateSourceJarBuild
 		ctx.PropertyErrorf("mode", "exported mode requires its aconfig_declaration has exportable prop true")
 	}
 
-	var newExported bool
-	if useNewExported, ok := ctx.Config().GetBuildFlag("RELEASE_ACONFIG_NEW_EXPORTED"); ok {
-		// The build flag (RELEASE_ACONFIG_REQUIRE_ALL_READ_ONLY) is the negation of the aconfig flag
-		// (allow-read-write) for historical reasons.
-		// Bool build flags are always "" for false, and generally "true" for true.
-		newExported = useNewExported == "true"
-	}
-
 	ctx.Build(pctx, android.BuildParams{
 		Rule:        javaRule,
 		Input:       declarations.IntermediateCacheOutputPath,
 		Output:      srcJarPath,
 		Description: "aconfig.srcjar",
 		Args: map[string]string{
-			"mode":            mode,
-			"debug":           strconv.FormatBool(ctx.Config().ReleaseReadFromNewStorage()),
-			"new_exported":    strconv.FormatBool(newExported),
-			"check_api_level": strconv.FormatBool(ctx.Config().ReleaseAconfigCheckApiLevel()),
+			"mode": mode,
 		},
 	})
 
-	if declarations.Exportable {
+	if ctx.Config().ReleaseJarjarFlagsInFramework() || declarations.Exportable {
 		// Mark our generated code as possibly needing jarjar repackaging
 		// The repackaging only happens when the corresponding aconfig_declaration
 		// has property exportable true

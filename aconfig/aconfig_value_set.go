@@ -15,9 +15,10 @@
 package aconfig
 
 import (
-	"android/soong/android"
 	"fmt"
 	"strings"
+
+	"android/soong/android"
 
 	"github.com/google/blueprint"
 )
@@ -91,14 +92,7 @@ func (module *ValueSetModule) DepsMutator(ctx android.BottomUpMutatorContext) {
 		}
 	}
 
-	deps := ctx.AddDependency(ctx.Module(), valueSetTag, module.properties.Values...)
-	for _, dep := range deps {
-		_, ok := dep.(*ValuesModule)
-		if !ok {
-			ctx.PropertyErrorf("values", "values must be a aconfig_values module")
-			return
-		}
-	}
+	ctx.AddDependency(ctx.Module(), valueSetTag, module.properties.Values...)
 }
 
 func (module *ValueSetModule) GenerateAndroidBuildActions(ctx android.ModuleContext) {
@@ -106,11 +100,13 @@ func (module *ValueSetModule) GenerateAndroidBuildActions(ctx android.ModuleCont
 	// valueSetProviderKey provider that aconfig modules can read and use
 	// to append values to their aconfig actions.
 	packages := make(map[string]android.Paths)
-	ctx.VisitDirectDeps(func(dep android.Module) {
+	ctx.VisitDirectDepsProxyWithTag(valueSetTag, func(dep android.ModuleProxy) {
 		if depData, ok := android.OtherModuleProvider(ctx, dep, valuesProviderKey); ok {
 			srcs := make([]android.Path, len(depData.Values))
 			copy(srcs, depData.Values)
 			packages[depData.Package] = srcs
+		} else {
+			ctx.PropertyErrorf("values", "values dependency %q must be a aconfig_values module", ctx.OtherModuleName(dep))
 		}
 
 	})

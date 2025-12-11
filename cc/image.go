@@ -210,6 +210,8 @@ func (m *Module) ImageMutatorBegin(mctx android.ImageInterfaceContext) {
 	MutateImage(mctx, m)
 }
 
+func (m *Module) ImageMutatorSupported() bool { return true }
+
 func (m *Module) VendorAvailable() bool {
 	return Bool(m.VendorProperties.Vendor_available)
 }

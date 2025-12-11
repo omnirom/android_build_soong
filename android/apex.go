@@ -26,7 +26,7 @@ import (
 
 var (
 	// This is the sdk version when APEX was first introduced
-	SdkVersion_Android10 = uncheckedFinalApiLevel(29)
+	SdkVersion_Android10 = UncheckedFinalApiLevel(29)
 )
 
 // ApexInfo describes the metadata about one or more apexBundles that an apex variant of a module is
@@ -111,14 +111,6 @@ type ApexAvailableInfo struct {
 var ApexInfoProvider = blueprint.NewMutatorProvider[ApexInfo]("apex_mutate")
 var ApexAvailableInfoProvider = blueprint.NewMutatorProvider[ApexAvailableInfo]("apex_mutate")
 
-func (i ApexInfo) AddJSONData(d *map[string]interface{}) {
-	(*d)["Apex"] = map[string]interface{}{
-		"ApexVariationName": i.ApexVariationName,
-		"MinSdkVersion":     i.MinSdkVersion,
-		"ForPrebuiltApex":   i.ForPrebuiltApex,
-	}
-}
-
 // mergedName gives the name of the alias variation that will be used when multiple apex variations
 // of a module can be deduped into one variation. For example, if libfoo is included in both apex.a
 // and apex.b, and if the two APEXes have the same min_sdk_version (say 29), then libfoo doesn't
@@ -155,6 +147,12 @@ type ApexBundleInfo struct {
 
 var ApexBundleInfoProvider = blueprint.NewMutatorProvider[ApexBundleInfo]("apex_mutate")
 
+var PlatformAvailabilityInfoProvider = blueprint.NewMutatorProvider[PlatformAvailabilityInfo]("mark_platform_availability")
+
+type PlatformAvailabilityInfo struct {
+	NotAvailableToPlatform bool
+}
+
 // DepInSameApexChecker defines an interface that should be used to determine whether a given dependency
 // should be considered as part of the same APEX as the current module or not.
 type DepInSameApexChecker interface {
@@ -188,7 +186,7 @@ type DepInSameApexInfo struct {
 
 var DepInSameApexInfoProvider = blueprint.NewMutatorProvider[DepInSameApexInfo]("apex_unique")
 
-func IsDepInSameApex(ctx BaseModuleContext, module, dep Module) bool {
+func IsDepInSameApex(ctx BaseModuleContext, module, dep ModuleOrProxy) bool {
 	depTag := ctx.OtherModuleDependencyTag(dep)
 	if _, ok := depTag.(ExcludeFromApexContentsTag); ok {
 		// The tag defines a dependency that never requires the child module to be part of the same
@@ -273,15 +271,6 @@ type ApexModule interface {
 	// Returns false by default.
 	AlwaysRequiresPlatformApexVariant() bool
 
-	// Returns true if this module is not available to platform (i.e. apex_available property
-	// doesn't have "//apex_available:platform"), or shouldn't be available to platform, which
-	// is the case when this module depends on other module that isn't available to platform.
-	NotAvailableForPlatform() bool
-
-	// Marks that this module is not available to platform. Set by the
-	// check-platform-availability mutator in the apex package.
-	SetNotAvailableForPlatform()
-
 	// Returns the min sdk version that the module supports, .
 	MinSdkVersionSupported(ctx BaseModuleContext) ApiLevel
 
@@ -304,9 +293,6 @@ type ApexProperties struct {
 	// Prefix pattern (com.foo.*) can be used to match with any APEX name with the prefix(com.foo.).
 	// Default is ["//apex_available:platform"].
 	Apex_available []string
-
-	// See ApexModule.NotAvailableForPlatform()
-	NotAvailableForPlatform bool `blueprint:"mutated"`
 
 	// See ApexModule.UniqueApexVariants()
 	UniqueApexVariationsForDeps bool `blueprint:"mutated"`
@@ -389,7 +375,9 @@ func (m *ApexModuleBase) ApexTransitionMutatorMutate(ctx BottomUpMutatorContext,
 			ApexAvailableFor: module.ApexAvailableFor(),
 		})
 	}
-	if platformVariation && !ctx.Host() && !module.AvailableFor(AvailableToPlatform) && module.NotAvailableForPlatform() {
+
+	platformAvailabilityInfo, _ := ModuleProvider(ctx, PlatformAvailabilityInfoProvider)
+	if platformVariation && !ctx.Host() && !module.AvailableFor(AvailableToPlatform) && platformAvailabilityInfo.NotAvailableToPlatform {
 		// Do not install the module for platform, but still allow it to output
 		// uninstallable AndroidMk entries in certain cases when they have side
 		// effects.  TODO(jiyong): move this routine to somewhere else
@@ -524,10 +512,6 @@ func CheckAvailableForApex(what string, apex_available []string) bool {
 		if strings.HasSuffix(apex_name, ".*") && strings.HasPrefix(what, strings.TrimSuffix(apex_name, "*")) {
 			return true
 		}
-		// TODO b/383863941: Remove once legacy name is no longer used
-		if (apex_name == "com.android.btservices" && what == "com.android.bt") || (apex_name == "com.android.bt" && what == "com.android.btservices") {
-			return true
-		}
 	}
 	return false
 }
@@ -540,16 +524,6 @@ func (m *ApexModuleBase) AvailableFor(what string) bool {
 // Implements ApexModule
 func (m *ApexModuleBase) AlwaysRequiresPlatformApexVariant() bool {
 	return false
-}
-
-// Implements ApexModule
-func (m *ApexModuleBase) NotAvailableForPlatform() bool {
-	return m.ApexProperties.NotAvailableForPlatform
-}
-
-// Implements ApexModule
-func (m *ApexModuleBase) SetNotAvailableForPlatform() {
-	m.ApexProperties.NotAvailableForPlatform = true
 }
 
 // This function makes sure that the apex_available property is valid
@@ -599,7 +573,7 @@ func AvailableToSameApexes(mod1, mod2 ApexModule) bool {
 // variant.
 func UpdateUniqueApexVariationsForDeps(mctx BottomUpMutatorContext, am ApexModule) {
 	// If any of the dependencies requires unique apex variations, so does this module.
-	mctx.VisitDirectDeps(func(dep Module) {
+	mctx.visitDirectDeps(func(dep Module) {
 		if depApexModule, ok := dep.(ApexModule); ok {
 			if IsDepInSameApex(mctx, am, depApexModule) &&
 				(depApexModule.UniqueApexVariations() ||
@@ -653,6 +627,14 @@ type ApexBundleDepsData struct {
 
 var ApexBundleDepsDataProvider = blueprint.NewProvider[ApexBundleDepsData]()
 
+// ApexBundleTypeInfo is used to identify the module is a apexBundle module.
+type ApexBundleTypeInfo struct {
+	Pem Path
+	Key Path
+}
+
+var ApexBundleTypeInfoProvider = blueprint.NewProvider[ApexBundleTypeInfo]()
+
 func (d *ApexBundleDepsInfo) FlatListPath() Path {
 	return d.flatListPath
 }
@@ -701,7 +683,7 @@ type WalkPayloadDepsFunc func(ctx BaseModuleContext, do PayloadDepsCallback)
 // ModuleWithMinSdkVersionCheck represents a module that implements min_sdk_version checks
 type ModuleWithMinSdkVersionCheck interface {
 	Module
-	MinSdkVersion(ctx EarlyModuleContext) ApiLevel
+	MinSdkVersion(ctx MinSdkVersionFromValueContext) ApiLevel
 	CheckMinSdkVersion(ctx ModuleContext)
 }
 
@@ -758,13 +740,14 @@ type MinSdkVersionFromValueContext interface {
 	Config() Config
 	DeviceConfig() DeviceConfig
 	ModuleErrorContext
+	ConfigurableEvaluatorContext
 }
 
 // Returns nil (success) if this module should support the given sdk version. Returns an
 // error if not. No default implementation is provided for this method. A module type
 // implementing this interface should provide an implementation. A module supports an sdk
 // version when the module's min_sdk_version is equal to or less than the given sdk version.
-func ShouldSupportSdkVersion(ctx BaseModuleContext, module Module, sdkVersion ApiLevel) error {
+func ShouldSupportSdkVersion(ctx BaseModuleContext, module ModuleOrProxy, sdkVersion ApiLevel) error {
 	info, ok := OtherModuleProvider(ctx, module, CommonModuleInfoProvider)
 	if !ok || info.MinSdkVersionSupported.IsNone() {
 		return fmt.Errorf("min_sdk_version is not specified")
@@ -806,10 +789,10 @@ type ApexExportsInfo struct {
 	LibraryNameToDexJarPathOnHost map[string]Path
 }
 
-var PrebuiltInfoProvider = blueprint.NewProvider[PrebuiltInfo]()
+var PrebuiltJsonInfoProvider = blueprint.NewProvider[PrebuiltJsonInfo]()
 
 // contents of prebuilt_info.json
-type PrebuiltInfo struct {
+type PrebuiltJsonInfo struct {
 	// Name of the apex, without the prebuilt_ prefix
 	Name string
 

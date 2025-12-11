@@ -47,6 +47,7 @@ func createSuperImage(
 		Use_dynamic_partitions:        proptools.BoolPtr(partitionVars.ProductUseDynamicPartitions),
 		Super_image_in_update_package: proptools.BoolPtr(partitionVars.BoardSuperImageInUpdatePackage),
 		Create_super_empty:            proptools.BoolPtr(partitionVars.BuildingSuperEmptyImage),
+		Build_super_partition:         proptools.BoolPtr(partitionVars.ProductBuildSuperPartition),
 	}
 	if partitionVars.ProductVirtualAbOta {
 		superImageProps.Virtual_ab.Enable = proptools.BoolPtr(true)
@@ -74,6 +75,14 @@ func createSuperImage(
 	superImageProps.Size = proptools.Int64Ptr(size)
 	sparse := !partitionVars.TargetUserimagesSparseExtDisabled && !partitionVars.TargetUserimagesSparseF2fsDisabled
 	superImageProps.Sparse = proptools.BoolPtr(sparse)
+	if partitionVars.BoardSuperPartitionWarnLimit != "" {
+		limit, _ := strconv.ParseInt(partitionVars.BoardSuperPartitionWarnLimit, 10, 64)
+		superImageProps.Size_warn_limit = proptools.Int64Ptr(limit)
+	}
+	if partitionVars.BoardSuperPartitionErrorLimit != "" {
+		limit, _ := strconv.ParseInt(partitionVars.BoardSuperPartitionErrorLimit, 10, 64)
+		superImageProps.Size_error_limit = proptools.Int64Ptr(limit)
+	}
 
 	var partitionGroupsInfo []filesystem.PartitionGroupsInfo
 	for _, groupName := range android.SortedKeys(partitionVars.BoardSuperPartitionGroups) {

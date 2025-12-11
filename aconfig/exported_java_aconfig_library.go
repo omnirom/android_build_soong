@@ -15,8 +15,6 @@
 package aconfig
 
 import (
-	"strconv"
-
 	"android/soong/android"
 )
 
@@ -39,16 +37,6 @@ func (this *exportedJavaDeclarationsLibrarySingleton) GenerateBuildActions(ctx a
 		cacheFiles = append(cacheFiles, decl.IntermediateCacheOutputPath)
 	})
 
-	var newExported bool
-	if useNewExported, ok := ctx.Config().GetBuildFlag("RELEASE_ACONFIG_NEW_EXPORTED"); ok {
-		newExported = useNewExported == "true"
-	}
-
-	var newStorage bool
-	if useNewStorage, ok := ctx.Config().GetBuildFlag("RELEASE_READ_FROM_NEW_STORAGE"); ok {
-		newStorage = useNewStorage == "true"
-	}
-
 	// Generate build action for aconfig
 	this.intermediatePath = android.PathForIntermediates(ctx, "exported_java_aconfig_library.jar")
 	ctx.Build(pctx, android.BuildParams{
@@ -57,10 +45,7 @@ func (this *exportedJavaDeclarationsLibrarySingleton) GenerateBuildActions(ctx a
 		Output:      this.intermediatePath,
 		Description: "exported_java_aconfig_library",
 		Args: map[string]string{
-			"cache_files":      android.JoinPathsWithPrefix(cacheFiles, " "),
-			"use_new_storage":  strconv.FormatBool(newStorage),
-			"use_new_exported": strconv.FormatBool(newExported),
-			"check_api_level":  strconv.FormatBool(ctx.Config().ReleaseAconfigCheckApiLevel()),
+			"cache_files": android.JoinPathsWithPrefix(cacheFiles, " "),
 		},
 	})
 	ctx.Phony("exported_java_aconfig_library", this.intermediatePath)

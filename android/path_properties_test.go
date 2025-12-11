@@ -55,7 +55,7 @@ func pathDepsMutatorTestModuleFactory() Module {
 }
 
 func (p *pathDepsMutatorTestModule) GenerateAndroidBuildActions(ctx ModuleContext) {
-	ctx.VisitDirectDeps(func(dep Module) {
+	ctx.VisitDirectDepsProxy(func(dep ModuleProxy) {
 		if _, ok := ctx.OtherModuleDependencyTag(dep).(sourceOrOutputDependencyTag); ok {
 			p.sourceDeps = append(p.sourceDeps, ctx.OtherModuleName(dep))
 		}
@@ -64,7 +64,7 @@ func (p *pathDepsMutatorTestModule) GenerateAndroidBuildActions(ctx ModuleContex
 	if p.props.Foo != "" {
 		// Make sure there is only one dependency on a module listed in a property present in multiple property structs
 		m := SrcIsModule(p.props.Foo)
-		if GetModuleProxyFromPathDep(ctx, m, "") == nil {
+		if GetModuleProxyFromPathDep(ctx, m, "").IsNil() {
 			ctx.ModuleErrorf("GetDirectDepWithTag failed")
 		}
 	}

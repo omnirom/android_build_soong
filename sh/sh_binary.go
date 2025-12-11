@@ -240,6 +240,8 @@ var _ android.ImageInterface = (*ShBinary)(nil)
 
 func (s *ShBinary) ImageMutatorBegin(ctx android.ImageInterfaceContext) {}
 
+func (s *ShBinary) ImageMutatorSupported() bool { return true }
+
 func (s *ShBinary) VendorVariantNeeded(ctx android.ImageInterfaceContext) bool {
 	return s.InstallInVendor()
 }
@@ -382,6 +384,7 @@ func (s *ShBinary) customAndroidMkEntries(entries *android.AndroidMkEntries) {
 	if len(s.properties.Symlinks) > 0 {
 		entries.SetString("LOCAL_MODULE_SYMLINKS", strings.Join(s.properties.Symlinks, " "))
 	}
+	entries.SetBool("LOCAL_CHECK_ELF_FILES", false)
 }
 
 type dependencyTag struct {
@@ -540,6 +543,18 @@ func (s *ShTest) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	installedData := ctx.InstallTestData(s.installDir, s.data)
 	s.installedFile = ctx.InstallExecutable(s.installDir, s.outputFilePath.Base(), s.outputFilePath, installedData...)
 
+	ctx.SetTestSuiteInfo(android.TestSuiteInfo{
+		TestSuites:           s.testProperties.Test_suites,
+		MainFile:             s.outputFilePath,
+		MainFileStem:         s.outputFilePath.Base(),
+		ConfigFile:           s.testConfig,
+		ExtraConfigs:         s.extraTestConfigs,
+		Data:                 s.data,
+		NeedsArchFolder:      true,
+		PerTestcaseDirectory: proptools.Bool(s.testProperties.Per_testcase_directory),
+		IsUnitTest:           Bool(s.testProperties.Test_options.Unit_test),
+	})
+
 	mkEntries := s.AndroidMkEntries()[0]
 	android.SetProvider(ctx, tradefed.BaseTestProviderKey, tradefed.BaseTestProviderData{
 		TestcaseRelDataFiles: addArch(ctx.Arch().ArchType.String(), installedData.Paths()),
@@ -574,10 +589,6 @@ func (s *ShTest) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		moduleInfoJSON.TestConfig = append(moduleInfoJSON.TestConfig, s.testConfig.String())
 	}
 	moduleInfoJSON.TestConfig = append(moduleInfoJSON.TestConfig, s.extraTestConfigs.Strings()...)
-
-	android.SetProvider(ctx, android.TestSuiteInfoProvider, android.TestSuiteInfo{
-		TestSuites: s.testProperties.Test_suites,
-	})
 }
 
 func addArch(archType string, paths android.Paths) []string {

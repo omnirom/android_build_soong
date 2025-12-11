@@ -196,9 +196,9 @@ type allApexCerts struct {
 func (_ *allApexCerts) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	var avbpubkeys android.Paths
 	var certificatesPem android.Paths
-	ctx.VisitDirectDeps(func(m android.Module) {
-		if apex, ok := m.(*apexBundle); ok {
-			pem, _ := apex.getCertificateAndPrivateKey(ctx)
+	ctx.VisitDirectDepsProxy(func(m android.ModuleProxy) {
+		if apex, ok := android.OtherModuleProvider(ctx, m, android.ApexBundleTypeInfoProvider); ok {
+			pem := apex.Pem
 			if !android.ExistentPathForSource(ctx, pem.String()).Valid() {
 				if ctx.Config().AllowMissingDependencies() {
 					return
@@ -208,7 +208,7 @@ func (_ *allApexCerts) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 			}
 			certificatesPem = append(certificatesPem, pem)
 			// avbpubkey for signing the apex payload
-			avbpubkeys = append(avbpubkeys, apex.publicKeyFile)
+			avbpubkeys = append(avbpubkeys, apex.Key)
 		}
 	})
 	certificatesPem = android.SortedUniquePaths(certificatesPem) // For hermiticity

@@ -15,11 +15,12 @@
 package aconfig
 
 import (
-	"android/soong/android"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+
+	"android/soong/android"
 
 	"github.com/google/blueprint"
 )
@@ -95,7 +96,9 @@ func (module *DeclarationsModule) DepsMutator(ctx android.BottomUpMutatorContext
 	if len(valuesFromConfig) > 0 {
 		ctx.AddDependency(ctx.Module(), implicitValuesTag, valuesFromConfig...)
 	}
-	for rcName, valueSets := range ctx.Config().ReleaseAconfigExtraReleaseConfigsValueSets() {
+	extraValueSetsMap := ctx.Config().ReleaseAconfigExtraReleaseConfigsValueSets()
+	for _, rcName := range android.SortedKeys(extraValueSetsMap) {
+		valueSets := extraValueSetsMap[rcName]
 		if len(valueSets) > 0 {
 			ctx.AddDependency(ctx.Module(), implicitValuesTagType{ReleaseConfig: rcName}, valueSets...)
 		}
@@ -144,8 +147,10 @@ func (module *DeclarationsModule) GenerateAndroidBuildActions(ctx android.Module
 
 	values := make(map[string][]string)
 	valuesFiles := make(map[string][]android.Path, 0)
-	providerData := android.AconfigReleaseDeclarationsProviderData{}
-	ctx.VisitDirectDeps(func(dep android.Module) {
+	providerData := android.AconfigReleaseDeclarationsProviderData{
+		Data: map[string]android.AconfigDeclarationsProviderData{},
+	}
+	ctx.VisitDirectDepsProxy(func(dep android.ModuleProxy) {
 		if depData, ok := android.OtherModuleProvider(ctx, dep, valueSetProviderKey); ok {
 			depTag := ctx.OtherModuleDependencyTag(dep)
 			for _, config := range configs {
@@ -170,7 +175,7 @@ func (module *DeclarationsModule) GenerateAndroidBuildActions(ctx android.Module
 
 		// Intermediate format
 		declarationFiles := android.PathsForModuleSrc(ctx, module.properties.Srcs)
-		intermediateCacheFilePath := android.PathForModuleOut(ctx, assembleFileName(config, "intermediate.pb"))
+		intermediateCacheFilePath := android.PathForModuleOut(ctx, assembleFileName(config, "aconfig-cache.pb"))
 		var defaultPermission string
 		defaultPermission = ctx.Config().ReleaseAconfigFlagDefaultPermission()
 		if config != "" {
@@ -178,23 +183,25 @@ func (module *DeclarationsModule) GenerateAndroidBuildActions(ctx android.Module
 				defaultPermission = confPerm
 			}
 		}
-		var allowReadWrite bool
-		if requireAllReadOnly, ok := ctx.Config().GetBuildFlag("RELEASE_ACONFIG_REQUIRE_ALL_READ_ONLY"); ok {
-			// The build flag (RELEASE_ACONFIG_REQUIRE_ALL_READ_ONLY) is the negation of the aconfig flag
-			// (allow-read-write) for historical reasons.
-			// Bool build flags are always "" for false, and generally "true" for true.
-			allowReadWrite = requireAllReadOnly == ""
-		}
+
+		forceReadOnly := ctx.Config().GetBuildFlagBool("RELEASE_CONFIG_FORCE_READ_ONLY")
+		// The build flag (RELEASE_ACONFIG_REQUIRE_ALL_READ_ONLY) is the negation of the aconfig flag
+		// (allow-read-write) for historical reasons.
+		allowReadWrite := !ctx.Config().GetBuildFlagBool("RELEASE_ACONFIG_REQUIRE_ALL_READ_ONLY")
+
 		inputFiles := make([]android.Path, len(declarationFiles))
 		copy(inputFiles, declarationFiles)
 		inputFiles = append(inputFiles, valuesFiles[config]...)
+		mainlineBetaNamespaceConfig := ctx.Config().ReleaseMainlineBetaNamespaceConfig()
 		args := map[string]string{
-			"release_version":    ctx.Config().ReleaseVersion(),
-			"package":            module.properties.Package,
-			"declarations":       android.JoinPathsWithPrefix(declarationFiles, "--declarations "),
-			"values":             joinAndPrefix(" --values ", values[config]),
-			"default-permission": optionalVariable(" --default-permission ", defaultPermission),
-			"allow-read-write":   optionalVariable(" --allow-read-write ", strconv.FormatBool(allowReadWrite)),
+			"release_version":                ctx.Config().ReleaseVersion(),
+			"package":                        module.properties.Package,
+			"declarations":                   android.JoinPathsWithPrefix(declarationFiles, "--declarations "),
+			"values":                         joinAndPrefix(" --values ", values[config]),
+			"default-permission":             optionalVariable(" --default-permission ", defaultPermission),
+			"allow-read-write":               optionalVariable(" --allow-read-write ", strconv.FormatBool(allowReadWrite)),
+			"mainline-beta-namespace-config": optionalVariable(" --mainline-beta-namespace-config ", mainlineBetaNamespaceConfig),
+			"force-read-only":                optionalVariable(" --force-read-only ", strconv.FormatBool(forceReadOnly)),
 		}
 		if len(module.properties.Container) > 0 {
 			args["container"] = "--container " + module.properties.Container
@@ -207,7 +214,7 @@ func (module *DeclarationsModule) GenerateAndroidBuildActions(ctx android.Module
 			Args:        args,
 		})
 
-		intermediateDumpFilePath := android.PathForModuleOut(ctx, assembleFileName(config, "intermediate.txt"))
+		intermediateDumpFilePath := android.PathForModuleOut(ctx, assembleFileName(config, "aconfig-flags.txt"))
 		ctx.Build(pctx, android.BuildParams{
 			Rule:        aconfigTextRule,
 			Output:      intermediateDumpFilePath,
@@ -215,7 +222,7 @@ func (module *DeclarationsModule) GenerateAndroidBuildActions(ctx android.Module
 			Description: "aconfig_text",
 		})
 
-		providerData[config] = android.AconfigDeclarationsProviderData{
+		providerData.Data[config] = android.AconfigDeclarationsProviderData{
 			Package:                     module.properties.Package,
 			Container:                   module.properties.Container,
 			Exportable:                  module.properties.Exportable,
@@ -223,7 +230,7 @@ func (module *DeclarationsModule) GenerateAndroidBuildActions(ctx android.Module
 			IntermediateDumpOutputPath:  intermediateDumpFilePath,
 		}
 	}
-	android.SetProvider(ctx, android.AconfigDeclarationsProviderKey, providerData[""])
+	android.SetProvider(ctx, android.AconfigDeclarationsProviderKey, providerData.Data[""])
 	android.SetProvider(ctx, android.AconfigReleaseDeclarationsProviderKey, providerData)
 }
 

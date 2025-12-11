@@ -16,6 +16,7 @@ package filesystem
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -138,9 +139,15 @@ type vbmetaPartitionInfo struct {
 	// Information about the vbmeta partition that will be added to misc_info.txt
 	// created by android_device
 	PropFileForMiscInfo android.Path
+
+	// Whether this is a partition of bootloader.img
+	AbOtaBootloaderPartition bool
 }
 
+type vbmetaPartitionInfos []vbmetaPartitionInfo
+
 var vbmetaPartitionProvider = blueprint.NewProvider[vbmetaPartitionInfo]()
+var vbmetaPartitionsProvider = blueprint.NewProvider[vbmetaPartitionInfos]()
 
 // vbmeta is the partition image that has the verification information for other partitions.
 func VbmetaFactory() android.Module {
@@ -177,6 +184,30 @@ func (v *vbmeta) partitionName() string {
 // See external/avb/libavb/avb_slot_verify.c#VBMETA_MAX_SIZE
 const vbmetaMaxSize = 64 * 1024
 
+// This is the order that make listed the partitions in. The order is important because
+// it ends up being encoded in the output file. Maintain the order so that the resultant
+// files are easier to compare.
+// https://cs.android.com/android/platform/superproject/main/+/main:build/make/core/Makefile;l=4833;drc=a951ebf0198006f7fd38073a05c442d0eb92f97b
+var includeDescriptorsFromImgOrder = []string{
+	"boot",
+	"init_boot",
+	"vendor_boot",
+	"vendor_kernel_boot",
+	"system",
+	"vendor",
+	"product",
+	"system_ext",
+	"odm",
+	"vendor_dlkm",
+	"odm_dlkm",
+	"system_dlkm",
+	"dtbo",
+	"pvmfw",
+	"recovery",
+	"vbmeta_system",
+	"vbmeta_vendor",
+}
+
 func (v *vbmeta) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	builder := android.NewRuleBuilder(pctx, ctx)
 	cmd := builder.Command().BuiltTool("avbtool").Text("make_vbmeta_image")
@@ -196,6 +227,11 @@ func (v *vbmeta) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		return
 	}
 
+	if v.partitionName() == "vbmeta" && ctx.Config().Eng() {
+		// https://source.corp.google.com/h/googleplex-android/platform/build/+/0cf7c289634e9aad9720cb45bb42ad0d338f7802:core/Makefile;l=5057-5060;drc=0e426f646784e2d233098f6aa0f7444070b1049f;bpv=1;bpt=0
+		cmd.Flag("--set_hashtree_disabled_flag")
+	}
+
 	for _, avb_prop := range v.properties.Avb_properties {
 		key := proptools.String(avb_prop.Key)
 		if key == "" {
@@ -210,24 +246,81 @@ func (v *vbmeta) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		cmd.FlagWithArg("--prop ", key+":"+value)
 	}
 
-	for _, p := range ctx.GetDirectDepsWithTag(vbmetaPartitionDep) {
-		f, ok := p.(Filesystem)
+	type partitionWithName struct {
+		Name   string
+		Output android.Path
+	}
+	var includeDescriptorsFromImages []partitionWithName
+	for _, p := range ctx.GetDirectDepsProxyWithTag(vbmetaPartitionDep) {
+		bootImgInfo, ok := android.OtherModuleProvider(ctx, p, BootimgInfoProvider)
+		if ok {
+			includeDescriptorsFromImages = append(includeDescriptorsFromImages, partitionWithName{
+				Name:   bootImgInfo.Type.String(),
+				Output: bootImgInfo.SignedOutput,
+			})
+			continue
+		}
+		vbmetaPartitionInfo, ok := android.OtherModuleProvider(ctx, p, vbmetaPartitionProvider)
+		if ok {
+			includeDescriptorsFromImages = append(includeDescriptorsFromImages, partitionWithName{
+				Name:   vbmetaPartitionInfo.Name,
+				Output: vbmetaPartitionInfo.Output,
+			})
+			continue
+		}
+
+		vbmetaPartitionInfos, ok := android.OtherModuleProvider(ctx, p, vbmetaPartitionsProvider)
+		if ok {
+			for _, vbmetaPartitionInfo := range vbmetaPartitionInfos {
+				includeDescriptorsFromImages = append(includeDescriptorsFromImages, partitionWithName{
+					Name:   vbmetaPartitionInfo.Name,
+					Output: vbmetaPartitionInfo.Output,
+				})
+			}
+			continue
+		}
+
+		fsInfo, ok := android.OtherModuleProvider(ctx, p, FilesystemProvider)
 		if !ok {
-			ctx.PropertyErrorf("partitions", "%q(type: %s) is not supported",
+			ctx.PropertyErrorf("partitions", "%q(type: %s) is not supported, must be a filesystem",
 				p.Name(), ctx.OtherModuleType(p))
 			continue
 		}
-		signedImage := f.SignedOutputPath()
-		if signedImage == nil {
-			ctx.PropertyErrorf("partitions", "%q(type: %s) is not signed. Use `use_avb: true`",
-				p.Name(), ctx.OtherModuleType(p))
-			continue
-		}
-		cmd.FlagWithInput("--include_descriptors_from_image ", signedImage)
+		includeDescriptorsFromImages = append(includeDescriptorsFromImages, partitionWithName{
+			Name:   fsInfo.PartitionName,
+			Output: fsInfo.SignedOutputPath,
+		})
+	}
+
+	// This is the order that make listed the partitions in. The order is important because
+	// it ends up being encoded in the output file. Maintain the order so that the resultant
+	// files are easier to compare.
+	// https://cs.android.com/android/platform/superproject/main/+/main:build/make/core/Makefile;l=4833;drc=a951ebf0198006f7fd38073a05c442d0eb92f97b
+	if v.partitionName() == "vbmeta" {
+		sort.SliceStable(includeDescriptorsFromImages, func(i, j int) bool {
+			iName := includeDescriptorsFromImages[i].Name
+			jName := includeDescriptorsFromImages[j].Name
+			iIndex := slices.Index(includeDescriptorsFromImgOrder, iName)
+			jIndex := slices.Index(includeDescriptorsFromImgOrder, jName)
+			if iIndex < 0 && jIndex < 0 {
+				return iName < jName
+			}
+			if iIndex < 0 {
+				return false
+			}
+			if jIndex < 0 {
+				return true
+			}
+			return iIndex < jIndex
+		})
+	}
+
+	for _, partition := range includeDescriptorsFromImages {
+		cmd.FlagWithInput("--include_descriptors_from_image ", partition.Output)
 	}
 
 	seenRils := make(map[int]bool)
-	for _, cp := range ctx.GetDirectDepsWithTag(vbmetaChainedPartitionDep) {
+	for _, cp := range ctx.GetDirectDepsProxyWithTag(vbmetaChainedPartitionDep) {
 		info, ok := android.OtherModuleProvider(ctx, cp, vbmetaPartitionProvider)
 		if !ok {
 			ctx.PropertyErrorf("chained_partitions", "Expected all modules in chained_partitions to provide vbmetaPartitionProvider, but %s did not", cp.Name())
@@ -341,23 +434,49 @@ func (v *vbmeta) buildPropFileForMiscInfo(ctx android.ModuleContext) android.Pat
 	}
 
 	var partitionDepNames []string
+	var bootloaderPartitions []android.Path
 	ctx.VisitDirectDepsProxyWithTag(vbmetaPartitionDep, func(child android.ModuleProxy) {
 		if info, ok := android.OtherModuleProvider(ctx, child, vbmetaPartitionProvider); ok {
 			partitionDepNames = append(partitionDepNames, info.Name)
+		} else if info, ok := android.OtherModuleProvider(ctx, child, vbmetaPartitionsProvider); ok {
+			for _, vbmetaPartition := range info {
+				if vbmetaPartition.AbOtaBootloaderPartition {
+					// The bootloader partitions are unpacked from bootloader.img, signed with avb
+					// and its hashtree descriptors are included in vbmeta.img
+					// Make packaging's add_img_to_target_files invocation does this by
+					// explicitly adding `--include_descriptors_from_image $signed.img` to avb_vbmeta_args
+					// This ports this implementation to Soong.
+					bootloaderPartitions = append(bootloaderPartitions, vbmetaPartition.Output)
+				}
+			}
 		} else {
 			ctx.ModuleErrorf("vbmeta dep %s does not set vbmetaPartitionProvider\n", child)
 		}
 	})
+
 	if v.partitionName() != "vbmeta" { // skip for vbmeta to match Make's misc_info.txt
 		addStr(fmt.Sprintf("avb_%s", v.partitionName()), strings.Join(android.SortedUniqueStrings(partitionDepNames), " "))
 	}
 
-	addStr(fmt.Sprintf("avb_%s_args", v.partitionName()), fmt.Sprintf("--padding_size 4096 --rollback_index %s", v.rollbackIndexString(ctx)))
+	var args []string
+	for _, p := range bootloaderPartitions {
+		args = append(args, "--include_descriptors_from_image "+p.String())
+	}
+	args = append(args, "--padding_size 4096")
+
+	// We only need the flag in top-level vbmeta.img.
+	// https://cs.android.com/android/platform/superproject/main/+/main:build/make/core/Makefile;l=4917;drc=a951ebf0198006f7fd38073a05c442d0eb92f97b
+	if ctx.Config().Eng() && v.partitionName() == "vbmeta" {
+		args = append(args, "--set_hashtree_disabled_flag")
+	}
+
+	args = append(args, "--rollback_index "+v.rollbackIndexString(ctx))
+	addStr(fmt.Sprintf("avb_%s_args", v.partitionName()), strings.Join(args, " "))
 
 	sort.Strings(lines)
 
 	propFile := android.PathForModuleOut(ctx, "prop_file_for_misc_info")
-	android.WriteFileRule(ctx, propFile, strings.Join(lines, "\n"))
+	android.WriteFileRule(ctx, propFile, strings.Join(lines, "\n"), bootloaderPartitions...)
 	return propFile
 }
 

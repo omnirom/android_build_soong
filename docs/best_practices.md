@@ -14,8 +14,7 @@ source tree.
 ## Network access
 
 Never access the network during the build. We expect to enforce this in the
-future, though there will be some level of exceptions for tools like `distcc`
-and `goma`.
+future, though there will be some level of exceptions for tools like `distcc`.
 
 ## Paths
 

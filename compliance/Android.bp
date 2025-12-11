@@ -20,6 +20,7 @@ bootstrap_go_package {
     name: "soong-compliance",
     pkgPath: "android/soong/compliance",
     deps: [
+        "blueprint",
         "soong-android",
     ],
     srcs: [

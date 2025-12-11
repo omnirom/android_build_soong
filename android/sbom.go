@@ -15,7 +15,9 @@
 package android
 
 import (
+	"path"
 	"path/filepath"
+	"strings"
 
 	"github.com/google/blueprint"
 )
@@ -26,9 +28,9 @@ var (
 
 	// Command to generate SBOM in Soong.
 	genSbomRule = pctx.AndroidStaticRule("genSbomRule", blueprint.RuleParams{
-		Command:     "rm -rf $out && ${genSbom} --output_file ${out} --metadata ${in} --product_out ${productOut} --soong_out ${soongOut} --build_version \"$$(cat ${buildFingerprintFile})\" --product_mfr \"${productManufacturer}\" --json",
+		Command:     "rm -rf $out && ${genSbom} --output_file ${out} --metadata ${in} --product_out ${productOut} --soong_out ${soongOut} --build_version \"$$(cat ${buildFingerprintFile})\" --product_mfr \"${productManufacturer}\" --json ${unbundledModule}",
 		CommandDeps: []string{"${genSbom}"},
-	}, "productOut", "soongOut", "buildFingerprintFile", "productManufacturer")
+	}, "productOut", "soongOut", "buildFingerprintFile", "productManufacturer", "unbundledModule")
 )
 
 func init() {
@@ -41,7 +43,6 @@ func RegisterSbomSingleton(ctx RegistrationContext) {
 
 // sbomSingleton is used to generate build actions of generating SBOM of products.
 type sbomSingleton struct {
-	sbomFile OutputPath
 }
 
 func sbomSingletonFactory() Singleton {
@@ -53,37 +54,76 @@ func (this *sbomSingleton) GenerateBuildActions(ctx SingletonContext) {
 	if !ctx.Config().HasDeviceProduct() {
 		return
 	}
-	implicits := []Path{}
-	prodVars := ctx.Config().productVariables
-	buildFingerprintFile := PathForArbitraryOutput(ctx, "target", "product", String(prodVars.DeviceName), "build_fingerprint.txt")
-	implicits = append(implicits, buildFingerprintFile)
-
-	// Add installed_files.stamp as implicit input, which depends on all installed files of the product.
-	installedFilesStamp := PathForOutput(ctx, "compliance-metadata", ctx.Config().DeviceProduct(), "installed_files.stamp")
-	implicits = append(implicits, installedFilesStamp)
-
+	buildFingerprintFile := ctx.Config().BuildFingerprintFile(ctx)
 	metadataDb := PathForOutput(ctx, "compliance-metadata", ctx.Config().DeviceProduct(), "compliance-metadata.db")
-	this.sbomFile = PathForOutput(ctx, "sbom", ctx.Config().DeviceProduct(), "sbom.spdx.json")
-	ctx.Build(pctx, BuildParams{
-		Rule:      genSbomRule,
-		Input:     metadataDb,
-		Implicits: implicits,
-		Output:    this.sbomFile,
-		Args: map[string]string{
-			"productOut":           filepath.Join(ctx.Config().OutDir(), "target", "product", String(prodVars.DeviceName)),
-			"soongOut":             ctx.Config().soongOutDir,
-			"buildFingerprintFile": buildFingerprintFile.String(),
-			"productManufacturer":  ctx.Config().ProductVariables().ProductManufacturer,
-		},
-	})
+	productOut := filepath.Join(ctx.Config().OutDir(), "target", "product", String(ctx.Config().productVariables.DeviceName))
 
-	if !ctx.Config().UnbundledBuildApps() {
+	if ctx.Config().HasUnbundledBuildApps() {
+		// In unbundled builds, the unbundled_builder module will find what modules to build
+		// and then call BuildUnbundledSbom() on each of them, so this singleton doesn't need
+		// to do anything.
+
+		// Still create an sbom phony just so the phony exists even if there are no sbom-generating
+		// unbundled apps.
+		ctx.Phony("sbom")
+	} else {
 		// When building SBOM of products, phony rule "sbom" is for generating product SBOM in Soong.
+		implicits := []Path{}
+		implicits = append(implicits, buildFingerprintFile)
+
+		// Add installed_files.stamp as implicit input, which depends on all installed files of the product.
+		installedFilesStamp := PathForOutput(ctx, "compliance-metadata", ctx.Config().DeviceProduct(), "installed_files.stamp")
+		implicits = append(implicits, installedFilesStamp)
+
+		sbomFile := PathForOutput(ctx, "sbom", ctx.Config().DeviceProduct(), "sbom.spdx.json")
+		ctx.Build(pctx, BuildParams{
+			Rule:      genSbomRule,
+			Input:     metadataDb,
+			Implicits: implicits,
+			Output:    sbomFile,
+			Args: map[string]string{
+				"productOut":           productOut,
+				"soongOut":             ctx.Config().soongOutDir,
+				"buildFingerprintFile": buildFingerprintFile.String(),
+				"productManufacturer":  ctx.Config().ProductVariables().ProductManufacturer,
+			},
+		})
+
 		ctx.Build(pctx, BuildParams{
 			Rule:   blueprint.Phony,
-			Inputs: []Path{this.sbomFile},
+			Inputs: []Path{sbomFile},
 			Output: PathForPhony(ctx, "sbom"),
 		})
-		ctx.DistForGoalWithFilename("droid", this.sbomFile, "sbom/sbom.spdx.json")
+		ctx.DistForGoalWithFilename("droid", sbomFile, "sbom/sbom.spdx.json")
+	}
+}
+
+func BuildUnbundledSbom(ctx ModuleContext, module ModuleProxy) {
+	if metadataInfo, ok := OtherModuleProvider(ctx, module, ComplianceMetadataProvider); ok && len(metadataInfo.filesContained) > 0 {
+		buildFingerprintFile := ctx.Config().BuildFingerprintFile(ctx)
+		metadataDb := PathForOutput(ctx, "compliance-metadata", ctx.Config().DeviceProduct(), "compliance-metadata.db")
+		productOut := filepath.Join(ctx.Config().OutDir(), "target", "product", String(ctx.Config().productVariables.DeviceName))
+
+		implicits := []Path{}
+		implicits = append(implicits, buildFingerprintFile)
+		installedFile := metadataInfo.filesContained[0]
+		implicits = append(implicits, PathForArbitraryOutput(ctx, strings.TrimPrefix(installedFile, ctx.Config().OutDir()+"/")))
+
+		sbomFile := PathForOutput(ctx, "sbom", ctx.Config().DeviceProduct(), module.Name(), path.Base(installedFile)+".spdx.json")
+		ctx.Build(pctx, BuildParams{
+			Rule:      genSbomRule,
+			Input:     metadataDb,
+			Implicits: implicits,
+			Output:    sbomFile,
+			Args: map[string]string{
+				"productOut":           productOut,
+				"soongOut":             ctx.Config().soongOutDir,
+				"buildFingerprintFile": buildFingerprintFile.String(),
+				"productManufacturer":  ctx.Config().ProductVariables().ProductManufacturer,
+				"unbundledModule":      "--unbundled_module " + module.Name(),
+			},
+		})
+		ctx.Phony("sbom", sbomFile)
+		ctx.DistForGoalsWithFilename([]string{"apps_only", "sbom"}, sbomFile, "sbom/"+sbomFile.Base())
 	}
 }

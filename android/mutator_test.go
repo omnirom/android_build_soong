@@ -129,7 +129,7 @@ func TestFinalDepsPhase(t *testing.T) {
 				ctx.BottomUp("final", func(ctx BottomUpMutatorContext) {
 					counter, _ := finalGot.LoadOrStore(ctx.Module().String(), &atomic.Int64{})
 					counter.(*atomic.Int64).Add(1)
-					ctx.VisitDirectDeps(func(mod Module) {
+					ctx.VisitDirectDepsProxy(func(mod ModuleProxy) {
 						counter, _ := finalGot.LoadOrStore(fmt.Sprintf("%s -> %s", ctx.Module().String(), mod), &atomic.Int64{})
 						counter.(*atomic.Int64).Add(1)
 					})

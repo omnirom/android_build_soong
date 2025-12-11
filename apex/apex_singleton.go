@@ -75,9 +75,6 @@ var (
 				echo "When submitting the generated CL, you must include the following information";
 				echo "in the commit message if you are adding a new dependency:";
 				echo "Apex-Size-Increase: Expected binary size increase for affected APEXes (or the size of the .jar / .so file of the new library)";
-				echo "Previous-Platform-Support: Are the maintainers of the new dependency committed to supporting previous platform releases?";
-				echo "Aosp-First: Is the new dependency being developed AOSP-first or internal?";
-				echo "Test-Info: What’s the testing strategy for the new dependency? Does it have its own tests, and are you adding integration tests? How/when are the tests run?";
 				echo "You do not need OWNERS approval to submit the change, but mainline-modularization@";
 				echo "will periodically review additions and may require changes.";
 				echo "******************************";
@@ -158,10 +155,10 @@ type apexPrebuiltInfo struct {
 }
 
 func (a *apexPrebuiltInfo) GenerateBuildActions(ctx android.SingletonContext) {
-	prebuiltInfos := []android.PrebuiltInfo{}
+	prebuiltInfos := []android.PrebuiltJsonInfo{}
 
 	ctx.VisitAllModuleProxies(func(m android.ModuleProxy) {
-		prebuiltInfo, exists := android.OtherModuleProvider(ctx, m, android.PrebuiltInfoProvider)
+		prebuiltInfo, exists := android.OtherModuleProvider(ctx, m, android.PrebuiltJsonInfoProvider)
 		// Use prebuiltInfoProvider to filter out non apex soong modules.
 		// Use HideFromMake to filter out the unselected variants of a specific apex.
 		if exists && !android.OtherModulePointerProviderOrDefault(ctx, m, android.CommonModuleInfoProvider).HideFromMake {

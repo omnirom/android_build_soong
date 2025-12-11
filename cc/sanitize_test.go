@@ -1354,9 +1354,9 @@ func TestHwasan(t *testing.T) {
 			extraPreparer: android.FixtureModifyConfig(func(config android.Config) {
 				config.Targets[android.Android] = []android.Target{
 					{
-						android.Android,
-						android.Arch{
-							ArchType: android.X86, ArchVariant: "silvermont", Abi: []string{"armeabi-v7a"}}, android.NativeBridgeDisabled, "", "", false},
+						Os:   android.Android,
+						Arch: android.Arch{ArchType: android.X86, ArchVariant: "silvermont", Abi: []string{"armeabi-v7a"}},
+					},
 				}
 			}),
 			expectedVariants: map[string][]string{

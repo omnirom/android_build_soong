@@ -20,23 +20,7 @@ import (
 	"testing"
 
 	"android/soong/android"
-
-	"github.com/google/blueprint"
 )
-
-type visitDirectDepsInterface interface {
-	VisitDirectDeps(blueprint.Module, func(dep blueprint.Module))
-}
-
-func hasDirectDep(ctx visitDirectDepsInterface, m android.Module, wantDep android.Module) bool {
-	var found bool
-	ctx.VisitDirectDeps(m, func(dep blueprint.Module) {
-		if dep == wantDep {
-			found = true
-		}
-	})
-	return found
-}
 
 func TestAfdoDeps(t *testing.T) {
 	t.Parallel()
@@ -129,11 +113,11 @@ func TestAfdoDeps(t *testing.T) {
 	}
 
 	// Check dependency edge from afdo-enabled module to static deps
-	if !hasDirectDep(result, libTest.Module(), libFooAfdoVariant.Module()) {
+	if !android.HasDirectDep(result, libTest.Module(), libFooAfdoVariant.Module()) {
 		t.Errorf("libTest missing dependency on afdo variant of libFoo")
 	}
 
-	if !hasDirectDep(result, libFooAfdoVariant.Module(), libBarAfdoVariant.Module()) {
+	if !android.HasDirectDep(result, libFooAfdoVariant.Module(), libBarAfdoVariant.Module()) {
 		t.Errorf("libTest missing dependency on afdo variant of libBar")
 	}
 
@@ -157,11 +141,11 @@ func TestAfdoDeps(t *testing.T) {
 	}
 
 	// Check dependency edges of static deps
-	if hasDirectDep(result, libTest.Module(), libFoo.Module()) {
+	if android.HasDirectDep(result, libTest.Module(), libFoo.Module()) {
 		t.Errorf("libTest should not depend on non-afdo variant of libFoo")
 	}
 
-	if !hasDirectDep(result, libFoo.Module(), libBar.Module()) {
+	if !android.HasDirectDep(result, libFoo.Module(), libBar.Module()) {
 		t.Errorf("libFoo missing dependency on non-afdo variant of libBar")
 	}
 
@@ -191,11 +175,11 @@ func TestAfdoDeps(t *testing.T) {
 	}
 
 	// Check dependency edge from afdo-enabled module to static deps
-	if !hasDirectDep(result, libTest32.Module(), libFooAfdoVariant32.Module()) {
+	if !android.HasDirectDep(result, libTest32.Module(), libFooAfdoVariant32.Module()) {
 		t.Errorf("arm32 libTest missing dependency on afdo variant of libFoo")
 	}
 
-	if !hasDirectDep(result, libFooAfdoVariant32.Module(), libBarAfdoVariant32.Module()) {
+	if !android.HasDirectDep(result, libFooAfdoVariant32.Module(), libBarAfdoVariant32.Module()) {
 		t.Errorf("arm32 libTest missing dependency on afdo variant of libBar")
 	}
 
@@ -240,11 +224,11 @@ func TestAfdoDeps(t *testing.T) {
 	}
 
 	// Check dependency edge from afdo-enabled module to static deps
-	if !hasDirectDep(result, libTestHost.Module(), libFooHost.Module()) {
+	if !android.HasDirectDep(result, libTestHost.Module(), libFooHost.Module()) {
 		t.Errorf("host libTest missing dependency on non-afdo variant of libFoo")
 	}
 
-	if !hasDirectDep(result, libFooHost.Module(), libBarHost.Module()) {
+	if !android.HasDirectDep(result, libFooHost.Module(), libBarHost.Module()) {
 		t.Errorf("host libTest missing dependency on non-afdo variant of libBar")
 	}
 
@@ -305,11 +289,11 @@ func TestAfdoEnabledOnStaticDepNoAfdo(t *testing.T) {
 	libFoo := result.ModuleForTests(t, "libFoo", "android_arm64_armv8-a_static")
 	libBar := result.ModuleForTests(t, "libBar", "android_arm64_armv8-a_static").Module()
 
-	if !hasDirectDep(result, libTest, libFoo.Module()) {
+	if !android.HasDirectDep(result, libTest, libFoo.Module()) {
 		t.Errorf("libTest missing dependency on non-afdo variant of libFoo")
 	}
 
-	if !hasDirectDep(result, libFoo.Module(), libBar) {
+	if !android.HasDirectDep(result, libFoo.Module(), libBar) {
 		t.Errorf("libFoo missing dependency on non-afdo variant of libBar")
 	}
 
@@ -503,11 +487,11 @@ func TestMultipleAfdoRDeps(t *testing.T) {
 	}
 
 	// Check dependency edges of static deps
-	if !hasDirectDep(result, libTest.Module(), libFooAfdoVariantWithLibTest.Module()) {
+	if !android.HasDirectDep(result, libTest.Module(), libFooAfdoVariantWithLibTest.Module()) {
 		t.Errorf("libTest missing dependency on afdo variant of libFoo")
 	}
 
-	if !hasDirectDep(result, libBar.Module(), libFooAfdoVariantWithLibBar.Module()) {
+	if !android.HasDirectDep(result, libBar.Module(), libFooAfdoVariantWithLibBar.Module()) {
 		t.Errorf("libFoo missing dependency on non-afdo variant of libBar")
 	}
 }
@@ -563,11 +547,11 @@ func TestAfdoDepsWithoutProfile(t *testing.T) {
 		t.Errorf("Expected 'libBarAfdoVariant' to enable afdo, but did not find %q in cflags %q", expectedCFlag, cFlags)
 	}
 	// Check dependency edge from afdo-enabled module to static deps
-	if !hasDirectDep(result, libTest.Module(), libFooAfdoVariant.Module()) {
+	if !android.HasDirectDep(result, libTest.Module(), libFooAfdoVariant.Module()) {
 		t.Errorf("libTest missing dependency on afdo variant of libFoo")
 	}
 
-	if !hasDirectDep(result, libFooAfdoVariant.Module(), libBarAfdoVariant.Module()) {
+	if !android.HasDirectDep(result, libFooAfdoVariant.Module(), libBarAfdoVariant.Module()) {
 		t.Errorf("libTest missing dependency on afdo variant of libBar")
 	}
 
@@ -585,11 +569,11 @@ func TestAfdoDepsWithoutProfile(t *testing.T) {
 	}
 
 	// Check dependency edges of static deps
-	if hasDirectDep(result, libTest.Module(), libFoo.Module()) {
+	if android.HasDirectDep(result, libTest.Module(), libFoo.Module()) {
 		t.Errorf("libTest should not depend on non-afdo variant of libFoo")
 	}
 
-	if !hasDirectDep(result, libFoo.Module(), libBar.Module()) {
+	if !android.HasDirectDep(result, libFoo.Module(), libBar.Module()) {
 		t.Errorf("libFoo missing dependency on non-afdo variant of libBar")
 	}
 }

@@ -79,7 +79,6 @@ type Toolchain interface {
 	Cflags() string
 	Cppflags() string
 	Ldflags() string
-	Lldflags() string
 	InstructionSetFlags(string) (string, error)
 
 	ndkTriple() string

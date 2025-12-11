@@ -25,6 +25,8 @@ var archVariants = map[ArchType][]string{
 		"armv8-a-branchprot",
 		"armv8-2a",
 		"armv8-2a-dotprod",
+		"armv8-5a",
+		"armv8-7a",
 		"armv9-a",
 		"armv9-2a",
 		"armv9-3a",
@@ -113,8 +115,14 @@ var cpuVariants = map[ArchType][]string{
 	X86_64: {},
 }
 
+// Lists all possible optional features for each architecture.
 var archFeatures = map[ArchType][]string{
+	Arm: {
+		// Software implementation of ceil/floor is needed in libm
+		"soft_ceil_floor",
+	},
 	Arm64: {
+		"branchprot",
 		"dotprod",
 	},
 	X86: {
@@ -142,21 +150,43 @@ var archFeatures = map[ArchType][]string{
 	},
 }
 
+// Lists which optional features are automatically enabled
+// for each value of TARGET_ARCH_VARIANT.
 var androidArchFeatureMap = map[ArchType]map[string][]string{
+	Arm: {
+		"armv7-a-neon": {
+			"soft_ceil_floor",
+		},
+	},
 	Arm64: {
+		"armv8-a-branchprot": {
+			"branchprot",
+		},
 		"armv8-2a-dotprod": {
 			"dotprod",
 		},
+		"armv8-5a": {
+			"branchprot",
+			"dotprod",
+		},
+		"armv8-7a": {
+			"branchprot",
+			"dotprod",
+		},
 		"armv9-a": {
+			"branchprot",
 			"dotprod",
 		},
 		"armv9-2a": {
+			"branchprot",
 			"dotprod",
 		},
 		"armv9-3a": {
+			"branchprot",
 			"dotprod",
 		},
 		"armv9-4a": {
+			"branchprot",
 			"dotprod",
 		},
 	},

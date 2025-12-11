@@ -142,74 +142,64 @@ class SymbolPresenceTest(unittest.TestCase):
     def test_symbol_in_api(self) -> None:
         self.assertTrue(symbolfile.symbol_in_api([], Arch('arm'), 9))
         self.assertTrue(
-            symbolfile.symbol_in_api([Tag('introduced=9')], Arch('arm'), 9))
+            symbolfile.symbol_in_api(Tags.from_strs(['introduced=9']), Arch('arm'), 9))
         self.assertTrue(
-            symbolfile.symbol_in_api([Tag('introduced=9')], Arch('arm'), 14))
+            symbolfile.symbol_in_api(Tags.from_strs(['introduced=9']), Arch('arm'), 14))
         self.assertTrue(
-            symbolfile.symbol_in_api([Tag('introduced-arm=9')], Arch('arm'),
+            symbolfile.symbol_in_api(Tags.from_strs(['introduced-arm=9']), Arch('arm'),
                                      14))
         self.assertTrue(
-            symbolfile.symbol_in_api([Tag('introduced-arm=9')], Arch('arm'),
+            symbolfile.symbol_in_api(Tags.from_strs(['introduced-arm=9']), Arch('arm'),
                                      14))
         self.assertTrue(
-            symbolfile.symbol_in_api([Tag('introduced-x86=14')], Arch('arm'),
+            symbolfile.symbol_in_api(Tags.from_strs(['introduced-x86=14']), Arch('arm'),
                                      9))
         self.assertTrue(
             symbolfile.symbol_in_api(
-                [Tag('introduced-arm=9'),
-                 Tag('introduced-x86=21')], Arch('arm'), 14))
+                Tags.from_strs(['introduced-arm=9',
+                                'introduced-x86=21']), Arch('arm'), 14))
         self.assertTrue(
             symbolfile.symbol_in_api(
-                [Tag('introduced=9'),
-                 Tag('introduced-x86=21')], Arch('arm'), 14))
+                Tags.from_strs(['introduced=9',
+                                'introduced-x86=21']), Arch('arm'), 14))
         self.assertTrue(
             symbolfile.symbol_in_api(
-                [Tag('introduced=21'),
-                 Tag('introduced-arm=9')], Arch('arm'), 14))
-        self.assertTrue(
-            symbolfile.symbol_in_api([Tag('future')], Arch('arm'),
-                                     symbolfile.FUTURE_API_LEVEL))
+                Tags.from_strs(['introduced=21',
+                                'introduced-arm=9']), Arch('arm'), 14))
 
         self.assertFalse(
-            symbolfile.symbol_in_api([Tag('introduced=14')], Arch('arm'), 9))
+            symbolfile.symbol_in_api(Tags.from_strs(['introduced=14']), Arch('arm'), 9))
         self.assertFalse(
-            symbolfile.symbol_in_api([Tag('introduced-arm=14')], Arch('arm'),
+            symbolfile.symbol_in_api(Tags.from_strs(['introduced-arm=14']), Arch('arm'),
                                      9))
         self.assertFalse(
-            symbolfile.symbol_in_api([Tag('future')], Arch('arm'), 9))
+            symbolfile.symbol_in_api(
+                Tags.from_strs(['introduced-arm=21',
+                                'introduced-x86=9']), Arch('arm'), 14))
         self.assertFalse(
             symbolfile.symbol_in_api(
-                [Tag('introduced=9'), Tag('future')], Arch('arm'), 14))
-        self.assertFalse(
-            symbolfile.symbol_in_api([Tag('introduced-arm=9'),
-                                      Tag('future')], Arch('arm'), 14))
+                Tags.from_strs(['introduced=9',
+                                'introduced-arm=21']), Arch('arm'), 14))
         self.assertFalse(
             symbolfile.symbol_in_api(
-                [Tag('introduced-arm=21'),
-                 Tag('introduced-x86=9')], Arch('arm'), 14))
-        self.assertFalse(
-            symbolfile.symbol_in_api(
-                [Tag('introduced=9'),
-                 Tag('introduced-arm=21')], Arch('arm'), 14))
-        self.assertFalse(
-            symbolfile.symbol_in_api(
-                [Tag('introduced=21'),
-                 Tag('introduced-x86=9')], Arch('arm'), 14))
+                Tags.from_strs(['introduced=21',
+                                'introduced-x86=9']), Arch('arm'), 14))
 
         # Interesting edge case: this symbol should be omitted from the
         # library, but this call should still return true because none of the
         # tags indiciate that it's not present in this API level.
-        self.assertTrue(symbolfile.symbol_in_api([Tag('x86')], Arch('arm'), 9))
+        self.assertTrue(symbolfile.symbol_in_api(
+            Tags.from_strs(['x86']), Arch('arm'), 9))
 
     def test_verioned_in_api(self) -> None:
         self.assertTrue(symbolfile.symbol_versioned_in_api([], 9))
         self.assertTrue(
-            symbolfile.symbol_versioned_in_api([Tag('versioned=9')], 9))
+            symbolfile.symbol_versioned_in_api(Tags.from_strs(['versioned=9']), 9))
         self.assertTrue(
-            symbolfile.symbol_versioned_in_api([Tag('versioned=9')], 14))
+            symbolfile.symbol_versioned_in_api(Tags.from_strs(['versioned=9']), 14))
 
         self.assertFalse(
-            symbolfile.symbol_versioned_in_api([Tag('versioned=14')], 9))
+            symbolfile.symbol_versioned_in_api(Tags.from_strs(['versioned=14']), 9))
 
 
 class OmitVersionTest(unittest.TestCase):
@@ -384,6 +374,16 @@ class OmitSymbolTest(unittest.TestCase):
         self.assertInclude(f, s_apex)
         self.assertInclude(f, s_systemapi)
 
+    def test_omit_private(self) -> None:
+        f_arm = self.filter
+        s_none = Symbol('foo', Tags())
+        s_platform_only = Symbol('foo', Tags.from_strs(['platform-only']))
+        s_draft = Symbol('foo', Tags.from_strs(['draft']))
+
+        self.assertInclude(f_arm, s_none)
+        self.assertOmit(f_arm, s_platform_only)
+        self.assertOmit(f_arm, s_draft)
+
     def test_omit_arch(self) -> None:
         f_arm = self.filter
         s_none = Symbol('foo', Tags())
@@ -449,7 +449,8 @@ class SymbolFileParseTest(unittest.TestCase):
         version = parser.parse_version()
         self.assertEqual('VERSION_1', version.name)
         self.assertIsNone(version.base)
-        self.assertEqual(Tags.from_strs(['weak', 'introduced=35']), version.tags)
+        self.assertEqual(Tags.from_strs(
+            ['weak', 'introduced=35']), version.tags)
 
         # Inherit introduced= tags from version block so that
         # should_omit_tags() can differently based on introduced API level when treating

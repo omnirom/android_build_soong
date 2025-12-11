@@ -15,8 +15,6 @@
 package build
 
 import (
-	"android/soong/ui/metrics"
-	"android/soong/ui/status"
 	"crypto/md5"
 	"fmt"
 	"io/ioutil"
@@ -24,6 +22,9 @@ import (
 	"os/user"
 	"path/filepath"
 	"strings"
+
+	"android/soong/ui/metrics"
+	"android/soong/ui/status"
 )
 
 var spaceSlashReplacer = strings.NewReplacer("/", "_", " ", "_")
@@ -70,8 +71,7 @@ func genKatiSuffix(ctx Context, config Config) {
 	}
 }
 
-func writeValueIfChanged(ctx Context, config Config, dir string, filename string, value string) {
-	filePath := filepath.Join(dir, filename)
+func writeValueIfChanged(ctx Context, filePath string, value string) {
 	previousValue := ""
 	rawPreviousValue, err := os.ReadFile(filePath)
 	if err == nil {
@@ -85,12 +85,20 @@ func writeValueIfChanged(ctx Context, config Config, dir string, filename string
 	}
 }
 
+func copyFileIfChanged(ctx Context, from, to string) {
+	fromContents, err := os.ReadFile(from)
+	if err != nil {
+		ctx.Fatalf("Failed to read %s: ", err)
+	}
+	writeValueIfChanged(ctx, to, string(fromContents))
+}
+
 // Base function to construct and run the Kati command line with additional
 // arguments, and a custom function closure to mutate the environment Kati runs
 // in.
-func runKati(ctx Context, config Config, extraSuffix string, args []string, envFunc func(*Environment)) {
+func runKati(ctx Context, config Config, e *TraceEvent, extraSuffix string, args []string, envFunc func(*Environment)) {
 	executable := config.KatiBin()
-	// cKati arguments.
+	// Kati arguments.
 	args = append([]string{
 		// Instead of executing commands directly, generate a Ninja file.
 		"--ninja",
@@ -162,7 +170,7 @@ func runKati(ctx Context, config Config, extraSuffix string, args []string, envF
 		args = append(args, "--default_pool=local_pool")
 	}
 
-	cmd := Command(ctx, config, "ckati", executable, args...)
+	cmd := Command(ctx, config, e, "kati", executable, args...)
 
 	// Set up the nsjail sandbox.
 	cmd.Sandbox = katiSandbox
@@ -170,7 +178,7 @@ func runKati(ctx Context, config Config, extraSuffix string, args []string, envF
 	// Set up stdout and stderr.
 	pipe, err := cmd.StdoutPipe()
 	if err != nil {
-		ctx.Fatalln("Error getting output pipe for ckati:", err)
+		ctx.Fatalln("Error getting output pipe for kati:", err)
 	}
 	cmd.Stderr = cmd.Stdout
 
@@ -228,8 +236,8 @@ func runKati(ctx Context, config Config, extraSuffix string, args []string, envF
 }
 
 func runKatiBuild(ctx Context, config Config) {
-	ctx.BeginTrace(metrics.RunKati, "kati build")
-	defer ctx.EndTrace()
+	e := ctx.BeginTrace(metrics.RunKati, "kati build")
+	defer e.End()
 
 	args := []string{
 		// Mark the output directory as writable.
@@ -262,7 +270,7 @@ func runKatiBuild(ctx Context, config Config) {
 		// the dist.mk file, containing dist-for-goals data.
 		"KATI_PACKAGE_MK_DIR="+config.KatiPackageMkDir())
 
-	runKati(ctx, config, katiBuildSuffix, args, func(env *Environment) {})
+	runKati(ctx, config, e, katiBuildSuffix, args, func(env *Environment) {})
 
 	// compress and dist the main build ninja file.
 	distGzipFile(ctx, config, config.KatiBuildNinjaFile())
@@ -278,8 +286,8 @@ func runKatiBuild(ctx Context, config Config) {
 // These should be increasingly uncommon, as it's a deprecated feature and there
 // isn't an equivalent feature in Soong.
 func cleanCopyHeaders(ctx Context, config Config) {
-	ctx.BeginTrace("clean", "clean copy headers")
-	defer ctx.EndTrace()
+	e := ctx.BeginTrace("clean", "clean copy headers")
+	defer e.End()
 
 	// Read and parse the list of copied headers from a file in the product
 	// output directory.
@@ -321,8 +329,8 @@ func cleanCopyHeaders(ctx Context, config Config) {
 // Clean out any previously installed files from the disk that are not installed
 // in the current build.
 func cleanOldInstalledFiles(ctx Context, config Config) {
-	ctx.BeginTrace("clean", "clean old installed files")
-	defer ctx.EndTrace()
+	e := ctx.BeginTrace("clean", "clean old installed files")
+	defer e.End()
 
 	// We shouldn't be removing files from one side of the two-step asan builds
 	var suffix string
@@ -340,8 +348,8 @@ func cleanOldInstalledFiles(ctx Context, config Config) {
 // Generate the Ninja file containing the packaging command lines for the dist
 // dir.
 func runKatiPackage(ctx Context, config Config, soongOnly bool) {
-	ctx.BeginTrace(metrics.RunKati, "kati package")
-	defer ctx.EndTrace()
+	e := ctx.BeginTrace(metrics.RunKati, "kati package")
+	defer e.End()
 
 	entryPoint := "build/make/packaging/main.mk"
 	suffix := katiPackageSuffix
@@ -367,7 +375,7 @@ func runKatiPackage(ctx Context, config Config, soongOnly bool) {
 	}
 
 	// Run Kati against a restricted set of environment variables.
-	runKati(ctx, config, suffix, args, func(env *Environment) {
+	runKati(ctx, config, e, suffix, args, func(env *Environment) {
 		env.Allow([]string{
 			// Some generic basics
 			"LANG",
@@ -400,10 +408,10 @@ func runKatiPackage(ctx Context, config Config, soongOnly bool) {
 
 // Run Kati on the cleanspec files to clean the build.
 func runKatiCleanSpec(ctx Context, config Config) {
-	ctx.BeginTrace(metrics.RunKati, "kati cleanspec")
-	defer ctx.EndTrace()
+	e := ctx.BeginTrace(metrics.RunKati, "kati cleanspec")
+	defer e.End()
 
-	runKati(ctx, config, katiCleanspecSuffix, []string{
+	runKati(ctx, config, e, katiCleanspecSuffix, []string{
 		// Fail when encountering implicit rules. e.g.
 		"--werror_implicit_rules",
 		// Fail when redefining / duplicating a target.

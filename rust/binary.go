@@ -15,6 +15,9 @@
 package rust
 
 import (
+	"github.com/google/blueprint/pathtools"
+	"github.com/google/blueprint/proptools"
+
 	"android/soong/android"
 )
 
@@ -69,6 +72,24 @@ func NewRustBinary(hod android.HostOrDeviceSupported) (*Module, *binaryDecorator
 	return module, binary
 }
 
+func (binary *binaryDecorator) begin(ctx BaseModuleContext) {
+	binary.baseCompiler.begin(ctx)
+
+	if ctx.Os().Linux() && ctx.Host() && ctx.toolchain().Musl() {
+		// Unless explicitly specified otherwise, host static binaries are built statically
+		// if HostStaticBinaries is true for the product configuration.
+		// In Rust however this is only supported for musl targets.
+		if binary.Properties.Static_executable == nil && ctx.Config().HostStaticBinaries() {
+			binary.Properties.Static_executable = proptools.BoolPtr(true)
+		}
+	}
+
+	if ctx.Darwin() || ctx.Windows() || (ctx.Os().Linux() && ctx.Host() && ctx.toolchain().Glibc()) {
+		// Static executables are not supported on Darwin, Linux glibc, or Windows
+		binary.Properties.Static_executable = nil
+	}
+}
+
 func (binary *binaryDecorator) compilerFlags(ctx ModuleContext, flags Flags) Flags {
 	flags = binary.baseCompiler.compilerFlags(ctx, flags)
 
@@ -79,11 +100,11 @@ func (binary *binaryDecorator) compilerFlags(ctx ModuleContext, flags Flags) Fla
 			"-Wl,--gc-sections",
 			"-Wl,-z,nocopyreloc",
 			"-Wl,--no-undefined-version")
+	}
 
-		if Bool(binary.Properties.Static_executable) {
-			flags.LinkFlags = append(flags.LinkFlags, "-static")
-			flags.RustFlags = append(flags.RustFlags, "-C relocation-model=static")
-		}
+	if Bool(binary.Properties.Static_executable) {
+		flags.LinkFlags = append(flags.LinkFlags, "-static")
+		flags.RustFlags = append(flags.RustFlags, "-C relocation-model=static")
 	}
 
 	return flags
@@ -109,12 +130,14 @@ func (binary *binaryDecorator) compilerDeps(ctx DepsContext, deps Deps) Deps {
 			deps.CrtBegin = []string{"libc_musl_crtbegin_dynamic"}
 		}
 		deps.CrtEnd = []string{"libc_musl_crtend"}
+	} else if ctx.Os() == android.Windows {
+		deps.CrtBegin = []string{"rsbegin.rust_sysroot"}
+		deps.CrtEnd = []string{"rsend.rust_sysroot"}
 	}
-
 	return deps
 }
 
-func (binary *binaryDecorator) compilerProps() []interface{} {
+func (binary *binaryDecorator) compilerProps() []any {
 	return append(binary.baseCompiler.compilerProps(),
 		&binary.Properties,
 		&binary.stripper.StripProperties)
@@ -132,7 +155,10 @@ func (binary *binaryDecorator) compile(ctx ModuleContext, flags Flags, deps Path
 	fileName := binary.getStem(ctx) + ctx.toolchain().ExecutableSuffix()
 	outputFile := android.PathForModuleOut(ctx, fileName)
 	ret := buildOutput{outputFile: outputFile}
-	crateRootPath := crateRootPath(ctx, binary)
+	crateRootPath := binary.crateRootPath(ctx)
+
+	deps.SrcFiles = append(deps.SrcFiles, crateRootPath)
+	deps.SrcFiles = append(deps.SrcFiles, binary.crateSources(ctx)...)
 
 	// Ensure link dirs are not duplicated
 	deps.linkDirs = android.FirstUniqueStrings(deps.linkDirs)
@@ -140,18 +166,28 @@ func (binary *binaryDecorator) compile(ctx ModuleContext, flags Flags, deps Path
 	flags.RustFlags = append(flags.RustFlags, deps.depFlags...)
 	flags.LinkFlags = append(flags.LinkFlags, deps.depLinkFlags...)
 	flags.LinkFlags = append(flags.LinkFlags, deps.rustLibObjects...)
-	flags.LinkFlags = append(flags.LinkFlags, deps.sharedLibObjects...)
 	flags.LinkFlags = append(flags.LinkFlags, deps.staticLibObjects...)
 	flags.LinkFlags = append(flags.LinkFlags, deps.wholeStaticLibObjects...)
+
+	if ctx.Windows() {
+		for _, lib := range deps.sharedLibObjects {
+			// Windows uses the .lib import library at link-time and at runtime
+			// uses the .dll library, so we need to make sure we're passing the
+			// import library to the linker.
+			flags.LinkFlags = append(flags.LinkFlags, pathtools.ReplaceExtension(lib, "lib"))
+		}
+	} else {
+		flags.LinkFlags = append(flags.LinkFlags, deps.sharedLibObjects...)
+	}
 
 	if binary.stripper.NeedsStrip(ctx) {
 		strippedOutputFile := outputFile
 		outputFile = android.PathForModuleOut(ctx, "unstripped", fileName)
 		binary.stripper.StripExecutableOrSharedLib(ctx, outputFile, strippedOutputFile)
 
-		binary.baseCompiler.strippedOutputFile = android.OptionalPathForPath(strippedOutputFile)
+		binary.strippedOutputFile = android.OptionalPathForPath(strippedOutputFile)
 	}
-	binary.baseCompiler.unstrippedOutputFile = outputFile
+	binary.unstrippedOutputFile = outputFile
 
 	ret.kytheFile = TransformSrcToBinary(ctx, crateRootPath, deps, flags, outputFile).kytheFile
 	return ret
@@ -168,9 +204,9 @@ func (binary *binaryDecorator) autoDep(ctx android.BottomUpMutatorContext) autoD
 	}
 }
 
-func (binary *binaryDecorator) stdLinkage(device bool) RustLinkage {
+func (binary *binaryDecorator) stdLinkage(device bool) StdLinkage {
 	if binary.preferRlib() {
-		return RlibLinkage
+		return RlibStd
 	}
 	return binary.baseCompiler.stdLinkage(device)
 }

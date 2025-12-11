@@ -20,8 +20,6 @@ import (
 
 	"android/soong/android"
 	"android/soong/cc"
-
-	"github.com/google/blueprint"
 )
 
 var ccCodegenModeTestData = []struct {
@@ -206,7 +204,8 @@ func TestAndroidMkCcLibrary(t *testing.T) {
 	`
 	result := android.GroupFixturePreparers(
 		PrepareForTestWithAconfigBuildComponents,
-		cc.PrepareForTestWithCcDefaultModules).
+		cc.PrepareForTestWithCcDefaultModules,
+		android.PrepareForTestWithAndroidMk).
 		ExtendWithErrorHandler(android.FixtureExpectsNoErrors).RunTestWithBp(t, bp)
 
 	module := result.ModuleForTests(t, "my_cc_library", "android_vendor_arm64_armv8-a_shared").Module()
@@ -214,7 +213,7 @@ func TestAndroidMkCcLibrary(t *testing.T) {
 	entry := android.AndroidMkInfoForTest(t, result.TestContext, module).PrimaryInfo
 
 	makeVar := entry.EntryMap["LOCAL_ACONFIG_FILES"]
-	android.EnsureListContainsSuffix(t, makeVar, "my_aconfig_declarations_foo/intermediate.pb")
+	android.EnsureListContainsSuffix(t, makeVar, "my_aconfig_declarations_foo/aconfig-cache.pb")
 }
 
 func TestForceReadOnly(t *testing.T) {
@@ -256,7 +255,7 @@ func TestForceReadOnly(t *testing.T) {
 
 	module := result.ModuleForTests(t, "my_cc_aconfig_library", "android_arm64_armv8-a_shared").Module()
 	dependOnReadLib := false
-	result.VisitDirectDeps(module, func(dep blueprint.Module) {
+	result.VisitDirectDeps(module, func(dep android.Module) {
 		if dep.Name() == libAconfigStorageReadApiCcDep {
 			dependOnReadLib = true
 		}

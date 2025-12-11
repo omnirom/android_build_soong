@@ -40,7 +40,7 @@ var _ SourceProvider = (*BaseSourceProvider)(nil)
 type SourceProvider interface {
 	GenerateSource(ctx ModuleContext, deps PathDeps) android.Path
 	Srcs() android.Paths
-	SourceProviderProps() []interface{}
+	SourceProviderProps() []any
 	SourceProviderDeps(ctx DepsContext, deps Deps) Deps
 	setSubName(subName string)
 	getSubName() string
@@ -55,8 +55,8 @@ func (sp *BaseSourceProvider) GenerateSource(ctx ModuleContext, deps PathDeps) a
 	panic("BaseSourceProviderModule does not implement GenerateSource()")
 }
 
-func (sp *BaseSourceProvider) SourceProviderProps() []interface{} {
-	return []interface{}{&sp.Properties}
+func (sp *BaseSourceProvider) SourceProviderProps() []any {
+	return []any{&sp.Properties}
 }
 
 func NewSourceProvider() *BaseSourceProvider {

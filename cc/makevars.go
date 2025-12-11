@@ -100,19 +100,15 @@ func makeVarsProvider(ctx android.MakeVarsContext) {
 
 	// Filter vendor_public_library that are exported to make
 	var exportedVendorPublicLibraries []string
-	ctx.VisitAllModules(func(module android.Module) {
-		if ccModule, ok := module.(*Module); ok {
-			baseName := ccModule.BaseModuleName()
-			if ccModule.IsVendorPublicLibrary() && module.ExportedToMake() {
-				exportedVendorPublicLibraries = append(exportedVendorPublicLibraries, baseName)
+	ctx.VisitAllModuleProxies(func(module android.ModuleProxy) {
+		if ccInfo, ok := android.OtherModuleProvider(ctx, module, CcInfoProvider); ok {
+			commonInfo := android.OtherModuleProviderOrDefault(ctx, module, android.CommonModuleInfoProvider)
+			if ccInfo.IsVendorPublicLibrary && commonInfo.ExportedToMake {
+				exportedVendorPublicLibraries = append(exportedVendorPublicLibraries, commonInfo.BaseModuleName)
 			}
 		}
 	})
 	ctx.Strict("VENDOR_PUBLIC_LIBRARIES", makeVarsString(exportedVendorPublicLibraries))
-
-	lsdumpPaths := *lsdumpPaths(ctx.Config())
-	sort.Strings(lsdumpPaths)
-	ctx.Strict("LSDUMP_PATHS", strings.Join(lsdumpPaths, " "))
 
 	ctx.Strict("ANDROID_WARNING_ALLOWED_PROJECTS", makeStringOfWarningAllowedProjects())
 
@@ -244,12 +240,6 @@ func makeVarsToolchain(ctx android.MakeVarsContext, secondPrefix string,
 	ctx.Strict(clangPrefix+"GLOBAL_LDFLAGS", strings.Join([]string{
 		fmt.Sprintf("${config.%sGlobalLdflags}", hod),
 		toolchain.Ldflags(),
-		toolchain.ToolchainLdflags(),
-		productExtraLdflags,
-	}, " "))
-	ctx.Strict(clangPrefix+"GLOBAL_LLDFLAGS", strings.Join([]string{
-		fmt.Sprintf("${config.%sGlobalLldflags}", hod),
-		toolchain.Lldflags(),
 		toolchain.ToolchainLdflags(),
 		productExtraLdflags,
 	}, " "))

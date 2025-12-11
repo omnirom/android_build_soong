@@ -221,7 +221,7 @@ func TestPlatformBootclasspath_ClasspathFragmentPaths(t *testing.T) {
 	android.AssertPathRelativeToTopEquals(t, "install filepath", "out/target/product/test_device/system/etc/classpaths", p.ClasspathFragmentBase.installDirPath)
 }
 
-func TestPlatformBootclasspathModule_AndroidMkEntries(t *testing.T) {
+func TestPlatformBootclasspathModule_AndroidMkInfo(t *testing.T) {
 	t.Parallel()
 	preparer := android.GroupFixturePreparers(
 		prepareForTestWithPlatformBootclasspath,
@@ -230,16 +230,17 @@ func TestPlatformBootclasspathModule_AndroidMkEntries(t *testing.T) {
 				name: "platform-bootclasspath",
 			}
 		`),
+		android.PrepareForTestWithAndroidMk,
 	)
 
-	t.Run("AndroidMkEntries", func(t *testing.T) {
+	t.Run("AndroidMkInfo", func(t *testing.T) {
 		t.Parallel()
 		result := preparer.RunTest(t)
 
 		p := result.Module("platform-bootclasspath", "android_common").(*platformBootclasspathModule)
 
-		entries := android.AndroidMkEntriesForTest(t, result.TestContext, p)
-		android.AssertIntEquals(t, "AndroidMkEntries count", 2, len(entries))
+		info := android.AndroidMkInfoForTest(t, result.TestContext, p)
+		android.AssertIntEquals(t, "AndroidMkInfo.ExtraInfo count", 1, len(info.ExtraInfo))
 	})
 
 	t.Run("hiddenapi-flags-entry", func(t *testing.T) {
@@ -248,8 +249,8 @@ func TestPlatformBootclasspathModule_AndroidMkEntries(t *testing.T) {
 
 		p := result.Module("platform-bootclasspath", "android_common").(*platformBootclasspathModule)
 
-		entries := android.AndroidMkEntriesForTest(t, result.TestContext, p)
-		got := entries[0].OutputFile
+		info := android.AndroidMkInfoForTest(t, result.TestContext, p)
+		got := info.PrimaryInfo.OutputFile
 		android.AssertBoolEquals(t, "valid output path", true, got.Valid())
 		android.AssertSame(t, "output filepath", p.hiddenAPIFlagsCSV, got.Path())
 	})
@@ -267,8 +268,8 @@ func TestPlatformBootclasspathModule_AndroidMkEntries(t *testing.T) {
 
 		p := result.Module("platform-bootclasspath", "android_common").(*platformBootclasspathModule)
 
-		entries := android.AndroidMkEntriesForTest(t, result.TestContext, p)
-		got := entries[1]
+		info := android.AndroidMkInfoForTest(t, result.TestContext, p)
+		got := info.ExtraInfo[0]
 		for k, expectedValue := range want {
 			if value, ok := got.EntryMap[k]; ok {
 				android.AssertDeepEquals(t, k, expectedValue, value)
@@ -315,8 +316,8 @@ func TestPlatformBootclasspath_Dist(t *testing.T) {
 	).RunTest(t)
 
 	platformBootclasspath := result.Module("platform-bootclasspath", "android_common").(*platformBootclasspathModule)
-	entries := android.AndroidMkEntriesForTest(t, result.TestContext, platformBootclasspath)
-	goals := entries[0].GetDistForGoals(platformBootclasspath)
+	info := android.AndroidMkInfoForTest(t, result.TestContext, platformBootclasspath)
+	goals := info.PrimaryInfo.GetDistForGoals(result.TestContext, platformBootclasspath)
 	android.AssertStringEquals(t, "platform dist goals phony", ".PHONY: droidcore", goals[0])
 	android.AssertStringDoesContain(t, "platform dist goals meta check", goals[1], "$(if $(strip $(ALL_TARGETS.")
 	android.AssertStringDoesContain(t, "platform dist goals meta assign", goals[1], "),,$(eval ALL_TARGETS.")

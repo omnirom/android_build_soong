@@ -53,13 +53,24 @@ var PrepareForTestWithJavaBuildComponents = android.GroupFixturePreparers(
 		// Needed for linter used by java_library.
 		"build/soong/java/lint_defaults.txt": nil,
 		// Needed for java components that invoke Metalava.
-		"build/soong/java/metalava/Android.bp": []byte(`filegroup {name: "metalava-config-files"}`),
+		"build/soong/java/metalava/default-unsafe-ignore-missing-latest-api.txt": nil,
+		"build/soong/java/metalava/Android.bp": []byte(`
+				filegroup {name: "metalava-config-files"}
+				filegroup {
+            name: "default-unsafe-ignore-missing-latest-api",
+            srcs: ["default-unsafe-ignore-missing-latest-api.txt"],
+        }
+			`),
 		// Needed for apps that do not provide their own.
 		"build/make/target/product/security": nil,
 		// Required to generate Java used-by API coverage
 		"build/soong/scripts/gen_java_usedby_apex.sh": nil,
-		// Needed for the global lint checks provided from frameworks/base
-		"prebuilts/cmdline-tools/AndroidGlobalLintChecker.jar": nil,
+		// Needed for the global lint checks provided from tools/lint_checks
+		"tools/lint_checks/global/Android.bp": []byte(`
+			java_library_host {
+				name: "AndroidGlobalLintChecker",
+			}
+			`),
 	}.AddToFixture(),
 	android.PrepareForTestWithBuildFlag("RELEASE_DEFAULT_UPDATABLE_MODULE_VERSION", testDefaultUpdatableModuleVersion),
 )
@@ -588,7 +599,7 @@ func getModuleDependencies(t *testing.T, ctx *android.TestContext, name, variant
 	t.Helper()
 	module := ctx.ModuleForTests(t, name, variant).Module()
 	deps := []string{}
-	ctx.VisitDirectDeps(module, func(m blueprint.Module) {
+	ctx.VisitDirectDepsProxies(module, func(m android.ModuleProxy) {
 		deps = append(deps, m.Name())
 	})
 	return android.SortedUniqueStrings(deps)
@@ -619,7 +630,7 @@ func CheckModuleHasDependency(t *testing.T, ctx *android.TestContext, name, vari
 func CheckModuleHasDependencyWithTag(t *testing.T, ctx *android.TestContext, name, variant string, desiredTag blueprint.DependencyTag, expected string) bool {
 	module := ctx.ModuleForTests(t, name, variant).Module()
 	found := false
-	ctx.VisitDirectDepsWithTags(module, func(m blueprint.Module, tag blueprint.DependencyTag) {
+	ctx.VisitDirectDepsProxiesWithTags(module, func(m blueprint.ModuleProxy, tag blueprint.DependencyTag) {
 		if tag == desiredTag && m.Name() == expected {
 			found = true
 		}
@@ -654,9 +665,9 @@ func CheckClasspathFragmentProtoContentInfoProvider(t *testing.T, result *androi
 func CheckPlatformBootclasspathDependencies(t *testing.T, ctx *android.TestContext, name, variant string, expected []string) {
 	t.Helper()
 	platformBootclasspath := ctx.ModuleForTests(t, name, variant).Module().(*platformBootclasspathModule)
-	modules := []android.Module{}
-	ctx.VisitDirectDeps(platformBootclasspath, func(m blueprint.Module) {
-		modules = append(modules, m.(android.Module))
+	modules := []android.ModuleProxy{}
+	ctx.VisitDirectDepsProxies(platformBootclasspath, func(m android.ModuleProxy) {
+		modules = append(modules, m)
 	})
 
 	pairs := apexNamePairsFromModules(ctx, modules, platformBootclasspath.libraryToApex)
@@ -664,7 +675,7 @@ func CheckPlatformBootclasspathDependencies(t *testing.T, ctx *android.TestConte
 }
 
 // apexNamePairsFromModules returns the apex:module pair for the supplied modules.
-func apexNamePairsFromModules(ctx *android.TestContext, modules []android.Module, modulesToApex map[android.Module]string) []string {
+func apexNamePairsFromModules(ctx *android.TestContext, modules []android.ModuleProxy, modulesToApex map[android.ModuleProxy]string) []string {
 	pairs := []string{}
 	for _, module := range modules {
 		pairs = append(pairs, apexNamePairFromModule(ctx, module, modulesToApex))
@@ -673,7 +684,7 @@ func apexNamePairsFromModules(ctx *android.TestContext, modules []android.Module
 }
 
 // ApexFragmentPairsFromModules returns the apex:fragment pair for the supplied fragments.
-func ApexFragmentPairsFromModules(ctx *android.TestContext, fragments []android.Module, apexNameToFragment map[string]android.Module) []string {
+func ApexFragmentPairsFromModules(ctx *android.TestContext, fragments []android.ModuleProxy, apexNameToFragment map[string]android.ModuleProxy) []string {
 	pairs := []string{}
 	for _, fragment := range fragments {
 		found := false
@@ -690,7 +701,7 @@ func ApexFragmentPairsFromModules(ctx *android.TestContext, fragments []android.
 	return pairs
 }
 
-func apexNamePairFromModule(ctx *android.TestContext, module android.Module, modulesToApex map[android.Module]string) string {
+func apexNamePairFromModule(ctx *android.TestContext, module android.ModuleProxy, modulesToApex map[android.ModuleProxy]string) string {
 	name := module.Name()
 	apex := modulesToApex[module]
 	if apex == "" {

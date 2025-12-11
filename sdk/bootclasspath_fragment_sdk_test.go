@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"android/soong/android"
+	"android/soong/dexpreopt"
 	"android/soong/java"
 )
 
@@ -90,6 +91,8 @@ func TestSnapshotWithBootclasspathFragment_ImageName(t *testing.T) {
 		// Add a platform_bootclasspath that depends on the fragment.
 		fixtureAddPlatformBootclasspathForBootclasspathFragmentWithExtra(
 			"com.android.art", "art-bootclasspath-fragment", java.ApexBootJarFragmentsForPlatformBootclasspath),
+
+		dexpreopt.FixtureSetBootImageProfiles("art/build/boot/boot-image-profile.txt"),
 
 		java.PrepareForBootImageConfigTest,
 		java.PrepareApexBootJarConfigsAndModules,

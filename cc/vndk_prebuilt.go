@@ -69,7 +69,7 @@ type vndkPrebuiltProperties struct {
 
 	// Check the prebuilt ELF files (e.g. DT_SONAME, DT_NEEDED, resolution of undefined symbols,
 	// etc).
-	Check_elf_files *bool
+	Check_elf_files *bool `android:"arch_variant"`
 }
 
 type vndkPrebuiltLibraryDecorator struct {

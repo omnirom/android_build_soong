@@ -66,7 +66,12 @@ function soong_build_go
     BUILDDIR=$(getoutdir) \
       SRCDIR=${TOP} \
       BLUEPRINTDIR=${TOP}/build/blueprint \
-      EXTRA_ARGS="-pkg-path android/soong=${TOP}/build/soong -pkg-path prebuilts/bazel/common/proto=${TOP}/prebuilts/bazel/common/proto -pkg-path rbcrun=${TOP}/build/make/tools/rbcrun -pkg-path google.golang.org/protobuf=${TOP}/external/golang-protobuf -pkg-path go.starlark.net=${TOP}/external/starlark-go" \
+      EXTRA_ARGS="-pkg-path android/soong=${TOP}/build/soong \
+        -pkg-path prebuilts/bazel/common/proto=${TOP}/prebuilts/bazel/common/proto \
+        -pkg-path rbcrun=${TOP}/build/make/tools/rbcrun \
+        -pkg-path google.golang.org/protobuf=${TOP}/external/golang-protobuf \
+        -pkg-path go.starlark.net=${TOP}/external/starlark-go \
+        -pkg-path github.com/akrylysov/pogreb=${TOP}/external/pogreb" \
       build_go $@
 }
 

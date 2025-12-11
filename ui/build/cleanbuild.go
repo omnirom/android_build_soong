@@ -206,8 +206,8 @@ func installCleanIfNecessary(ctx Context, config Config) {
 		return
 	}
 
-	ctx.BeginTrace(metrics.PrimaryNinja, "installclean")
-	defer ctx.EndTrace()
+	e := ctx.BeginTrace(metrics.PrimaryNinja, "installclean")
+	defer e.End()
 
 	previousProductAndVariant := strings.TrimPrefix(strings.TrimSuffix(previousConfig, suffix), prefix)
 	currentProductAndVariant := strings.TrimPrefix(strings.TrimSuffix(currentConfig, suffix), prefix)
@@ -223,6 +223,11 @@ func installCleanIfNecessary(ctx Context, config Config) {
 // all files which were potentially built with partial compile, so that they
 // get rebuilt with that turned off.
 func partialCompileCleanIfNecessary(ctx Context, config Config) {
+	// No need to ever clean unless TARGET_BUILD_VARIANT=eng.
+	if config.TargetBuildVariant() != "eng" {
+		return
+	}
+
 	configFile := config.DevicePreviousUsePartialCompile()
 	currentValue, _ := config.Environment().Get("SOONG_USE_PARTIAL_COMPILE")
 
@@ -253,8 +258,8 @@ func partialCompileCleanIfNecessary(ctx Context, config Config) {
 		return
 	case "true":
 		// Transitioning from on to off.  Build (phony) target: partialcompileclean.
-		ctx.BeginTrace(metrics.PrimaryNinja, "partialcompileclean")
-		defer ctx.EndTrace()
+		e := ctx.BeginTrace(metrics.PrimaryNinja, "partialcompileclean")
+		defer e.End()
 
 		ctx.Printf("SOONG_USE_PARTIAL_COMPILE turned off, forcing partialcompileclean\n")
 

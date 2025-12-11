@@ -20,7 +20,6 @@ import (
 	"testing"
 
 	"android/soong/android"
-	"github.com/google/blueprint"
 )
 
 var prepareForPrebuiltTest = android.GroupFixturePreparers(
@@ -132,42 +131,31 @@ func TestPrebuilt(t *testing.T) {
 	prebuiltLibfShared := ctx.ModuleForTests(t, "prebuilt_libf", "android_arm64_armv8-a_shared").Module()
 	prebuiltCrtx := ctx.ModuleForTests(t, "prebuilt_crtx", "android_arm64_armv8-a").Module()
 
-	hasDep := func(m android.Module, wantDep android.Module) bool {
-		t.Helper()
-		var found bool
-		ctx.VisitDirectDeps(m, func(dep blueprint.Module) {
-			if dep == wantDep {
-				found = true
-			}
-		})
-		return found
-	}
-
-	if !hasDep(liba, prebuiltLiba) {
+	if !android.HasDirectDep(ctx, liba, prebuiltLiba) {
 		t.Errorf("liba missing dependency on prebuilt_liba")
 	}
 
-	if !hasDep(libb, prebuiltLibb) {
+	if !android.HasDirectDep(ctx, libb, prebuiltLibb) {
 		t.Errorf("libb missing dependency on prebuilt_libb")
 	}
 
-	if !hasDep(libd, prebuiltLibd) {
+	if !android.HasDirectDep(ctx, libd, prebuiltLibd) {
 		t.Errorf("libd missing dependency on prebuilt_libd")
 	}
 
-	if !hasDep(libe, prebuiltLibe) {
+	if !android.HasDirectDep(ctx, libe, prebuiltLibe) {
 		t.Errorf("libe missing dependency on prebuilt_libe")
 	}
 
-	if !hasDep(libfStatic, prebuiltLibfStatic) {
+	if !android.HasDirectDep(ctx, libfStatic, prebuiltLibfStatic) {
 		t.Errorf("libf static missing dependency on prebuilt_libf")
 	}
 
-	if !hasDep(libfShared, prebuiltLibfShared) {
+	if !android.HasDirectDep(ctx, libfShared, prebuiltLibfShared) {
 		t.Errorf("libf shared missing dependency on prebuilt_libf")
 	}
 
-	if !hasDep(crtx, prebuiltCrtx) {
+	if !android.HasDirectDep(ctx, crtx, prebuiltCrtx) {
 		t.Errorf("crtx missing dependency on prebuilt_crtx")
 	}
 
@@ -440,17 +428,6 @@ func TestMultiplePrebuilts(t *testing.T) {
 		}
 		all_apex_contributions {name: "all_apex_contributions"}
 	`
-	hasDep := func(ctx *android.TestContext, m android.Module, wantDep android.Module) bool {
-		t.Helper()
-		var found bool
-		ctx.VisitDirectDeps(m, func(dep blueprint.Module) {
-			if dep == wantDep {
-				found = true
-			}
-		})
-		return found
-	}
-
 	testCases := []struct {
 		desc                   string
 		selectedDependencyName string
@@ -486,7 +463,7 @@ func TestMultiplePrebuilts(t *testing.T) {
 		}, preparer)
 		libfoo := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_shared").Module()
 		expectedDependency := ctx.ModuleForTests(t, tc.expectedDependencyName, "android_arm64_armv8-a_shared").Module()
-		android.AssertBoolEquals(t, fmt.Sprintf("expected dependency from %s to %s\n", libfoo.Name(), tc.expectedDependencyName), true, hasDep(ctx, libfoo, expectedDependency))
+		android.AssertBoolEquals(t, fmt.Sprintf("expected dependency from %s to %s\n", libfoo.Name(), tc.expectedDependencyName), true, android.HasDirectDep(ctx, libfoo, expectedDependency))
 		// check that LOCAL_SHARED_LIBRARIES contains libbar and not libbar.v<N>
 		entries := android.AndroidMkInfoForTest(t, ctx, libfoo).PrimaryInfo
 		android.AssertStringListContains(t, "Version should not be present in LOCAL_SHARED_LIBRARIES", entries.EntryMap["LOCAL_SHARED_LIBRARIES"], "libbar")
@@ -539,16 +516,6 @@ func TestMultiplePrebuiltsPreferredUsingLegacyFlags(t *testing.T) {
 		}
 		all_apex_contributions {name: "all_apex_contributions"}
 	`
-	hasDep := func(ctx *android.TestContext, m android.Module, wantDep android.Module) bool {
-		t.Helper()
-		var found bool
-		ctx.VisitDirectDeps(m, func(dep blueprint.Module) {
-			if dep == wantDep {
-				found = true
-			}
-		})
-		return found
-	}
 
 	testCases := []struct {
 		desc                   string
@@ -587,7 +554,8 @@ func TestMultiplePrebuiltsPreferredUsingLegacyFlags(t *testing.T) {
 		}
 		libfoo := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_shared").Module()
 		expectedDependency := ctx.ModuleForTests(t, tc.expectedDependencyName, "android_arm64_armv8-a_shared").Module()
-		android.AssertBoolEquals(t, fmt.Sprintf("expected dependency from %s to %s\n", libfoo.Name(), tc.expectedDependencyName), true, hasDep(ctx, libfoo, expectedDependency))
+		android.AssertBoolEquals(t, fmt.Sprintf("expected dependency from %s to %s\n", libfoo.Name(), tc.expectedDependencyName),
+			true, android.HasDirectDep(ctx, libfoo, expectedDependency))
 	}
 }
 
@@ -617,16 +585,6 @@ func TestMissingVariantInModuleSdk(t *testing.T) {
 		}
 		all_apex_contributions {name: "all_apex_contributions"}
 	`
-	hasDep := func(ctx *android.TestContext, m android.Module, wantDep android.Module) bool {
-		t.Helper()
-		var found bool
-		ctx.VisitDirectDeps(m, func(dep blueprint.Module) {
-			if dep == wantDep {
-				found = true
-			}
-		})
-		return found
-	}
 
 	preparer := android.GroupFixturePreparers(
 		android.FixtureRegisterWithContext(func(ctx android.RegistrationContext) {
@@ -642,5 +600,6 @@ func TestMissingVariantInModuleSdk(t *testing.T) {
 	sourceLibBar := ctx.ModuleForTests(t, "libbar", "android_arm64_armv8-a_static").Module()
 	// Even though the prebuilt is listed in apex_contributions, the prebuilt does not have a static variant.
 	// Therefore source of libbar should be used.
-	android.AssertBoolEquals(t, fmt.Sprintf("expected dependency from libfoo to source libbar"), true, hasDep(ctx, libfoo, sourceLibBar))
+	android.AssertBoolEquals(t, fmt.Sprintf("expected dependency from libfoo to source libbar"), true,
+		android.HasDirectDep(ctx, libfoo, sourceLibBar))
 }

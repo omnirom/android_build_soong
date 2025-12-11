@@ -57,18 +57,6 @@ type sdk struct {
 	// list properties.
 	dynamicMemberTraitListProperties interface{}
 
-	// Information about the OsType specific member variants depended upon by this variant.
-	//
-	// Set by OsType specific variants in the collectMembers() method and used by the
-	// CommonOS variant when building the snapshot. That work is all done on separate
-	// calls to the sdk.GenerateAndroidBuildActions method which is guaranteed to be
-	// called for the OsType specific variants before the CommonOS variant (because
-	// the latter depends on the former).
-	memberVariantDeps []sdkMemberVariantDep
-
-	// The multilib variants that are used by this sdk variant.
-	multilibUsages multilibUsage
-
 	properties sdkProperties
 
 	snapshotFile android.OptionalPath
@@ -162,30 +150,36 @@ func (s *sdk) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	// This method is guaranteed to be called on OsType specific variants before it is called
 	// on their corresponding CommonOS variant.
 	if !s.IsCommonOSVariant() {
-		// Update the OsType specific sdk variant with information about its members.
-		s.collectMembers(ctx)
+		if s.snapshotFile.Valid() || s.infoFile.Valid() {
+			panic(fmt.Errorf("Snapshot (%q) and info file (%q) should not be set for sdk CommonOSVariant.",
+				s.snapshotFile, s.infoFile))
+		}
 	} else {
 		// Get the OsType specific variants on which the CommonOS depends.
 		osSpecificVariants := android.GetOsSpecificVariantsOfCommonOSVariant(ctx)
-		var sdkVariants []*sdk
+		var memberVariantDeps []sdkMemberVariantDep
 		for _, m := range osSpecificVariants {
-			if sdkVariant, ok := m.(*sdk); ok {
-				sdkVariants = append(sdkVariants, sdkVariant)
-			}
+			// Update the OsType specific sdk variant with information about its members.
+			memberVariantDeps = append(memberVariantDeps, s.collectMembers(ctx, m)...)
 		}
 
 		// Generate the snapshot from the member info.
-		s.buildSnapshot(ctx, sdkVariants)
-	}
+		s.buildSnapshot(ctx, memberVariantDeps)
 
-	if s.snapshotFile.Valid() != s.infoFile.Valid() {
-		panic(fmt.Sprintf("Snapshot (%q) and info file (%q) should both be set or neither should be set.", s.snapshotFile, s.infoFile))
-	}
+		if !s.snapshotFile.Valid() {
+			panic(fmt.Errorf("snapshotFile should be set."))
+		}
+		if !s.infoFile.Valid() {
+			panic(fmt.Errorf("infoFile should be set"))
+		}
 
-	if s.snapshotFile.Valid() {
 		ctx.SetOutputFiles([]android.Path{s.snapshotFile.Path()}, "")
 		ctx.SetOutputFiles([]android.Path{s.snapshotFile.Path(), s.infoFile.Path()}, android.DefaultDistTag)
 	}
+
+	moduleInfoJSON := ctx.ModuleInfoJSON()
+	moduleInfoJSON.Class = []string{"FAKE"}
+	moduleInfoJSON.SystemSharedLibs = []string{"none"}
 }
 
 func (s *sdk) AndroidMkEntries() []android.AndroidMkEntries {

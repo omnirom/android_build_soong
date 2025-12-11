@@ -207,8 +207,8 @@ func diffSnapshots(previous []fileEntry, current []fileEntry) snapshotDiff {
 // And record in out/soong:
 //   - A list of all files in the staging directories, including their hashes.
 func runStagingSnapshot(ctx Context, config Config) {
-	ctx.BeginTrace(metrics.RunSoong, "runStagingSnapshot")
-	defer ctx.EndTrace()
+	e := ctx.BeginTrace(metrics.RunSoong, "runStagingSnapshot")
+	defer e.End()
 
 	snapshotFilename := shared.JoinPath(config.SoongOutDir(), "staged_files.json")
 

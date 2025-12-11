@@ -15,125 +15,86 @@
 package android
 
 import (
-	"path/filepath"
-	"strings"
-
 	"github.com/google/blueprint"
 )
 
-func init() {
-	RegisterParallelSingletonType("testsuites", testSuiteFilesFactory)
-}
-
-func testSuiteFilesFactory() Singleton {
-	return &testSuiteFiles{}
-}
-
-type testSuiteFiles struct{}
+//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
 
 type TestSuiteModule interface {
 	Module
 	TestSuites() []string
 }
 
+// @auto-generate: gob
 type TestSuiteInfo struct {
+	// A suffix to append to the name of the test.
+	// Useful because historically different variants of soong modules became differently-named
+	// make modules, like "my_test.vendor" for the vendor variant.
+	NameSuffix string
+
 	TestSuites []string
+
+	NeedsArchFolder bool
+
+	MainFile Path
+
+	MainFileStem string
+
+	MainFileExt string
+
+	ConfigFile Path
+
+	ConfigFileSuffix string
+
+	ExtraConfigs Paths
+
+	PerTestcaseDirectory bool
+
+	Data []DataPath
+
+	NonArchData []DataPath
+
+	CompatibilitySupportFiles []Path
+
+	// Eqivalent of LOCAL_DISABLE_TEST_CONFIG in make
+	DisableTestConfig bool
+
+	// Eqivalent of LOCAL_IS_UNIT_TEST in make
+	IsUnitTest bool
 }
 
 var TestSuiteInfoProvider = blueprint.NewProvider[TestSuiteInfo]()
 
-type SupportFilesInfo struct {
-	SupportFiles InstallPaths
+// TestSuiteSharedLibsInfo is a provider of AndroidMk names of shared lib modules, for packaging
+// shared libs into test suites. It's not intended as a general-purpose shared lib tracking
+// mechanism. It's added to both test modules (to track their shared libs) and also shared lib
+// modules (to track their transitive shared libs).
+// @auto-generate: gob
+type TestSuiteSharedLibsInfo struct {
+	MakeNames []string
 }
 
-var SupportFilesInfoProvider = blueprint.NewProvider[SupportFilesInfo]()
+var TestSuiteSharedLibsInfoProvider = blueprint.NewProvider[TestSuiteSharedLibsInfo]()
 
-func (t *testSuiteFiles) GenerateBuildActions(ctx SingletonContext) {
-	files := make(map[string]map[string]InstallPaths)
-
-	ctx.VisitAllModuleProxies(func(m ModuleProxy) {
-		if tsm, ok := OtherModuleProvider(ctx, m, TestSuiteInfoProvider); ok {
-			for _, testSuite := range tsm.TestSuites {
-				if files[testSuite] == nil {
-					files[testSuite] = make(map[string]InstallPaths)
-				}
-				name := ctx.ModuleName(m)
-				files[testSuite][name] = append(files[testSuite][name],
-					OtherModuleProviderOrDefault(ctx, m, InstallFilesProvider).InstallFiles...)
-			}
-		}
-	})
-
-	robolectricZip, robolectrictListZip := buildTestSuite(ctx, "robolectric-tests", files["robolectric-tests"])
-	ctx.Phony("robolectric-tests", robolectricZip, robolectrictListZip)
-	ctx.DistForGoal("robolectric-tests", robolectricZip, robolectrictListZip)
-
-	ravenwoodZip, ravenwoodListZip := buildTestSuite(ctx, "ravenwood-tests", files["ravenwood-tests"])
-	ctx.Phony("ravenwood-tests", ravenwoodZip, ravenwoodListZip)
-	ctx.DistForGoal("ravenwood-tests", ravenwoodZip, ravenwoodListZip)
+// MakeNameInfoProvider records the AndroidMk name for the module. This will match the names
+// referenced in TestSuiteSharedLibsInfo
+// @auto-generate: gob
+type MakeNameInfo struct {
+	Name string
 }
 
-func buildTestSuite(ctx SingletonContext, suiteName string, files map[string]InstallPaths) (Path, Path) {
-	var installedPaths InstallPaths
-	for _, module := range SortedKeys(files) {
-		installedPaths = append(installedPaths, files[module]...)
-	}
+var MakeNameInfoProvider = blueprint.NewProvider[MakeNameInfo]()
 
-	outputFile := pathForPackaging(ctx, suiteName+".zip")
-	rule := NewRuleBuilder(pctx, ctx)
-	rule.Command().BuiltTool("soong_zip").
-		FlagWithOutput("-o ", outputFile).
-		FlagWithArg("-P ", "host/testcases").
-		FlagWithArg("-C ", pathForTestCases(ctx).String()).
-		FlagWithRspFileInputList("-r ", outputFile.ReplaceExtension(ctx, "rsp"), installedPaths.Paths()).
-		Flag("-sha256") // necessary to save cas_uploader's time
-
-	testList := buildTestList(ctx, suiteName+"_list", installedPaths)
-	testListZipOutputFile := pathForPackaging(ctx, suiteName+"_list.zip")
-
-	rule.Command().BuiltTool("soong_zip").
-		FlagWithOutput("-o ", testListZipOutputFile).
-		FlagWithArg("-C ", pathForPackaging(ctx).String()).
-		FlagWithInput("-f ", testList).
-		Flag("-sha256")
-
-	rule.Build(strings.ReplaceAll(suiteName, "-", "_")+"_zip", suiteName+".zip")
-
-	return outputFile, testListZipOutputFile
+// @auto-generate: gob
+type FilePair struct {
+	Src Path
+	Dst WritablePath
 }
 
-func buildTestList(ctx SingletonContext, listFile string, installedPaths InstallPaths) Path {
-	buf := &strings.Builder{}
-	for _, p := range installedPaths {
-		if p.Ext() != ".config" {
-			continue
-		}
-		pc, err := toTestListPath(p.String(), pathForTestCases(ctx).String(), "host/testcases")
-		if err != nil {
-			ctx.Errorf("Failed to convert path: %s, %v", p.String(), err)
-			continue
-		}
-		buf.WriteString(pc)
-		buf.WriteString("\n")
-	}
-	outputFile := pathForPackaging(ctx, listFile)
-	WriteFileRuleVerbatim(ctx, outputFile, buf.String())
-	return outputFile
+// @auto-generate: gob
+type TestSuiteInstallsInfo struct {
+	Files              []FilePair
+	OneVariantInstalls []FilePair
 }
 
-func toTestListPath(path, relativeRoot, prefix string) (string, error) {
-	dest, err := filepath.Rel(relativeRoot, path)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(prefix, dest), nil
-}
-
-func pathForPackaging(ctx PathContext, pathComponents ...string) OutputPath {
-	pathComponents = append([]string{"packaging"}, pathComponents...)
-	return PathForOutput(ctx, pathComponents...)
-}
-
-func pathForTestCases(ctx PathContext) InstallPath {
-	return pathForInstall(ctx, ctx.Config().BuildOS, X86, "testcases")
-}
+var TestSuiteInstallsInfoProvider = blueprint.NewProvider[TestSuiteInstallsInfo]()

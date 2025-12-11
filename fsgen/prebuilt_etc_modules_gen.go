@@ -32,20 +32,24 @@ type srcBaseFileInstallBaseFileTuple struct {
 // prebuilt src files grouped by the install partitions.
 // Each groups are a mapping of the relative install path to the name of the files
 type prebuiltSrcGroupByInstallPartition struct {
-	system     map[string][]srcBaseFileInstallBaseFileTuple
-	system_ext map[string][]srcBaseFileInstallBaseFileTuple
-	product    map[string][]srcBaseFileInstallBaseFileTuple
-	vendor     map[string][]srcBaseFileInstallBaseFileTuple
-	recovery   map[string][]srcBaseFileInstallBaseFileTuple
+	system         map[string][]srcBaseFileInstallBaseFileTuple
+	system_ext     map[string][]srcBaseFileInstallBaseFileTuple
+	product        map[string][]srcBaseFileInstallBaseFileTuple
+	vendor         map[string][]srcBaseFileInstallBaseFileTuple
+	recovery       map[string][]srcBaseFileInstallBaseFileTuple
+	vendor_dlkm    map[string][]srcBaseFileInstallBaseFileTuple
+	vendor_ramdisk map[string][]srcBaseFileInstallBaseFileTuple
 }
 
 func newPrebuiltSrcGroupByInstallPartition() *prebuiltSrcGroupByInstallPartition {
 	return &prebuiltSrcGroupByInstallPartition{
-		system:     map[string][]srcBaseFileInstallBaseFileTuple{},
-		system_ext: map[string][]srcBaseFileInstallBaseFileTuple{},
-		product:    map[string][]srcBaseFileInstallBaseFileTuple{},
-		vendor:     map[string][]srcBaseFileInstallBaseFileTuple{},
-		recovery:   map[string][]srcBaseFileInstallBaseFileTuple{},
+		system:         map[string][]srcBaseFileInstallBaseFileTuple{},
+		system_ext:     map[string][]srcBaseFileInstallBaseFileTuple{},
+		product:        map[string][]srcBaseFileInstallBaseFileTuple{},
+		vendor:         map[string][]srcBaseFileInstallBaseFileTuple{},
+		recovery:       map[string][]srcBaseFileInstallBaseFileTuple{},
+		vendor_dlkm:    map[string][]srcBaseFileInstallBaseFileTuple{},
+		vendor_ramdisk: map[string][]srcBaseFileInstallBaseFileTuple{},
 	}
 }
 
@@ -63,8 +67,7 @@ func appendIfCorrectInstallPartition(partitionToInstallPathList []partitionToIns
 		installPath := part.installPath
 
 		if isSubdirectory(installPath, destPath) {
-			relativeInstallPath, _ := filepath.Rel(installPath, destPath)
-			relativeInstallDir := filepath.Dir(relativeInstallPath)
+			installDir := filepath.Dir(destPath)
 			var srcMap map[string][]srcBaseFileInstallBaseFileTuple
 			switch partition {
 			case "system":
@@ -77,9 +80,13 @@ func appendIfCorrectInstallPartition(partitionToInstallPathList []partitionToIns
 				srcMap = srcGroup.vendor
 			case "recovery":
 				srcMap = srcGroup.recovery
+			case "vendor_dlkm":
+				srcMap = srcGroup.vendor_dlkm
+			case "vendor_ramdisk":
+				srcMap = srcGroup.vendor_ramdisk
 			}
 			if srcMap != nil {
-				srcMap[relativeInstallDir] = append(srcMap[relativeInstallDir], srcBaseFileInstallBaseFileTuple{
+				srcMap[installDir] = append(srcMap[installDir], srcBaseFileInstallBaseFileTuple{
 					srcBaseFile:     filepath.Base(srcPath),
 					installBaseFile: filepath.Base(destPath),
 				})
@@ -125,19 +132,26 @@ type partitionToInstallPath struct {
 	installPath string
 }
 
-func processProductCopyFiles(ctx android.LoadHookContext) map[string]*prebuiltSrcGroupByInstallPartition {
-	// Filter out duplicate dest entries and non existing src entries
-	productCopyFileMap := uniqueExistingProductCopyFileMap(ctx)
-
+func getPartitionToInstallPathList(ctx android.LoadHookContext) []partitionToInstallPath {
 	// System is intentionally added at the last to consider the scenarios where
 	// non-system partitions are installed as part of the system partition
 	partitionToInstallPathList := []partitionToInstallPath{
 		{name: "recovery", installPath: "recovery/root"},
 		{name: "vendor", installPath: ctx.DeviceConfig().VendorPath()},
+		{name: "vendor_dlkm", installPath: ctx.DeviceConfig().VendorDlkmPath()},
+		{name: "vendor_ramdisk", installPath: "vendor_ramdisk"},
 		{name: "product", installPath: ctx.DeviceConfig().ProductPath()},
 		{name: "system_ext", installPath: ctx.DeviceConfig().SystemExtPath()},
 		{name: "system", installPath: "system"},
+		{name: "system", installPath: "root"},
 	}
+
+	return partitionToInstallPathList
+}
+
+func processProductCopyFiles(ctx android.LoadHookContext) map[string]*prebuiltSrcGroupByInstallPartition {
+	// Filter out duplicate dest entries and non existing src entries
+	productCopyFileMap := uniqueExistingProductCopyFileMap(ctx)
 
 	groupedSources := map[string]*prebuiltSrcGroupByInstallPartition{}
 	for _, src := range android.SortedKeys(productCopyFileMap) {
@@ -147,7 +161,7 @@ func processProductCopyFiles(ctx android.LoadHookContext) map[string]*prebuiltSr
 			groupedSources[srcFileDir] = newPrebuiltSrcGroupByInstallPartition()
 		}
 		for _, dest := range destFiles {
-			appendIfCorrectInstallPartition(partitionToInstallPathList, dest, filepath.Base(src), groupedSources[srcFileDir])
+			appendIfCorrectInstallPartition(getPartitionToInstallPathList(ctx), dest, filepath.Base(src), groupedSources[srcFileDir])
 		}
 	}
 
@@ -157,11 +171,17 @@ func processProductCopyFiles(ctx android.LoadHookContext) map[string]*prebuiltSr
 type prebuiltModuleProperties struct {
 	Name *string
 
-	Soc_specific        *bool
-	Product_specific    *bool
-	System_ext_specific *bool
-	Recovery            *bool
-	Ramdisk             *bool
+	From_product_copy_files *bool
+
+	Soc_specific                              *bool
+	Product_specific                          *bool
+	System_ext_specific                       *bool
+	Vendor_dlkm_specific                      *bool
+	Recovery                                  *bool
+	Ramdisk                                   *bool
+	Vendor_ramdisk                            *bool
+	Install_in_root                           *bool
+	Install_path_skip_first_stage_ramdisk_dir *bool
 
 	Srcs []string
 
@@ -203,7 +223,7 @@ var (
 		"first_stage_ramdisk": etc.PrebuiltFirstStageRamdiskFactory,
 		"fonts":               etc.PrebuiltFontFactory,
 		"framework":           etc.PrebuiltFrameworkFactory,
-		"lib":                 etc.PrebuiltRenderScriptBitcodeFactory,
+		"lib":                 etc.PrebuiltLibFactory,
 		"lib64":               etc.PrebuiltRenderScriptBitcodeFactory,
 		"lib/rfsa":            etc.PrebuiltRFSAFactory,
 		"media":               etc.PrebuiltMediaFactory,
@@ -275,6 +295,13 @@ func prebuiltEtcModuleProps(ctx android.LoadHookContext, moduleName, partition, 
 		moduleProps.Product_specific = proptools.BoolPtr(true)
 	case "vendor":
 		moduleProps.Soc_specific = proptools.BoolPtr(true)
+	case "vendor_dlkm":
+		moduleProps.Vendor_dlkm_specific = proptools.BoolPtr(true)
+	case "vendor_ramdisk":
+		moduleProps.Vendor_ramdisk = proptools.BoolPtr(true)
+		// Enforce partition path to be "TARGET_COPY_OUT_VENDOR_RAMDISK" by skipping "first_stage_ramdisk".
+		moduleProps.Install_path_skip_first_stage_ramdisk_dir = proptools.BoolPtr(true)
+		moduleProps.Install_in_root = proptools.BoolPtr(true)
 	case "recovery":
 		// To match the logic in modulePartition() in android/paths.go
 		if ctx.DeviceConfig().BoardUsesRecoveryAsBoot() && strings.HasPrefix(destDir, "first_stage_ramdisk") {
@@ -284,6 +311,7 @@ func prebuiltEtcModuleProps(ctx android.LoadHookContext, moduleName, partition, 
 		}
 	}
 
+	moduleProps.From_product_copy_files = proptools.BoolPtr(true)
 	moduleProps.No_full_install = proptools.BoolPtr(true)
 	moduleProps.NamespaceExportedToMake = true
 	moduleProps.Visibility = []string{"//visibility:public"}
@@ -293,18 +321,6 @@ func prebuiltEtcModuleProps(ctx android.LoadHookContext, moduleName, partition, 
 
 func createPrebuiltEtcModulesInDirectory(ctx android.LoadHookContext, partition, srcDir, destDir string, destFiles []srcBaseFileInstallBaseFileTuple) (moduleNames []string) {
 	groupedDestFiles, maxLen := groupDestFilesBySrc(destFiles)
-
-	// Find out the most appropriate module type to generate
-	var etcInstallPathKey string
-	for _, etcInstallPath := range android.SortedKeys(etcInstallPathToFactoryList) {
-		// Do not break when found but iterate until the end to find a module with more
-		// specific install path
-		if strings.HasPrefix(destDir, etcInstallPath) {
-			etcInstallPathKey = etcInstallPath
-		}
-	}
-	moduleFactory := etcInstallPathToFactoryList[etcInstallPathKey]
-	relDestDirFromInstallDirBase, _ := filepath.Rel(etcInstallPathKey, destDir)
 
 	for fileIndex := range maxLen {
 		srcTuple := []srcBaseFileInstallBaseFileTuple{}
@@ -316,6 +332,28 @@ func createPrebuiltEtcModulesInDirectory(ctx android.LoadHookContext, partition,
 		}
 
 		moduleName := generatedPrebuiltEtcModuleName(partition, srcDir, destDir, fileIndex)
+
+		var firstInstallPath string
+		for _, pi := range getPartitionToInstallPathList(ctx) {
+			if isSubdirectory(pi.installPath, destDir) {
+				destDir, _ = filepath.Rel(pi.installPath, destDir)
+				firstInstallPath = pi.installPath
+				break
+			}
+		}
+
+		// Find out the most appropriate module type to generate
+		var etcInstallPathKey string
+		for _, etcInstallPath := range android.SortedKeys(etcInstallPathToFactoryList) {
+			// Do not break when found but iterate until the end to find a module with more
+			// specific install path
+			if strings.HasPrefix(destDir, etcInstallPath) {
+				etcInstallPathKey = etcInstallPath
+			}
+		}
+		moduleFactory := etcInstallPathToFactoryList[etcInstallPathKey]
+		relDestDirFromInstallDirBase, _ := filepath.Rel(etcInstallPathKey, destDir)
+
 		moduleProps := prebuiltEtcModuleProps(ctx, moduleName, partition, destDir)
 		modulePropsPtr := &moduleProps
 		propsList := []interface{}{modulePropsPtr}
@@ -334,7 +372,8 @@ func createPrebuiltEtcModulesInDirectory(ctx android.LoadHookContext, partition,
 		// default (See modulePartition() in android/paths.go). If the destination file
 		// directory is not `recovery/root/system/...`, it should set install_in_root to true
 		// to prevent being installed in `recovery/root/system`.
-		if partition == "recovery" && !strings.HasPrefix(destDir, "system") {
+		if (partition == "recovery" && !strings.HasPrefix(destDir, "system")) ||
+			(partition == "system" && firstInstallPath == "root" && destDir == ".") {
 			propsList = append(propsList, &prebuiltInstallInRootProperties{
 				Install_in_root: proptools.BoolPtr(true),
 			})
@@ -405,15 +444,25 @@ func createPrebuiltEtcModules(ctx android.LoadHookContext) (ret []string) {
 		ret = append(ret, createPrebuiltEtcModulesForPartition(ctx, "product", srcDir, groupedSource.product)...)
 		ret = append(ret, createPrebuiltEtcModulesForPartition(ctx, "vendor", srcDir, groupedSource.vendor)...)
 		ret = append(ret, createPrebuiltEtcModulesForPartition(ctx, "recovery", srcDir, groupedSource.recovery)...)
+		ret = append(ret, createPrebuiltEtcModulesForPartition(ctx, "vendor_dlkm", srcDir, groupedSource.vendor_dlkm)...)
+		ret = append(ret, createPrebuiltEtcModulesForPartition(ctx, "vendor_ramdisk", srcDir, groupedSource.vendor_ramdisk)...)
 	}
 
 	return ret
 }
 
 func createAvbpubkeyModule(ctx android.LoadHookContext) bool {
-	avbKeyPath := ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse.BoardAvbKeyPath
-	if avbKeyPath == "" {
+	partitionVars := ctx.Config().ProductVariables().PartitionVarsForSoongMigrationOnlyDoNotUse
+	if !(partitionVars.BuildingSystemOtherImage && partitionVars.BoardAvbEnable) {
+		// https://cs.android.com/android/platform/superproject/+/android-latest-release:build/make/core/Makefile;l=835;drc=8ab87941b1b9a3fc990cb1986e6245cf0af10a70
 		return false
+	}
+
+	avbKeyPath := partitionVars.BoardAvbKeyPath
+	if avbKeyPath == "" {
+		// Use default
+		// https://cs.android.com/android/_/android/platform/build/+/045a3d6a3e359633a14853a5a5e1e4f2a11cbdae:core/Makefile;l=4548;bpv=1;bpt=0;drc=a951ebf0198006f7fd38073a05c442d0eb92f97b
+		avbKeyPath = "external/avb/test/data/testkey_rsa4096.pem"
 	}
 	ctx.CreateModuleInDirectory(
 		etc.AvbpubkeyModuleFactory,
@@ -424,13 +473,29 @@ func createAvbpubkeyModule(ctx android.LoadHookContext) bool {
 			Private_key      *string
 			No_full_install  *bool
 			Visibility       []string
+			Licenses         []string
 		}{
 			Name:             proptools.StringPtr("system_other_avbpubkey"),
 			Product_specific: proptools.BoolPtr(true),
 			Private_key:      proptools.StringPtr(avbKeyPath),
 			No_full_install:  proptools.BoolPtr(true),
 			Visibility:       []string{"//visibility:public"},
+			Licenses:         []string{"Android-Apache-2.0"},
 		},
 	)
+
 	return true
+}
+
+func getPrebuiltKernelPath(ctx android.LoadHookContext) string {
+	processedProductCopyFilesMap := uniqueExistingProductCopyFileMap(ctx)
+	for _, srcPath := range android.SortedKeys(processedProductCopyFilesMap) {
+		destPaths := processedProductCopyFilesMap[srcPath]
+		for _, destPath := range destPaths {
+			if destPath == "kernel" {
+				return srcPath
+			}
+		}
+	}
+	return ""
 }

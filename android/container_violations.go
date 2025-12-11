@@ -4,19 +4,27 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 package android
 
 var ContainerDependencyViolationAllowlist = map[string][]string{
+	// go/keep-sorted start case=no block=yes newline_separated=yes
+	"AdExtServicesApkUITestsAppConsent": {
+		"framework", // cts -> unstable
+	},
+
 	"adservices-service-core": {
 		"gson", // apex [com.android.adservices, com.android.extservices] -> apex [com.android.virt]
+	},
+
+	"AdServicesSharedLibrariesUnitTests": {
+		"framework", // cts -> unstable
 	},
 
 	"android.car-module.impl": {
@@ -27,8 +35,28 @@ var ContainerDependencyViolationAllowlist = map[string][]string{
 		"framework", // cts -> unstable
 	},
 
+	"AppSearchMockingServicesTests": {
+		"framework", // cts -> unstable
+	},
+
+	"AppSearchServicesTests": {
+		"framework", // cts -> unstable
+	},
+
+	"AppsIndexerTests": {
+		"framework", // cts -> unstable
+	},
+
 	"art-aconfig-flags-java-lib": {
 		"framework-api-annotations-lib", // apex [com.android.art, com.android.art.debug, com.android.art.testing, test_imgdiag_com.android.art, test_jitzygote_com.android.art] -> system
+	},
+
+	"AvfRkpdAppIntegrationTests": {
+		"framework", // cts -> unstable
+	},
+
+	"BitmapTestApp": {
+		"framework", // cts -> unstable
 	},
 
 	"Bluetooth": {
@@ -44,6 +72,10 @@ var ContainerDependencyViolationAllowlist = map[string][]string{
 		"app-compat-annotations", // apex [com.android.bt] -> system
 	},
 
+	"CaptivePortalLoginTests": {
+		"framework", // cts -> unstable
+	},
+
 	"CarServiceUpdatable": {
 		"modules-utils-os",                    // apex [com.android.car.framework] -> apex [com.android.permission, test_com.android.permission]
 		"modules-utils-preconditions",         // apex [com.android.car.framework] -> apex [com.android.adservices, com.android.appsearch, com.android.cellbroadcast, com.android.extservices, com.android.ondevicepersonalization, com.android.tethering, com.android.uwb, com.android.wifi, test_com.android.cellbroadcast, test_com.android.wifi]
@@ -55,12 +87,36 @@ var ContainerDependencyViolationAllowlist = map[string][]string{
 		"framework", // apex [com.android.cellbroadcast, test_com.android.cellbroadcast] -> system
 	},
 
+	"CellBroadcastReceiverComplianceTests": {
+		"framework", // cts -> unstable
+	},
+
+	"CellBroadcastReceiverOemUnitTests": {
+		"framework", // cts -> unstable
+	},
+
+	"CellBroadcastServiceTests": {
+		"framework", // cts -> unstable
+	},
+
 	"connectivity-net-module-utils-bpf": {
 		"net-utils-device-common-struct-base", // apex [com.android.tethering] -> system
 	},
 
+	"ConnectivityCoverageTests": {
+		"framework", // cts -> unstable
+	},
+
 	"conscrypt-aconfig-flags-lib": {
 		"aconfig-annotations-lib-sdk-none", // apex [com.android.conscrypt, test_com.android.conscrypt] -> system
+	},
+
+	"ContactsIndexerTests": {
+		"framework", // cts -> unstable
+	},
+
+	"CrashRecoveryModuleTests": {
+		"framework", // cts -> unstable
 	},
 
 	"cronet_aml_base_base_java": {
@@ -174,6 +230,14 @@ var ContainerDependencyViolationAllowlist = map[string][]string{
 		"framework", // cts -> unstable
 	},
 
+	"CtsAppLocalesBackupApp1": {
+		"framework", // cts -> unstable
+	},
+
+	"CtsAppLocalesBackupApp2": {
+		"framework", // cts -> unstable
+	},
+
 	"CtsAppOpsTestCases": {
 		"framework", // cts -> unstable
 	},
@@ -195,6 +259,10 @@ var ContainerDependencyViolationAllowlist = map[string][]string{
 	},
 
 	"CtsBackgroundActivityAppAllowCrossUidFlagDefault": {
+		"framework", // cts -> unstable
+	},
+
+	"CtsBackupRestoreEventLoggerApp": {
 		"framework", // cts -> unstable
 	},
 
@@ -227,6 +295,14 @@ var ContainerDependencyViolationAllowlist = map[string][]string{
 	},
 
 	"CtsCompanionDeviceManagerUiAutomationTestCases": {
+		"framework", // cts -> unstable
+	},
+
+	"CtsContentProviderTestCases": {
+		"framework", // cts -> unstable
+	},
+
+	"CtsContentResolverTestCases": {
 		"framework", // cts -> unstable
 	},
 
@@ -338,6 +414,10 @@ var ContainerDependencyViolationAllowlist = map[string][]string{
 		"framework", // cts -> unstable
 	},
 
+	"CtsFullBackupApp": {
+		"framework", // cts -> unstable
+	},
+
 	"CtsHostsideCompatChangeTestsApp": {
 		"framework", // cts -> unstable
 	},
@@ -371,6 +451,10 @@ var ContainerDependencyViolationAllowlist = map[string][]string{
 	},
 
 	"CtsKeystoreTestCases": {
+		"framework", // cts -> unstable
+	},
+
+	"CtsKeyValueBackupApp": {
 		"framework", // cts -> unstable
 	},
 
@@ -474,11 +558,6 @@ var ContainerDependencyViolationAllowlist = map[string][]string{
 		"framework", // cts -> unstable
 	},
 
-	// TODO(b/387499846): Remove once migrated to sdk_version.
-	"CtsMediaRouterTestCases": {
-		"framework", // cts -> unstable
-	},
-
 	"CtsMediaRouterHostSideTestBluetoothPermissionsApp": {
 		"framework", // cts -> unstable
 	},
@@ -488,6 +567,11 @@ var ContainerDependencyViolationAllowlist = map[string][]string{
 	},
 
 	"CtsMediaRouterHostSideTestModifyAudioRoutingApp": {
+		"framework", // cts -> unstable
+	},
+
+	// TODO(b/387499846): Remove once migrated to sdk_version.
+	"CtsMediaRouterTestCases": {
 		"framework", // cts -> unstable
 	},
 
@@ -572,6 +656,14 @@ var ContainerDependencyViolationAllowlist = map[string][]string{
 		"framework", // cts -> unstable
 	},
 
+	"CtsPermissionBackupApp": {
+		"framework", // cts -> unstable
+	},
+
+	"CtsPermissionBackupApp22": {
+		"framework", // cts -> unstable
+	},
+
 	"CtsPermissionsSyncTestApp": {
 		"framework", // cts -> unstable
 	},
@@ -601,6 +693,26 @@ var ContainerDependencyViolationAllowlist = map[string][]string{
 	},
 
 	"CtsResourcesTestCases": {
+		"framework", // cts -> unstable
+	},
+
+	"CtsRestrictedModeNoActionApp1": {
+		"framework", // cts -> unstable
+	},
+
+	"CtsRestrictedModeNoActionApp2": {
+		"framework", // cts -> unstable
+	},
+
+	"CtsRestrictedModeOptedInApp": {
+		"framework", // cts -> unstable
+	},
+
+	"CtsRestrictedModeOptedOutApp": {
+		"framework", // cts -> unstable
+	},
+
+	"CtsRootBluetoothTestCases": {
 		"framework", // cts -> unstable
 	},
 
@@ -697,6 +809,10 @@ var ContainerDependencyViolationAllowlist = map[string][]string{
 	},
 
 	"CtsSuspendAppsTestCases": {
+		"framework", // cts -> unstable
+	},
+
+	"CtsSyncManagerTestCases": {
 		"framework", // cts -> unstable
 	},
 
@@ -833,6 +949,14 @@ var ContainerDependencyViolationAllowlist = map[string][]string{
 		"modules-utils-expresslog", // apex [com.android.devicelock] -> apex [com.android.bt, com.android.car.framework]
 	},
 
+	"DisruptiveTestApp": {
+		"framework", // cts -> unstable
+	},
+
+	"DocumentsUITests": {
+		"framework", // cts -> unstable
+	},
+
 	"FederatedCompute": {
 		"auto_value_annotations", // apex [com.android.ondevicepersonalization] -> apex [com.android.adservices, com.android.extservices, com.android.extservices_tplus]
 	},
@@ -849,14 +973,14 @@ var ContainerDependencyViolationAllowlist = map[string][]string{
 		"configinfra_framework_flags_java_lib", // apex [com.android.configinfrastructure] -> system
 	},
 
-	"framework-connectivity-t.impl": {
+	// TODO(b/382743602): Remove "app-compat-annotations" and depend on the stub version jar
+	// TODO(b/382301972): Remove the violations and use jarjar_rename or jarjar_prefix
+	"framework-connectivity-b.impl": {
 		"app-compat-annotations",            // apex [com.android.tethering] -> system
 		"framework-connectivity-pre-jarjar", // apex [com.android.tethering] -> system
 	},
 
-	// TODO(b/382743602): Remove "app-compat-annotations" and depend on the stub version jar
-	// TODO(b/382301972): Remove the violations and use jarjar_rename or jarjar_prefix
-	"framework-connectivity-b.impl": {
+	"framework-connectivity-t.impl": {
 		"app-compat-annotations",            // apex [com.android.tethering] -> system
 		"framework-connectivity-pre-jarjar", // apex [com.android.tethering] -> system
 	},
@@ -888,6 +1012,22 @@ var ContainerDependencyViolationAllowlist = map[string][]string{
 		"app-compat-annotations",      // apex [com.android.wifi, test_com.android.wifi] -> system
 	},
 
+	"FrameworksIkeTests": {
+		"framework", // cts -> unstable
+	},
+
+	"FrameworksVcnTests": {
+		"framework", // cts -> unstable
+	},
+
+	"FrameworksWifiApiTests": {
+		"framework", // cts -> unstable
+	},
+
+	"FrameworksWifiTests": {
+		"framework", // cts -> unstable
+	},
+
 	"grpc-java-core-internal": {
 		"gson",             // apex [com.android.adservices, com.android.devicelock, com.android.extservices] -> apex [com.android.virt]
 		"perfmark-api-lib", // apex [com.android.adservices, com.android.devicelock, com.android.extservices] -> system
@@ -903,6 +1043,14 @@ var ContainerDependencyViolationAllowlist = map[string][]string{
 
 	"libcore-aconfig-flags-lib": {
 		"framework-api-annotations-lib", // apex [com.android.art, com.android.art.debug, com.android.art.testing, test_imgdiag_com.android.art, test_jitzygote_com.android.art] -> system
+	},
+
+	"LibStatsPullTests": {
+		"framework", // cts -> unstable
+	},
+
+	"libtextclassifier_java_tests": {
+		"framework", // cts -> unstable
 	},
 
 	"loadlibrarytest_product_app": {
@@ -976,11 +1124,47 @@ var ContainerDependencyViolationAllowlist = map[string][]string{
 		"framework", // apex [com.android.mediaprovider, test_com.android.mediaprovider] -> system
 	},
 
+	"MediaProviderClientTests": {
+		"framework", // cts -> unstable
+	},
+
+	"MediaProviderTests": {
+		"framework", // cts -> unstable
+	},
+
+	"MediaRouterServiceTests": {
+		"framework", // cts -> unstable
+	},
+
 	"MockSatelliteGatewayServiceApp": {
 		"framework", // cts -> unstable
 	},
 
 	"MockSatelliteServiceApp": {
+		"framework", // cts -> unstable
+	},
+
+	"MtsConscryptFdSocketTestCases": {
+		"framework", // cts -> unstable
+	},
+
+	"MtsConscryptTestCases": {
+		"framework", // cts -> unstable
+	},
+
+	"MtsLibcoreBouncyCastleTestCases": {
+		"framework", // cts -> unstable
+	},
+
+	"MtsLibcoreOkHttpTestCases": {
+		"framework", // cts -> unstable
+	},
+
+	"MtsTetheringTestLatestSdk": {
+		"framework", // cts -> unstable
+	},
+
+	"MtsWifiTestCases": {
 		"framework", // cts -> unstable
 	},
 
@@ -992,12 +1176,40 @@ var ContainerDependencyViolationAllowlist = map[string][]string{
 		"net-utils-device-common-struct-base", // apex [com.android.tethering] -> system
 	},
 
+	"NetHttpCoverageTests": {
+		"framework", // cts -> unstable
+	},
+
+	"NetworkStackCoverageTests": {
+		"framework", // cts -> unstable
+	},
+
+	"NetworkStackRootTests": {
+		"framework", // cts -> unstable
+	},
+
+	"NetworkStackTests": {
+		"framework", // cts -> unstable
+	},
+
+	"NfcManagerTests": {
+		"framework", // cts -> unstable
+	},
+
 	"NfcNciApex": {
 		// TODO(b/383782511): Remove the violations once the infra is fixed.
 		"android.nfc.flags-aconfig-java",        // apex [com.android.nfcservices] -> system
 		"android.permission.flags-aconfig-java", // apex [com.android.nfcservices] -> apex [com.android.permission, test_com.android.permission]
 		// TODO(b/383782511): Remove the violations once the infra is fixed.
 		"framework-nfc.impl", // apex [com.android.nfcservices] -> system
+	},
+
+	"NfcNciUnitTests": {
+		"framework", // cts -> unstable
+	},
+
+	"NfcTestCases": {
+		"framework", // cts -> unstable
 	},
 
 	"okhttp-norepackage": {
@@ -1012,12 +1224,44 @@ var ContainerDependencyViolationAllowlist = map[string][]string{
 		"auto_value_annotations", // apex [com.android.devicelock] -> apex [com.android.adservices, com.android.extservices, com.android.extservices_tplus]
 	},
 
+	"PackageWatchdogTest": {
+		"framework", // cts -> unstable
+	},
+
 	"PermissionController-lib": {
 		"safety-center-annotations", // apex [com.android.permission, test_com.android.permission] -> system
 	},
 
+	"PermissionControllerOutOfProcessTests": {
+		"framework", // cts -> unstable
+	},
+
 	"PlatformProperties": {
 		"sysprop-library-stub-platform", // apex [com.android.bt, com.android.nfcservices, com.android.tethering, com.android.virt, com.android.wifi, test_com.android.wifi] -> system
+	},
+
+	"pts-bot-mts": {
+		"framework", // cts -> unstable
+	},
+
+	"RebootReadinessUnitTests": {
+		"framework", // cts -> unstable
+	},
+
+	"RkpdAppIntegrationTests": {
+		"framework", // cts -> unstable
+	},
+
+	"RkpdAppStressTests": {
+		"framework", // cts -> unstable
+	},
+
+	"RkpdAppUnitTests": {
+		"framework", // cts -> unstable
+	},
+
+	"RollbackPackageHealthObserverTests": {
+		"framework", // cts -> unstable
 	},
 
 	"safety-center-config": {
@@ -1040,11 +1284,27 @@ var ContainerDependencyViolationAllowlist = map[string][]string{
 		"safety-center-annotations", // apex [com.android.permission, test_com.android.permission] -> system
 	},
 
+	"SdkSandboxFrameworkUnitTests": {
+		"framework", // cts -> unstable
+	},
+
 	"SdkSandboxManagerDisabledTests": {
 		"framework", // cts -> unstable
 	},
 
+	"SdkSandboxManagerServiceUnitTests": {
+		"framework", // cts -> unstable
+	},
+
 	"SdkSandboxManagerTests": {
+		"framework", // cts -> unstable
+	},
+
+	"SdkSandboxRestrictionsTests": {
+		"framework", // cts -> unstable
+	},
+
+	"SdkSandboxUnitTests": {
 		"framework", // cts -> unstable
 	},
 
@@ -1061,6 +1321,13 @@ var ContainerDependencyViolationAllowlist = map[string][]string{
 		"libprotobuf-java-nano", // apex [com.android.tethering] -> apex [com.android.wifi, test_com.android.wifi]
 	},
 
+	// TODO(b/382301972): Remove the violations and use jarjar_rename or jarjar_prefix
+	"service-connectivity-b-pre-jarjar": {
+		"framework-connectivity-pre-jarjar",   // apex [com.android.tethering] -> system
+		"framework-connectivity-b-pre-jarjar", // apex [com.android.tethering] -> system
+		"framework-connectivity-t-pre-jarjar", // apex [com.android.tethering] -> system
+	},
+
 	"service-connectivity-pre-jarjar": {
 		"framework-connectivity-pre-jarjar", // apex [com.android.tethering] -> system
 	},
@@ -1071,13 +1338,6 @@ var ContainerDependencyViolationAllowlist = map[string][]string{
 
 	"service-connectivity-tiramisu-pre-jarjar": {
 		"framework-connectivity-pre-jarjar",   // apex [com.android.tethering] -> system
-		"framework-connectivity-t-pre-jarjar", // apex [com.android.tethering] -> system
-	},
-
-	// TODO(b/382301972): Remove the violations and use jarjar_rename or jarjar_prefix
-	"service-connectivity-b-pre-jarjar": {
-		"framework-connectivity-pre-jarjar",   // apex [com.android.tethering] -> system
-		"framework-connectivity-b-pre-jarjar", // apex [com.android.tethering] -> system
 		"framework-connectivity-t-pre-jarjar", // apex [com.android.tethering] -> system
 	},
 
@@ -1115,6 +1375,10 @@ var ContainerDependencyViolationAllowlist = map[string][]string{
 		"framework-connectivity-t-pre-jarjar", // apex [com.android.tethering] -> system
 	},
 
+	"service-rkp-unittest": {
+		"framework", // cts -> unstable
+	},
+
 	"service-thread-pre-jarjar": {
 		"framework-connectivity-pre-jarjar",   // apex [com.android.tethering] -> system
 		"framework-connectivity-t-pre-jarjar", // apex [com.android.tethering] -> system
@@ -1128,7 +1392,27 @@ var ContainerDependencyViolationAllowlist = map[string][]string{
 		"auto_value_annotations", // apex [com.android.wifi, test_com.android.wifi] -> apex [com.android.adservices, com.android.extservices, com.android.extservices_tplus]
 	},
 
+	"ServiceBluetoothTests": {
+		"framework", // cts -> unstable
+	},
+
+	"ServiceUwbTests": {
+		"framework", // cts -> unstable
+	},
+
+	"stable_cronet_NetHttpCoverageTests": {
+		"framework", // cts -> unstable
+	},
+
+	"StatsdTestUtilsTest": {
+		"framework", // cts -> unstable
+	},
+
 	"TelephonyDeviceTest": {
+		"framework", // cts -> unstable
+	},
+
+	"TeleServiceTests": {
 		"framework", // cts -> unstable
 	},
 
@@ -1152,9 +1436,33 @@ var ContainerDependencyViolationAllowlist = map[string][]string{
 		"connectivity-internal-api-util", // apex [com.android.tethering] -> system
 	},
 
+	"TetheringPrivilegedTests": {
+		"framework", // cts -> unstable
+	},
+
 	"tetheringstatsprotos": {
 		"ext",       // apex [com.android.tethering] -> system
 		"framework", // apex [com.android.tethering] -> system
+	},
+
+	"TetheringTests": {
+		"framework-minus-apex", // cts -> unstable
+	},
+
+	"TextClassifierNotificationTests": {
+		"framework", // cts -> unstable
+	},
+
+	"ThreadBorderRouterIntegrationTests": {
+		"framework", // cts -> unstable
+	},
+
+	"ThreadNetworkIntegrationTests": {
+		"framework", // cts -> unstable
+	},
+
+	"ThreadNetworkTrelDisabledTests": {
+		"framework", // cts -> unstable
 	},
 
 	"uwb_aconfig_flags_lib": {
@@ -1172,4 +1480,5 @@ var ContainerDependencyViolationAllowlist = map[string][]string{
 		"framework-wifi-pre-jarjar", // apex [com.android.wifi, test_com.android.wifi] -> system
 		"jsr305",                    // apex [com.android.wifi, test_com.android.wifi] -> apex [com.android.adservices, com.android.devicelock, com.android.extservices, com.android.healthfitness, com.android.media, com.android.mediaprovider, test_com.android.media, test_com.android.mediaprovider]
 	},
+	// go/keep-sorted end
 }

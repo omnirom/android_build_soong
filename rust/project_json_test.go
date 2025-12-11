@@ -16,8 +16,9 @@ package rust
 
 import (
 	"encoding/json"
-	"io/ioutil"
+	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -36,7 +37,7 @@ func testProjectJson(t *testing.T, bp string) []byte {
 	// The JSON file is generated via WriteFileToOutputDir. Therefore, it
 	// won't appear in the Output of the TestingSingleton. Manually verify
 	// it exists.
-	content, err := ioutil.ReadFile(filepath.Join(result.Config.SoongOutDir(), rustProjectJsonFileName))
+	content, err := os.ReadFile(filepath.Join(result.Config.SoongOutDir(), rustProjectJsonFileName))
 	if err != nil {
 		t.Errorf("rust-project.json has not been generated")
 	}
@@ -48,20 +49,20 @@ func testProjectJson(t *testing.T, bp string) []byte {
 // succeeded.
 // It uses an empty interface instead of relying on a defined structure to
 // avoid a strong dependency on our implementation.
-func validateJsonCrates(t *testing.T, rawContent []byte) []interface{} {
-	var content interface{}
+func validateJsonCrates(t *testing.T, rawContent []byte) []any {
+	var content any
 	err := json.Unmarshal(rawContent, &content)
 	if err != nil {
 		t.Errorf("Unable to parse the rust-project.json as JSON: %v", err)
 	}
-	root, ok := content.(map[string]interface{})
+	root, ok := content.(map[string]any)
 	if !ok {
 		t.Errorf("Unexpected JSON format: %v", content)
 	}
 	if _, ok = root["crates"]; !ok {
 		t.Errorf("No crates attribute in rust-project.json: %v", root)
 	}
-	crates, ok := root["crates"].([]interface{})
+	crates, ok := root["crates"].([]any)
 	if !ok {
 		t.Errorf("Unexpected crates format: %v", root["crates"])
 	}
@@ -69,8 +70,8 @@ func validateJsonCrates(t *testing.T, rawContent []byte) []interface{} {
 }
 
 // validateCrate ensures that a crate can be parsed as a map.
-func validateCrate(t *testing.T, crate interface{}) map[string]interface{} {
-	c, ok := crate.(map[string]interface{})
+func validateCrate(t *testing.T, crate any) map[string]any {
+	c, ok := crate.(map[string]any)
 	if !ok {
 		t.Fatalf("Unexpected type for crate: %v", c)
 	}
@@ -79,14 +80,14 @@ func validateCrate(t *testing.T, crate interface{}) map[string]interface{} {
 
 // validateDependencies parses the dependencies for a crate. It returns a list
 // of the dependencies name.
-func validateDependencies(t *testing.T, crate map[string]interface{}) []string {
+func validateDependencies(t *testing.T, crate map[string]any) []string {
 	var dependencies []string
-	deps, ok := crate["deps"].([]interface{})
+	deps, ok := crate["deps"].([]any)
 	if !ok {
 		t.Errorf("Unexpected format for deps: %v", crate["deps"])
 	}
 	for _, dep := range deps {
-		d, ok := dep.(map[string]interface{})
+		d, ok := dep.(map[string]any)
 		if !ok {
 			t.Errorf("Unexpected format for dependency: %v", dep)
 		}
@@ -158,8 +159,6 @@ func TestProjectJsonProcMacroDep(t *testing.T) {
 			if procMacro {
 				t.Fatalf("'librust' is not a proc macro crate, but is marked with is_proc_macro=true")
 			}
-		default:
-			break
 		}
 	}
 
@@ -182,7 +181,7 @@ func TestProjectJsonFeature(t *testing.T) {
 	crates := validateJsonCrates(t, jsonContent)
 	for _, c := range crates {
 		crate := validateCrate(t, c)
-		cfgs, ok := crate["cfg"].([]interface{})
+		cfgs, ok := crate["cfg"].([]any)
 		if !ok {
 			t.Fatalf("Unexpected type for cfgs: %v", crate)
 		}
@@ -282,18 +281,12 @@ func TestProjectJsonBindGen(t *testing.T) {
 		}
 		if strings.Contains(rootModule, "d/src/lib.rs") {
 			// Check that libd depends on libbindings1
-			found := false
-			for _, depName := range validateDependencies(t, crate) {
-				if depName == "bindings1" {
-					found = true
-					break
-				}
-			}
+			found := slices.Contains(validateDependencies(t, crate), "bindings1")
 			if !found {
 				t.Errorf("libd does not depend on libbindings1: %v", crate)
 			}
 			// Check that OUT_DIR is populated.
-			env, ok := crate["env"].(map[string]interface{})
+			env, ok := crate["env"].(map[string]any)
 			if !ok {
 				t.Errorf("libd does not have its environment variables set: %v", crate)
 			}

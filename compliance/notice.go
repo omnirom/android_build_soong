@@ -70,9 +70,18 @@ type noticeXmlProperties struct {
 	Partition_name string
 }
 
+func (nx *NoticeXmlModule) UseGenericConfig() bool {
+	return false
+}
+
 func (nx *NoticeXmlModule) GenerateAndroidBuildActions(ctx android.ModuleContext) {
-	prodVars := ctx.Config().ProductVariables()
-	buildFingerprintFile := android.PathForArbitraryOutput(ctx, "target", "product", android.String(prodVars.DeviceName), "build_fingerprint.txt")
+	// No build action needs to be done in notice_xml module type if notice xml generation is disabled
+	if ctx.Config().DisableNoticeXmlGeneration() {
+		nx.HideFromMake()
+		return
+	}
+
+	buildFingerprintFile := ctx.Config().BuildFingerprintFile(ctx)
 	implicits := []android.Path{buildFingerprintFile}
 
 	output := android.PathForModuleOut(ctx, "NOTICE.xml.gz")
@@ -91,15 +100,15 @@ func (nx *NoticeXmlModule) GenerateAndroidBuildActions(ctx android.ModuleContext
 
 	nx.outputFile = output.OutputPath
 
-	if android.Bool(ctx.Config().ProductVariables().UseSoongNoticeXML) {
-		installPath := android.PathForModuleInPartitionInstall(ctx, nx.props.Partition_name, "etc")
-		ctx.InstallFile(installPath, "NOTICE.xml.gz", nx.outputFile)
-	}
+	installPath := android.PathForModuleInPartitionInstall(ctx, nx.props.Partition_name, "etc")
+	ctx.InstallFile(installPath, "NOTICE.xml.gz", nx.outputFile)
 }
 
-func (nx *NoticeXmlModule) AndroidMkEntries() []android.AndroidMkEntries {
-	return []android.AndroidMkEntries{{
+func (nx *NoticeXmlModule) PrepareAndroidMKProviderInfo(config android.Config) *android.AndroidMkProviderInfo {
+	info := &android.AndroidMkProviderInfo{}
+	info.PrimaryInfo = android.AndroidMkInfo{
 		Class:      "ETC",
 		OutputFile: android.OptionalPathForPath(nx.outputFile),
-	}}
+	}
+	return info
 }

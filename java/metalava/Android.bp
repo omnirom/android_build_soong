@@ -17,3 +17,14 @@ filegroup {
     srcs: ["*-config.xml"],
     visibility: ["//visibility:public"],
 }
+
+// The previously released API to use when a java_sdk_library specifies
+//   `unsafe_ignore_missing_latest_api: true`
+//
+// This is needed because Metalava requires a previously released API to be
+// provided when using flagged APIs.
+filegroup {
+    name: "default-unsafe-ignore-missing-latest-api",
+    srcs: ["default-unsafe-ignore-missing-latest-api.txt"],
+    visibility: ["//visibility:public"],
+}

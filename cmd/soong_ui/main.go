@@ -74,7 +74,7 @@ var commands = []command{
 		description:  "print the value of the legacy make variable VAR to stdout",
 		simpleOutput: true,
 		logsPrefix:   "dumpvars-",
-		config:       dumpVarConfig,
+		config:       build.NewDumpVarConfig,
 		stdio:        customStdio,
 		run:          dumpVar,
 	}, {
@@ -82,7 +82,7 @@ var commands = []command{
 		description:  "dump the values of one or more legacy make variables, in shell syntax",
 		simpleOutput: true,
 		logsPrefix:   "dumpvars-",
-		config:       dumpVarConfig,
+		config:       build.NewDumpVarConfig,
 		stdio:        customStdio,
 		run:          dumpVars,
 	}, {
@@ -183,21 +183,18 @@ func main() {
 		CriticalPath:     criticalPath,
 	}}
 
-	freshConfig := func() build.Config {
-		config := c.config(buildCtx, args...)
-		config.SetLogsPrefix(c.logsPrefix)
-		return config
-	}
-	config := freshConfig()
+	config := c.config(buildCtx, args...)
+	config.SetLogsPrefix(c.logsPrefix)
 	logsDir := config.LogsDir()
 	buildStarted = config.BuildStartedTimeOrDefault(buildStarted)
 
-	buildErrorFile := filepath.Join(logsDir, c.logsPrefix+"build_error")
-	soongMetricsFile := filepath.Join(logsDir, c.logsPrefix+"soong_metrics")
-	rbeMetricsFile := filepath.Join(logsDir, c.logsPrefix+"rbe_metrics.pb")
-	soongBuildMetricsFile := filepath.Join(logsDir, c.logsPrefix+"soong_build_metrics.pb")
-	buildTraceFile := filepath.Join(logsDir, c.logsPrefix+"build.trace.gz")
-	executionMetricsFile := filepath.Join(logsDir, c.logsPrefix+"execution_metrics.pb")
+	suffix := os.Getenv("SOONG_METRICS_SUFFIX")
+	buildErrorFile := filepath.Join(logsDir, c.logsPrefix+"build_error"+suffix)
+	soongMetricsFile := filepath.Join(logsDir, c.logsPrefix+"soong_metrics"+suffix)
+	rbeMetricsFile := filepath.Join(logsDir, c.logsPrefix+"rbe_metrics"+suffix+".pb")
+	soongBuildMetricsFile := filepath.Join(logsDir, c.logsPrefix+"soong_build_metrics"+suffix+".pb")
+	buildTraceFile := filepath.Join(logsDir, c.logsPrefix+"build.trace"+suffix+".gz")
+	executionMetricsFile := filepath.Join(logsDir, c.logsPrefix+"execution_metrics"+suffix+".pb")
 
 	metricsFiles := []string{
 		buildErrorFile,        // build error strings
@@ -208,7 +205,7 @@ func main() {
 	}
 
 	defer func() {
-		emet.Finish(buildCtx)
+		emet.Finish(build.ExecutionMetricsFinishAdaptor{buildCtx})
 		stat.Finish()
 		criticalPath.WriteToMetrics(met)
 		met.Dump(soongMetricsFile)
@@ -241,10 +238,6 @@ func main() {
 	// PRODUCT_CONFIG_RELEASE_MAPS set for the final product config for the build.
 	// When product config uses a declarative language, we won't need to rerun product config.
 	preProductConfigSetup(buildCtx, config)
-	if build.SetProductReleaseConfigMaps(buildCtx, config) {
-		log.Verbose("Product release config maps found\n")
-		config = freshConfig()
-	}
 
 	c.run(buildCtx, config, args)
 }
@@ -303,10 +296,15 @@ func preProductConfigSetup(buildCtx build.Context, config build.Config) {
 		}
 	}
 
-	// Create a source finder.
-	f := build.NewSourceFinder(buildCtx, config)
-	defer f.Shutdown()
-	build.FindSources(buildCtx, config, f)
+	// _SOONG_INTERNAL_NO_FINDER may only be enabled when soong_ui has already run
+	// and the source tree is known to have not changed since.  This is most beneficial
+	// if the job is iterating over a large number of lunch targets.
+	if !build.OsEnvironment().IsEnvTrue("_SOONG_INTERNAL_NO_FINDER") {
+		// Create a source finder.
+		f := build.NewSourceFinder(buildCtx, config)
+		defer f.Shutdown()
+		build.FindSources(buildCtx, config, f)
+	}
 }
 
 func dumpVar(ctx build.Context, config build.Config, args []string) {
@@ -440,11 +438,6 @@ func stdio() terminal.StdioInterface {
 // reporting events to keep stdout clean from noise.
 func customStdio() terminal.StdioInterface {
 	return terminal.NewCustomStdio(os.Stdin, os.Stderr, os.Stderr)
-}
-
-// dumpVarConfig does not require any arguments to be parsed by the NewConfig.
-func dumpVarConfig(ctx build.Context, args ...string) build.Config {
-	return build.NewConfig(ctx)
 }
 
 func buildActionConfig(ctx build.Context, args ...string) build.Config {

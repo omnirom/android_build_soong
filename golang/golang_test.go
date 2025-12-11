@@ -15,9 +15,10 @@
 package golang
 
 import (
-	"android/soong/android"
 	"regexp"
 	"testing"
+
+	"android/soong/android"
 
 	"github.com/google/blueprint/bootstrap"
 )
@@ -47,7 +48,7 @@ func TestGolang(t *testing.T) {
 
 	bin := result.ModuleForTests(t, "gobin", result.Config.BuildOSTarget.String())
 
-	expected := "^out/host/" + result.Config.PrebuiltOS() + "/bin/go/gobin/?[^/]*/obj/gobin$"
+	expected := "^out/host/" + result.Config.PrebuiltOS() + "/bin/go/gobin/?[^/]*/pkg/gobin$"
 	actual := android.PathsRelativeToTop(bin.OutputFiles(result.TestContext, t, ""))
 	if len(actual) != 1 {
 		t.Fatalf("Expected 1 output file, got %v", actual)

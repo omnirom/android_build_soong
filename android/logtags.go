@@ -20,10 +20,13 @@ import (
 	"github.com/google/blueprint"
 )
 
+//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+
 func init() {
 	RegisterParallelSingletonType("logtags", LogtagsSingleton)
 }
 
+// @auto-generate: gob
 type LogtagsInfo struct {
 	Logtags Paths
 }

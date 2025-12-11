@@ -13,6 +13,7 @@ blueprint_go_binary {
     ],
     deps: [
         "blueprint-pathtools",
+        "golang-protobuf-proto",
         "golang-protobuf-encoding-prototext",
         "soong-elf",
         "soong-response",

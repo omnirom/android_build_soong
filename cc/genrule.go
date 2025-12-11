@@ -79,6 +79,10 @@ var _ android.ImageInterface = (*GenruleExtraProperties)(nil)
 
 func (g *GenruleExtraProperties) ImageMutatorBegin(ctx android.ImageInterfaceContext) {}
 
+func (g *GenruleExtraProperties) ImageMutatorSupported() bool {
+	return true
+}
+
 func (g *GenruleExtraProperties) VendorVariantNeeded(ctx android.ImageInterfaceContext) bool {
 	return Bool(g.Vendor_available) || Bool(g.Odm_available) || ctx.SocSpecific() || ctx.DeviceSpecific()
 }

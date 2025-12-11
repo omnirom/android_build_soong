@@ -180,7 +180,7 @@ func FixtureSetPreoptWithUpdatableBcp(value bool) android.FixturePreparer {
 // FixtureSetBootImageProfiles sets the BootImageProfiles property in the global config.
 func FixtureSetBootImageProfiles(profiles ...string) android.FixturePreparer {
 	return FixtureModifyGlobalConfig(func(ctx android.PathContext, dexpreoptConfig *GlobalConfig) {
-		dexpreoptConfig.BootImageProfiles = android.PathsForSource(ctx, profiles)
+		dexpreoptConfig.BootImageProfiles = android.PathsForTesting(profiles...)
 	})
 }
 
@@ -209,5 +209,12 @@ func FixtureDisableDexpreopt(disable bool) android.FixturePreparer {
 func FixtureSetEnableUffdGc(value string) android.FixturePreparer {
 	return FixtureModifyGlobalConfig(func(_ android.PathContext, dexpreoptConfig *GlobalConfig) {
 		dexpreoptConfig.EnableUffdGc = value
+	})
+}
+
+// FixtureSetPlatformSdkVersion sets the PlatformSdkVersion property in the global config.
+func FixtureSetPlatformSdkVersion(value string) android.FixturePreparer {
+	return FixtureModifyGlobalConfig(func(_ android.PathContext, dexpreoptConfig *GlobalConfig) {
+		dexpreoptConfig.PlatformSdkVersion = value
 	})
 }

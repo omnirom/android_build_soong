@@ -23,12 +23,12 @@ import (
 
 type SdkContext interface {
 	// SdkVersion returns SdkSpec that corresponds to the sdk_version property of the current module
-	SdkVersion(ctx EarlyModuleContext) SdkSpec
+	SdkVersion(ctx ConfigContext) SdkSpec
 	// SystemModules returns the system_modules property of the current module, or an empty string if it is not set.
 	SystemModules() string
 	// MinSdkVersion returns ApiLevel that corresponds to the min_sdk_version property of the current module,
 	// or from sdk_version if it is not set.
-	MinSdkVersion(ctx EarlyModuleContext) ApiLevel
+	MinSdkVersion(ctx MinSdkVersionFromValueContext) ApiLevel
 	// ReplaceMaxSdkVersionPlaceholder returns Apilevel to replace the maxSdkVersion property of permission and
 	// uses-permission tags if it is set.
 	ReplaceMaxSdkVersionPlaceholder(ctx EarlyModuleContext) ApiLevel
@@ -231,7 +231,7 @@ func (s SdkSpec) ForVendorPartition(ctx EarlyModuleContext) SdkSpec {
 	if s.Kind == SdkPublic || s.Kind == SdkSystem {
 		if s.ApiLevel.IsCurrent() {
 			if i, err := strconv.Atoi(currentSdkVersion); err == nil {
-				apiLevel := uncheckedFinalApiLevel(i)
+				apiLevel := UncheckedFinalApiLevel(i)
 				return SdkSpec{s.Kind, apiLevel, s.Raw}
 			}
 			panic(fmt.Errorf("BOARD_CURRENT_API_LEVEL_FOR_VENDOR_MODULES must be either \"current\" or a number, but was %q", currentSdkVersion))
@@ -297,7 +297,7 @@ var (
 	SdkSpecCorePlatform = SdkSpec{SdkCorePlatform, FutureApiLevel, "core_platform"}
 )
 
-func SdkSpecFrom(ctx EarlyModuleContext, str string) SdkSpec {
+func SdkSpecFrom(ctx ConfigContext, str string) SdkSpec {
 	return SdkSpecFromWithConfig(ctx.Config(), str)
 }
 

@@ -7,6 +7,7 @@ bootstrap_go_package {
     pkgPath: "android/soong/phony",
     deps: [
         "blueprint",
+        "blueprint-proptools",
         "soong-android",
     ],
     srcs: [

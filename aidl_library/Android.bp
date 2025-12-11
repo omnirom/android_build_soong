@@ -20,7 +20,9 @@ bootstrap_go_package {
     name: "soong-aidl-library",
     pkgPath: "android/soong/aidl_library",
     deps: [
+        "blueprint",
         "blueprint-depset",
+        "blueprint-proptools",
         "soong-android",
     ],
     srcs: [

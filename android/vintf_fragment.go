@@ -59,18 +59,15 @@ func vintfLibraryFactory() Module {
 }
 
 func (m *VintfFragmentModule) GenerateAndroidBuildActions(ctx ModuleContext) {
-	builder := NewRuleBuilder(pctx, ctx)
 	srcVintfFragment := PathForModuleSrc(ctx, m.properties.Src)
 	processedVintfFragment := PathForModuleOut(ctx, srcVintfFragment.Base())
 
 	// Process vintf fragment source file with assemble_vintf tool
-	builder.Command().
-		Flag("VINTF_IGNORE_TARGET_FCM_VERSION=true").
-		BuiltTool("assemble_vintf").
-		FlagWithInput("-i ", srcVintfFragment).
-		FlagWithOutput("-o ", processedVintfFragment)
-
-	builder.Build("assemble_vintf", "Process vintf fragment "+processedVintfFragment.String())
+	ctx.Build(pctx, BuildParams{
+		Rule:   AssembleVintfRule,
+		Input:  srcVintfFragment,
+		Output: processedVintfFragment,
+	})
 
 	m.installDirPath = PathForModuleInstall(ctx, "etc", "vintf", "manifest")
 	m.outputFilePath = processedVintfFragment

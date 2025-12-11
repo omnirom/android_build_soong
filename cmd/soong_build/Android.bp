@@ -21,11 +21,18 @@ blueprint_go_binary {
     deps: [
         "blueprint",
         "blueprint-bootstrap",
+        "blueprint-bootstrap-bpdoc",
+        "blueprint-deptools",
+        "blueprint-metrics",
+        "blueprint-pathtools",
+        "blueprint-proptools",
         "golang-protobuf-proto",
         "golang-protobuf-android",
         "soong",
         "soong-android",
+        "soong-android-allowlists",
         "soong-provenance",
+        "soong-shared",
         "soong-ui-metrics_proto",
     ],
     srcs: [

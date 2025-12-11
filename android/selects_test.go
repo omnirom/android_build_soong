@@ -25,14 +25,15 @@ import (
 
 func TestSelects(t *testing.T) {
 	testCases := []struct {
-		name           string
-		bp             string
-		fs             MockFS
-		provider       selectsTestProvider
-		providers      map[string]selectsTestProvider
-		vendorVars     map[string]map[string]string
-		vendorVarTypes map[string]map[string]string
-		expectedError  string
+		name                 string
+		bp                   string
+		fs                   MockFS
+		provider             selectsTestProvider
+		providers            map[string]selectsTestProvider
+		initializingProvider *selectsTestInitializingProvider
+		vendorVars           map[string]map[string]string
+		vendorVarTypes       map[string]map[string]string
+		expectedError        string
 	}{
 		{
 			name: "basic string list",
@@ -770,7 +771,7 @@ func TestSelects(t *testing.T) {
 				}),
 			}
 			`,
-			expectedError: `can't assign select statement to non-configurable property "my_nonconfigurable_bool"`,
+			expectedError: `can't assign select statement to non-configurable property "my_nonconfigurable_bool". This requires a small soong change to enable`,
 		},
 		{
 			name: "Assigning select to nonconfigurable string",
@@ -783,7 +784,7 @@ func TestSelects(t *testing.T) {
 				}),
 			}
 			`,
-			expectedError: `can't assign select statement to non-configurable property "my_nonconfigurable_string"`,
+			expectedError: `can't assign select statement to non-configurable property "my_nonconfigurable_string". This requires a small soong change to enable`,
 		},
 		{
 			name: "Assigning appended selects to nonconfigurable string",
@@ -799,7 +800,7 @@ func TestSelects(t *testing.T) {
 				}),
 			}
 			`,
-			expectedError: `can't assign select statement to non-configurable property "my_nonconfigurable_string"`,
+			expectedError: `can't assign select statement to non-configurable property "my_nonconfigurable_string". This requires a small soong change to enable`,
 		},
 		{
 			name: "Assigning select to nonconfigurable string list",
@@ -812,7 +813,20 @@ func TestSelects(t *testing.T) {
 				}),
 			}
 			`,
-			expectedError: `can't assign select statement to non-configurable property "my_nonconfigurable_string_list"`,
+			expectedError: `can't assign select statement to non-configurable property "my_nonconfigurable_string_list". This requires a small soong change to enable`,
+		},
+		{
+			name: "Assigning select to defaults property",
+			bp: `
+			my_module_type {
+				name: "foo",
+				defaults: select(soong_config_variable("foo", "bar"), {
+					"x": ["foo"],
+					default: [],
+				}),
+			}
+			`,
+			expectedError: `can't assign select statement to non-configurable property "defaults". We explicitly don't support selects on this property`,
 		},
 		{
 			name: "Select in variable",
@@ -1154,6 +1168,18 @@ my_module_type {
 			},
 			expectedError: `Expected all branches of a select on condition soong_config_variable\("my_namespace", "my_var"\) to have type string_list, found string`,
 		},
+		{
+			name: "Replacing initialized bool uses replace for the first value instead of append",
+			bp: `
+my_module_type {
+	name: "foo",
+	replacing_initialized_bool: false,
+}
+`,
+			initializingProvider: &selectsTestInitializingProvider{
+				replacing_initialized_bool: proptools.BoolPtr(false),
+			},
+		},
 	}
 
 	for _, tc := range testCases {
@@ -1199,6 +1225,15 @@ my_module_type {
 						t.Errorf("Expected:\n  %q\ngot:\n  %q", expected.String(), p.String())
 					}
 				}
+
+				if tc.initializingProvider != nil {
+					expected := *tc.initializingProvider
+					m := result.ModuleForTests(t, "foo", "android_arm64_armv8-a")
+					p, _ := OtherModuleProvider(result.testContext.OtherModuleProviderAdaptor(), m.Module(), selectsTestInitializingProviderKey)
+					if !reflect.DeepEqual(p, expected) {
+						t.Errorf("Expected:\n  %q\ngot:\n  %q", expected.String(), p.String())
+					}
+				}
 			}
 		})
 	}
@@ -1231,7 +1266,7 @@ func (p *selectsTestProvider) String() string {
 		myNonconfigurableStringStr = *p.my_nonconfigurable_string
 	}
 	return fmt.Sprintf(`selectsTestProvider {
-	my_bool: %v,
+	my_bool: %s,
 	my_string: %s,
     my_string_list: %s,
     my_paths: %s,
@@ -1255,12 +1290,31 @@ func (p *selectsTestProvider) String() string {
 
 var selectsTestProviderKey = blueprint.NewProvider[selectsTestProvider]()
 
+type selectsTestInitializingProvider struct {
+	replacing_initialized_bool *bool
+}
+
+func (p *selectsTestInitializingProvider) String() string {
+	myBoolStr := "nil"
+	if p.replacing_initialized_bool != nil {
+		myBoolStr = fmt.Sprintf("%t", *p.replacing_initialized_bool)
+	}
+	return fmt.Sprintf(`selectsTestInitializingProvider {
+	replacing_initialized_bool: %s,
+}`,
+		myBoolStr,
+	)
+}
+
+var selectsTestInitializingProviderKey = blueprint.NewProvider[selectsTestInitializingProvider]()
+
 type selectsMockModuleProperties struct {
 	My_bool                        proptools.Configurable[bool]
 	My_int64                       proptools.Configurable[int64]
 	My_string                      proptools.Configurable[string]
 	My_string_list                 proptools.Configurable[[]string]
 	My_paths                       proptools.Configurable[[]string] `android:"path"`
+	Replacing_initialized_bool     proptools.Configurable[bool]     `android:"replace_instead_of_append"`
 	Replacing_string_list          proptools.Configurable[[]string] `android:"replace_instead_of_append,arch_variant"`
 	Arch_variant_configurable_bool proptools.Configurable[bool]     `android:"replace_instead_of_append,arch_variant"`
 	My_nonconfigurable_bool        *bool
@@ -1299,6 +1353,9 @@ func (p *selectsMockModule) GenerateAndroidBuildActions(ctx ModuleContext) {
 		my_nonconfigurable_string:      p.properties.My_nonconfigurable_string,
 		my_nonconfigurable_string_list: p.properties.My_nonconfigurable_string_list,
 	})
+	SetProvider(ctx, selectsTestInitializingProviderKey, selectsTestInitializingProvider{
+		replacing_initialized_bool: optionalToPtr(p.properties.Replacing_initialized_bool.Get(ctx)),
+	})
 }
 
 func newSelectsMockModule() Module {
@@ -1306,6 +1363,7 @@ func newSelectsMockModule() Module {
 	m.AddProperties(&m.properties)
 	InitAndroidArchModule(m, HostAndDeviceSupported, MultilibFirst)
 	InitDefaultableModule(m)
+	m.properties.Replacing_initialized_bool = proptools.NewSimpleConfigurable(true)
 	return m
 }
 

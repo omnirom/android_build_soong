@@ -21,19 +21,16 @@ import (
 
 func TestEnd(t *testing.T) {
 	startTime := time.Date(2020, time.July, 13, 13, 0, 0, 0, time.UTC)
-	dur := time.Nanosecond * 10
+	var dur time.Duration
 	initialNow := _now
 	_now = func() time.Time { return startTime.Add(dur) }
 	defer func() { _now = initialNow }()
 
-	et := &EventTracer{}
-	et.push(&event{
-		desc:  "test",
-		name:  "test",
-		start: startTime,
-	})
+	event := newEvent(nil, "test", "test")
 
-	perf := et.End()
+	dur = 10 * time.Nanosecond
+	perf := event.perfInfo()
+
 	if perf.GetRealTime() != uint64(dur.Nanoseconds()) {
 		t.Errorf("got %d, want %d nanoseconds for event duration", perf.GetRealTime(), dur.Nanoseconds())
 	}
@@ -41,22 +38,18 @@ func TestEnd(t *testing.T) {
 
 func TestEndWithError(t *testing.T) {
 	startTime := time.Date(2020, time.July, 13, 13, 0, 0, 0, time.UTC)
-	dur := time.Nanosecond * 10
+	var dur time.Duration
 	initialNow := _now
 	_now = func() time.Time { return startTime.Add(dur) }
 	defer func() { _now = initialNow }()
 
 	err := "foobar"
-	et := &EventTracer{}
-	et.push(&event{
-		desc:            "test",
-		name:            "test",
-		start:           startTime,
-		nonZeroExitCode: true,
-		errorMsg:        &err,
-	})
+	event := newEvent(nil, "test", "test")
+	event.SetFatalOrPanicMessage(err)
 
-	perf := et.End()
+	dur = 10 * time.Nanosecond
+	perf := event.perfInfo()
+
 	if msg := perf.GetErrorMessage(); msg != err {
 		t.Errorf("got %q, want %q for even error message", msg, err)
 	}

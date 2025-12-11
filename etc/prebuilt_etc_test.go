@@ -17,6 +17,7 @@ package etc
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/google/blueprint/proptools"
@@ -54,21 +55,41 @@ func TestPrebuiltEtcVariants(t *testing.T) {
 			src: "baz.conf",
 			recovery: true,
 		}
+		prebuilt_etc {
+			name: "vendor.conf",
+			src: "vendor.conf",
+			vendor: true,
+		}
+		prebuilt_etc {
+			name: "odm.conf",
+			src: "odm.conf",
+			device_specific: true,
+		}
 	`)
 
-	foo_variants := result.ModuleVariantsForTests("foo.conf")
-	if len(foo_variants) != 1 {
-		t.Errorf("expected 1, got %#v", foo_variants)
+	fooVariants := result.ModuleVariantsForTests("foo.conf")
+	if g, w := fooVariants, []string{"android_arm64_armv8-a"}; !slices.Equal(g, w) {
+		t.Errorf("expected foo.conf variants %q, got %q", w, g)
 	}
 
-	bar_variants := result.ModuleVariantsForTests("bar.conf")
-	if len(bar_variants) != 2 {
-		t.Errorf("expected 2, got %#v", bar_variants)
+	barVariants := result.ModuleVariantsForTests("bar.conf")
+	if g, w := barVariants, []string{"android_arm64_armv8-a", "android_recovery_arm64_armv8-a"}; !slices.Equal(g, w) {
+		t.Errorf("expected bar.conf variants %q, got %q", w, g)
 	}
 
-	baz_variants := result.ModuleVariantsForTests("baz.conf")
-	if len(baz_variants) != 1 {
-		t.Errorf("expected 1, got %#v", baz_variants)
+	bazVariants := result.ModuleVariantsForTests("baz.conf")
+	if g, w := bazVariants, []string{"android_recovery_arm64_armv8-a"}; !slices.Equal(g, w) {
+		t.Errorf("expected baz.conf variants %q, got %q", w, g)
+	}
+
+	vendorVariants := result.ModuleVariantsForTests("vendor.conf")
+	if g, w := vendorVariants, []string{"android_vendor_arm64_armv8-a"}; !slices.Equal(g, w) {
+		t.Errorf("expected vendor.conf variants %q, got %q", w, g)
+	}
+
+	odmVariants := result.ModuleVariantsForTests("odm.conf")
+	if g, w := odmVariants, []string{"android_vendor_arm64_armv8-a"}; !slices.Equal(g, w) {
+		t.Errorf("expected odm.conf variants %q, got %q", w, g)
 	}
 }
 
@@ -492,6 +513,7 @@ func TestPrebuiltFirmwareDirPath(t *testing.T) {
 	tests := []struct {
 		description  string
 		config       string
+		variant      string
 		expectedPath string
 	}{{
 		description: "prebuilt: system firmware",
@@ -500,6 +522,7 @@ func TestPrebuiltFirmwareDirPath(t *testing.T) {
 				name: "foo.conf",
 				src: "foo.conf",
 			}`,
+		variant:      "android_arm64_armv8-a",
 		expectedPath: filepath.Join(targetPath, "system/etc/firmware"),
 	}, {
 		description: "prebuilt: vendor firmware",
@@ -510,12 +533,13 @@ func TestPrebuiltFirmwareDirPath(t *testing.T) {
 				soc_specific: true,
 				sub_dir: "sub_dir",
 			}`,
+		variant:      "android_vendor_arm64_armv8-a",
 		expectedPath: filepath.Join(targetPath, "vendor/firmware/sub_dir"),
 	}}
 	for _, tt := range tests {
 		t.Run(tt.description, func(t *testing.T) {
 			result := prepareForPrebuiltEtcTest.RunTestWithBp(t, tt.config)
-			p := result.Module("foo.conf", "android_arm64_armv8-a").(*PrebuiltEtc)
+			p := result.Module("foo.conf", tt.variant).(*PrebuiltEtc)
 			android.AssertPathRelativeToTopEquals(t, "install dir", tt.expectedPath, p.installDirPaths[0])
 		})
 	}
@@ -526,6 +550,7 @@ func TestPrebuiltDSPDirPath(t *testing.T) {
 	tests := []struct {
 		description  string
 		config       string
+		variant      string
 		expectedPath string
 	}{{
 		description: "prebuilt: system dsp",
@@ -534,6 +559,7 @@ func TestPrebuiltDSPDirPath(t *testing.T) {
 				name: "foo.conf",
 				src: "foo.conf",
 			}`,
+		variant:      "android_arm64_armv8-a",
 		expectedPath: filepath.Join(targetPath, "system/etc/dsp"),
 	}, {
 		description: "prebuilt: vendor dsp",
@@ -544,12 +570,13 @@ func TestPrebuiltDSPDirPath(t *testing.T) {
 				soc_specific: true,
 				sub_dir: "sub_dir",
 			}`,
+		variant:      "android_vendor_arm64_armv8-a",
 		expectedPath: filepath.Join(targetPath, "vendor/dsp/sub_dir"),
 	}}
 	for _, tt := range tests {
 		t.Run(tt.description, func(t *testing.T) {
 			result := prepareForPrebuiltEtcTest.RunTestWithBp(t, tt.config)
-			p := result.Module("foo.conf", "android_arm64_armv8-a").(*PrebuiltEtc)
+			p := result.Module("foo.conf", tt.variant).(*PrebuiltEtc)
 			android.AssertPathRelativeToTopEquals(t, "install dir", tt.expectedPath, p.installDirPaths[0])
 		})
 	}
@@ -560,6 +587,7 @@ func TestPrebuiltRFSADirPath(t *testing.T) {
 	tests := []struct {
 		description  string
 		config       string
+		variant      string
 		expectedPath string
 	}{{
 		description: "prebuilt: system rfsa",
@@ -568,6 +596,7 @@ func TestPrebuiltRFSADirPath(t *testing.T) {
 				name: "foo.conf",
 				src: "foo.conf",
 			}`,
+		variant:      "android_arm64_armv8-a",
 		expectedPath: filepath.Join(targetPath, "system/lib/rfsa"),
 	}, {
 		description: "prebuilt: vendor rfsa",
@@ -578,12 +607,13 @@ func TestPrebuiltRFSADirPath(t *testing.T) {
 				soc_specific: true,
 				sub_dir: "sub_dir",
 			}`,
+		variant:      "android_vendor_arm64_armv8-a",
 		expectedPath: filepath.Join(targetPath, "vendor/lib/rfsa/sub_dir"),
 	}}
 	for _, tt := range tests {
 		t.Run(tt.description, func(t *testing.T) {
 			result := prepareForPrebuiltEtcTest.RunTestWithBp(t, tt.config)
-			p := result.Module("foo.conf", "android_arm64_armv8-a").(*PrebuiltEtc)
+			p := result.Module("foo.conf", tt.variant).(*PrebuiltEtc)
 			android.AssertPathRelativeToTopEquals(t, "install dir", tt.expectedPath, p.installDirPaths[0])
 		})
 	}

@@ -78,11 +78,10 @@ func init() {
 	pctx.HostBinToolVariable("apex_ls", "apex-ls")
 	pctx.HostBinToolVariable("apex_sepolicy_tests", "apex_sepolicy_tests")
 	pctx.HostBinToolVariable("deapexer", "deapexer")
-	pctx.HostBinToolVariable("debugfs_static", "debugfs_static")
+	pctx.HostBinToolVariable("debugfs", "debugfs")
 	pctx.HostBinToolVariable("fsck_erofs", "fsck.erofs")
 	pctx.SourcePathVariable("genNdkUsedbyApexPath", "build/soong/scripts/gen_ndk_usedby_apex.sh")
 	pctx.HostBinToolVariable("conv_linker_config", "conv_linker_config")
-	pctx.HostBinToolVariable("assemble_vintf", "assemble_vintf")
 	pctx.HostBinToolVariable("apex_elf_checker", "apex_elf_checker")
 	pctx.HostBinToolVariable("aconfig", "aconfig")
 	pctx.HostBinToolVariable("host_apex_verifier", "host_apex_verifier")
@@ -226,29 +225,30 @@ var (
 	}, "image_dir")
 
 	apexHostVerifierRule = pctx.StaticRule("apexHostVerifierRule", blueprint.RuleParams{
-		Command: `${host_apex_verifier} --deapexer=${deapexer} --debugfs=${debugfs_static} ` +
+		Command: `${host_apex_verifier} --deapexer=${deapexer} --debugfs=${debugfs} ` +
 			`--fsckerofs=${fsck_erofs} --apex=${in} --partition_tag=${partition_tag} && touch ${out}`,
-		CommandDeps: []string{"${host_apex_verifier}", "${deapexer}", "${debugfs_static}", "${fsck_erofs}"},
+		CommandDeps: []string{"${host_apex_verifier}", "${deapexer}", "${debugfs}", "${fsck_erofs}"},
 		Description: "run host_apex_verifier",
 	}, "partition_tag")
 
-	assembleVintfRule = pctx.StaticRule("assembleVintfRule", blueprint.RuleParams{
-		Command:     `rm -f $out && VINTF_IGNORE_TARGET_FCM_VERSION=true ${assemble_vintf} -i $in -o $out`,
-		CommandDeps: []string{"${assemble_vintf}"},
-		Description: "run assemble_vintf",
-	})
-
 	apexElfCheckerUnwantedRule = pctx.StaticRule("apexElfCheckerUnwantedRule", blueprint.RuleParams{
 		Command:     `${apex_elf_checker} --tool_path ${tool_path} --unwanted ${unwanted} ${in} && touch ${out}`,
-		CommandDeps: []string{"${apex_elf_checker}", "${deapexer}", "${debugfs_static}", "${fsck_erofs}", "${config.ClangBin}/llvm-readelf"},
+		CommandDeps: []string{"${apex_elf_checker}", "${deapexer}", "${debugfs}", "${fsck_erofs}", "${config.ClangBin}/llvm-readelf"},
 		Description: "run apex_elf_checker --unwanted",
 	}, "tool_path", "unwanted")
+
+	apexAconfigFlagsPbRule = pctx.StaticRule("apexAconfigFlagsPbRule", blueprint.RuleParams{
+		Command: `${aconfig} dump-cache --dedup --format protobuf --out ${out} ` +
+			`--filter container:${container}+namespace:!${beta_namespace} ${cache_files}`,
+		CommandDeps: []string{"${aconfig}",},
+		Description: "create aconfig_flags.pb file",
+	}, "container", "beta_namespace", "cache_files")
 )
 
 func (a *apexBundle) buildAconfigFiles(ctx android.ModuleContext) []apexFile {
 	var aconfigFiles android.Paths
 	for _, file := range a.filesInfo {
-		if file.module == nil {
+		if file.module.IsNil() {
 			continue
 		}
 		if dep, ok := android.OtherModuleProvider(ctx, file.module, android.AconfigPropagatingProviderKey); ok {
@@ -267,23 +267,36 @@ func (a *apexBundle) buildAconfigFiles(ctx android.ModuleContext) []apexFile {
 	var files []apexFile
 	if len(aconfigFiles) > 0 {
 		apexAconfigFile := android.PathForModuleOut(ctx, "aconfig_flags.pb")
-		ctx.Build(pctx, android.BuildParams{
-			Rule:        aconfig.AllDeclarationsRule,
-			Inputs:      aconfigFiles,
-			Output:      apexAconfigFile,
-			Description: "combine_aconfig_declarations",
-			Args: map[string]string{
-				"cache_files": android.JoinPathsWithPrefix(aconfigFiles, "--cache "),
-			},
-		})
-		files = append(files, newApexFile(ctx, apexAconfigFile, "aconfig_flags", "etc", etc, nil))
-
-		// To enable fingerprint, we need to have v2 storage files. The default version is 1.
-		storageFilesVersion := 1
-		if ctx.Config().ReleaseFingerprintAconfigPackages() {
-			storageFilesVersion = 2
+		if ctx.Config().ReleaseRemoveBetaFlagsFromAconfigFlagsPb() {
+			beta_namespace := "";
+			if a.overridableProperties.Beta_namespace  != nil {
+				beta_namespace = *(a.overridableProperties.Beta_namespace)
+			}
+			ctx.Build(pctx, android.BuildParams{
+				Rule:        apexAconfigFlagsPbRule,
+				Inputs:      aconfigFiles,
+				Output:      apexAconfigFile,
+				Description: "aggregate all dependent aconfig caches",
+				Args: map[string]string{
+					"container": ctx.ModuleName(),
+					"beta_namespace": beta_namespace,
+					"cache_files": android.JoinPathsWithPrefix(aconfigFiles, "--cache "),
+				},
+			})
+		} else {
+			ctx.Build(pctx, android.BuildParams{
+				Rule:        aconfig.AllDeclarationsRule,
+				Inputs:      aconfigFiles,
+				Output:      apexAconfigFile,
+				Description: "combine_aconfig_declarations",
+				Args: map[string]string{
+					"cache_files": android.JoinPathsWithPrefix(aconfigFiles, "--cache "),
+				},
+			})
 		}
+		files = append(files, newApexFile(ctx, apexAconfigFile, "aconfig_flags", "etc", etc, android.ModuleProxy{}))
 
+		storageFilesVersion := ctx.Config().ReleaseAconfigStorageVersion()
 		for _, info := range createStorageInfo {
 			outputFile := android.PathForModuleOut(ctx, info.Output_file)
 			ctx.Build(pctx, android.BuildParams{
@@ -295,10 +308,10 @@ func (a *apexBundle) buildAconfigFiles(ctx android.ModuleContext) []apexFile {
 					"container":   ctx.ModuleName(),
 					"file_type":   info.File_type,
 					"cache_files": android.JoinPathsWithPrefix(aconfigFiles, "--cache "),
-					"version":     strconv.Itoa(storageFilesVersion),
+					"version":     storageFilesVersion,
 				},
 			})
-			files = append(files, newApexFile(ctx, outputFile, info.File_type, "etc", etc, nil))
+			files = append(files, newApexFile(ctx, outputFile, info.File_type, "etc", etc, android.ModuleProxy{}))
 		}
 	}
 	return files
@@ -408,8 +421,8 @@ func (a *apexBundle) buildFileContexts(ctx android.ModuleContext) android.Path {
 		if m, t := android.SrcIsModuleWithTag(*a.properties.File_contexts); m != "" {
 			isFileContextsModule = true
 			otherModule := android.GetModuleProxyFromPathDep(ctx, m, t)
-			if otherModule != nil {
-				fileContextsDir = ctx.OtherModuleDir(*otherModule)
+			if !otherModule.IsNil() {
+				fileContextsDir = ctx.OtherModuleDir(otherModule)
 			}
 		}
 		fileContexts = android.PathForModuleSrc(ctx, *a.properties.File_contexts)
@@ -526,14 +539,14 @@ func markManifestTestOnly(ctx android.ModuleContext, androidManifestFile android
 
 func shouldApplyAssembleVintf(fi apexFile) bool {
 	isVintfFragment, _ := path.Match("etc/vintf/*", fi.path())
-	_, fromVintfFragmentModule := fi.module.(*android.VintfFragmentModule)
+	fromVintfFragmentModule := fi.providers != nil && fi.providers.vintfFragmentInfo != nil
 	return isVintfFragment && !fromVintfFragmentModule
 }
 
 func runAssembleVintf(ctx android.ModuleContext, vintfFragment android.Path) android.Path {
 	processed := android.PathForModuleOut(ctx, "vintf", vintfFragment.Base())
 	ctx.Build(pctx, android.BuildParams{
-		Rule:        assembleVintfRule,
+		Rule:        android.AssembleVintfRule,
 		Input:       vintfFragment,
 		Output:      processed,
 		Description: "run assemble_vintf for VINTF in APEX",
@@ -566,7 +579,7 @@ func (a *apexBundle) installApexSystemServerFiles(ctx android.ModuleContext) {
 	}
 
 	psi := android.PrebuiltSelectionInfoMap{}
-	ctx.VisitDirectDeps(func(am android.Module) {
+	ctx.VisitDirectDepsProxy(func(am android.ModuleProxy) {
 		if info, exists := android.OtherModuleProvider(ctx, am, android.PrebuiltSelectionInfoProvider); exists {
 			psi = info
 		}
@@ -580,6 +593,9 @@ func (a *apexBundle) installApexSystemServerFiles(ctx android.ModuleContext) {
 		for _, install := range fi.systemServerDexpreoptInstalls {
 			var installedFile android.InstallPath
 			if performInstalls {
+				// android_device will create the install rule in soong-only builds.
+				// Skip creating the installation rule from the base variant
+				// in soong-only builds to prevent duplicate installation rules.
 				installedFile = ctx.InstallFile(install.InstallDirOnDevice, install.InstallFileOnDevice, install.OutputPathOnHost)
 			} else {
 				// Another module created the install rules, but this module should still depend on
@@ -588,7 +604,7 @@ func (a *apexBundle) installApexSystemServerFiles(ctx android.ModuleContext) {
 			}
 			a.extraInstalledFiles = append(a.extraInstalledFiles, installedFile)
 			a.extraInstalledPairs = append(a.extraInstalledPairs, installPair{install.OutputPathOnHost, installedFile})
-			ctx.PackageFile(install.InstallDirOnDevice, install.InstallFileOnDevice, install.OutputPathOnHost)
+			ctx.PackageFileWithFakeFullInstall(install.InstallDirOnDevice, install.InstallFileOnDevice, install.OutputPathOnHost)
 		}
 		if performInstalls {
 			for _, dexJar := range fi.systemServerDexJars {
@@ -653,10 +669,10 @@ func (a *apexBundle) buildApex(ctx android.ModuleContext) {
 				// are zipped. So we need to unzip them.
 				copyCommands = append(copyCommands,
 					fmt.Sprintf("unzip -qDD -d %s %s", destPathDir,
-						fi.module.(*java.AndroidAppSet).PackedAdditionalOutputs().String()))
+						fi.providers.appInfo.PackedAdditionalOutputs.String()))
 				if installSymbolFiles {
 					installedPath = ctx.InstallFileWithExtraFilesZip(apexDir.Join(ctx, fi.installDir),
-						fi.stem(), fi.builtFile, fi.module.(*java.AndroidAppSet).PackedAdditionalOutputs())
+						fi.stem(), fi.builtFile, fi.providers.appInfo.PackedAdditionalOutputs)
 				}
 			} else {
 				if installSymbolFiles {
@@ -817,10 +833,14 @@ func (a *apexBundle) buildApex(ctx android.ModuleContext) {
 	htmlGzNotice := android.PathForModuleOut(ctx, "NOTICE.html.gz")
 	android.BuildNoticeHtmlOutputFromLicenseMetadata(
 		ctx, htmlGzNotice, "", "",
-		[]string{
-			android.PathForModuleInstall(ctx).String() + "/",
-			android.PathForModuleInPartitionInstall(ctx, "apex").String() + "/",
-		})
+		android.BuildNoticeFromLicenseDataArgs{
+			StripPrefix: []string{
+				android.PathForModuleInstall(ctx).String() + "/",
+				android.PathForModuleInPartitionInstall(ctx, "apex").String() + "/",
+			},
+		},
+		ctx.ModuleProxy(),
+	)
 	noticeAssetPath := android.PathForModuleOut(ctx, "NOTICE", "NOTICE.html.gz")
 	builder := android.NewRuleBuilder(pctx, ctx)
 	builder.Command().Text("cp").
@@ -903,7 +923,6 @@ func (a *apexBundle) buildApex(ctx android.ModuleContext) {
 			"readelf":   "${config.ClangBin}/llvm-readelf",
 		},
 	})
-	a.nativeApisUsedByModuleFile = apisUsedbyOutputFile
 
 	var nativeLibNames []string
 	for _, f := range a.filesInfo {
@@ -918,7 +937,6 @@ func (a *apexBundle) buildApex(ctx android.ModuleContext) {
 		Output(apisBackedbyOutputFile).
 		Flags(nativeLibNames)
 	rb.Build("ndk_backedby_list", "Generate API libraries backed by Apex")
-	a.nativeApisBackedByModuleFile = apisBackedbyOutputFile
 
 	var javaLibOrApkPath []android.Path
 	for _, f := range a.filesInfo {
@@ -934,7 +952,12 @@ func (a *apexBundle) buildApex(ctx android.ModuleContext) {
 		Output(javaApiUsedbyOutputFile).
 		Inputs(javaLibOrApkPath)
 	javaUsedByRule.Build("java_usedby_list", "Generate Java APIs used by Apex")
-	a.javaApisUsedByModuleFile = javaApiUsedbyOutputFile
+
+	if slices.Contains(ctx.Config().UnbundledBuildApps(), a.Name()) && !android.ShouldSkipAndroidMkProcessing(ctx, a) {
+		ctx.DistForGoalWithFilename("apps_only", apisUsedbyOutputFile, "ndk_apis_usedby_apex/"+apisUsedbyOutputFile.Base())
+		ctx.DistForGoalWithFilename("apps_only", apisBackedbyOutputFile, "ndk_apis_backedby_apex/"+apisBackedbyOutputFile.Base())
+		ctx.DistForGoalWithFilename("apps_only", javaApiUsedbyOutputFile, "java_apis_used_by_apex/"+javaApiUsedbyOutputFile.Base())
+	}
 
 	bundleConfig := a.buildBundleConfig(ctx)
 
@@ -970,7 +993,7 @@ func (a *apexBundle) buildApex(ctx android.ModuleContext) {
 		"flags":        "-a 4096 --align-file-size", //alignment
 	}
 	implicits := android.Paths{pem, key}
-	if ctx.Config().UseRBE() && ctx.Config().IsEnvTrue("RBE_SIGNAPK") {
+	if ctx.Config().UseREWrapper() && ctx.Config().IsEnvTrue("RBE_SIGNAPK") {
 		rule = java.SignapkRE
 		args["implicits"] = strings.Join(implicits.Strings(), ",")
 		args["outCommaList"] = signedOutputFile.String()
@@ -1024,7 +1047,7 @@ func (a *apexBundle) buildApex(ctx android.ModuleContext) {
 		compressRule.Build("compressRule", "Generate unsigned compressed APEX file")
 
 		signedCompressedOutputFile := android.PathForModuleOut(ctx, a.Name()+imageCapexSuffix)
-		if ctx.Config().UseRBE() && ctx.Config().IsEnvTrue("RBE_SIGNAPK") {
+		if ctx.Config().UseREWrapper() && ctx.Config().IsEnvTrue("RBE_SIGNAPK") {
 			args["outCommaList"] = signedCompressedOutputFile.String()
 		}
 		ctx.Build(pctx, android.BuildParams{
@@ -1095,12 +1118,6 @@ func (a *apexBundle) getOverrideManifestPackageName(ctx android.ModuleContext) s
 }
 
 func (a *apexBundle) buildApexDependencyInfo(ctx android.ModuleContext) {
-	if a.properties.IsCoverageVariant {
-		// Otherwise, we will have duplicated rules for coverage and
-		// non-coverage variants of the same APEX
-		return
-	}
-
 	depInfos := android.DepNameToDepInfoMap{}
 	a.WalkPayloadDeps(ctx, func(ctx android.BaseModuleContext, from, to android.ModuleProxy, externalDep bool) bool {
 		if from.Name() == to.Name() {
@@ -1111,7 +1128,7 @@ func (a *apexBundle) buildApexDependencyInfo(ctx android.ModuleContext) {
 
 		// Skip dependencies that are only available to APEXes; they are developed with updatability
 		// in mind and don't need manual approval.
-		if android.OtherModulePointerProviderOrDefault(ctx, to, android.CommonModuleInfoProvider).NotAvailableForPlatform {
+		if android.OtherModuleProviderOrDefault(ctx, to, android.PlatformAvailabilityInfoProvider).NotAvailableToPlatform {
 			return !externalDep
 		}
 
@@ -1147,14 +1164,7 @@ func (a *apexBundle) buildApexDependencyInfo(ctx android.ModuleContext) {
 
 	a.ApexBundleDepsInfo.BuildDepsInfoLists(ctx, a.MinSdkVersion(ctx).String(), depInfos)
 
-	ctx.Build(pctx, android.BuildParams{
-		Rule:   android.Phony,
-		Output: android.PathForPhony(ctx, a.Name()+"-deps-info"),
-		Inputs: []android.Path{
-			a.ApexBundleDepsInfo.FullListPath(),
-			a.ApexBundleDepsInfo.FlatListPath(),
-		},
-	})
+	ctx.Phony(a.Name()+"-deps-info", a.ApexBundleDepsInfo.FullListPath(), a.ApexBundleDepsInfo.FlatListPath())
 }
 
 func (a *apexBundle) buildLintReports(ctx android.ModuleContext) {
@@ -1179,6 +1189,18 @@ func (a *apexBundle) buildLintReports(ctx android.ModuleContext) {
 	a.lintReports = java.BuildModuleLintReportZips(ctx, depSets, validations)
 }
 
+func (a *apexBundle) reexportJacocoInfo(ctx android.ModuleContext) {
+	var jacocoInfos []java.JacocoInfo
+	for _, fi := range a.filesInfo {
+		if fi.jacocoInfo.ReportClassesFile != nil {
+			jacocoInfos = append(jacocoInfos, fi.jacocoInfo)
+		}
+	}
+
+	android.SetProvider(ctx, java.ApexJacocoInfoProvider, jacocoInfos)
+	android.SetProvider(ctx, java.BundleProvider, java.BundleInfo{Bundle: a.bundleModuleFile})
+}
+
 func (a *apexBundle) buildCannedFsConfig(ctx android.ModuleContext) android.Path {
 	var readOnlyPaths = []string{"apex_manifest.json", "apex_manifest.pb"}
 	var executablePaths []string // this also includes dirs
@@ -1200,7 +1222,7 @@ func (a *apexBundle) buildCannedFsConfig(ctx android.ModuleContext) android.Path
 			readOnlyPaths = append(readOnlyPaths, pathInApex)
 			// Additional APKs
 			appSetDirs = append(appSetDirs, f.installDir)
-			appSetFiles[f.installDir] = f.module.(*java.AndroidAppSet).PackedAdditionalOutputs()
+			appSetFiles[f.installDir] = f.providers.appInfo.PackedAdditionalOutputs
 		} else {
 			readOnlyPaths = append(readOnlyPaths, pathInApex)
 		}

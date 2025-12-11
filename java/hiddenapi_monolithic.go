@@ -62,8 +62,9 @@ func newMonolithicHiddenAPIInfo(ctx android.ModuleContext, flagFilesByCategory F
 	for _, element := range classpathElements {
 		switch e := element.(type) {
 		case *ClasspathLibraryElement:
-			classesJars := retrieveClassesJarsFromModule(e.Module())
-			monolithicInfo.ClassesJars = append(monolithicInfo.ClassesJars, classesJars...)
+			if info, ok := android.OtherModuleProvider(ctx, e.Module(), JavaInfoProvider); ok {
+				monolithicInfo.ClassesJars = append(monolithicInfo.ClassesJars, info.HiddenapiClassesJarPaths...)
+			}
 
 		case *ClasspathFragmentElement:
 			fragment := e.Module()
@@ -79,7 +80,7 @@ func newMonolithicHiddenAPIInfo(ctx android.ModuleContext, flagFilesByCategory F
 }
 
 // append appends all the files from the supplied info to the corresponding files in this struct.
-func (i *MonolithicHiddenAPIInfo) append(ctx android.ModuleContext, otherModule android.Module, other *HiddenAPIInfo) {
+func (i *MonolithicHiddenAPIInfo) append(ctx android.ModuleContext, otherModule android.ModuleOrProxy, other *HiddenAPIInfo) {
 	i.FlagsFilesByCategory.append(other.FlagFilesByCategory)
 	i.AnnotationFlagsPaths = append(i.AnnotationFlagsPaths, other.AnnotationFlagsPath)
 	i.MetadataPaths = append(i.MetadataPaths, other.MetadataPath)

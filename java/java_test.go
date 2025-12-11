@@ -511,7 +511,7 @@ func TestArchSpecific(t *testing.T) {
 
 func TestBinary(t *testing.T) {
 	t.Parallel()
-	ctx, _ := testJava(t, `
+	ctx, _ := testJava(t, cc.GatherRequiredDepsForTest(android.Android)+`
 		java_library_host {
 			name: "foo",
 			srcs: ["a.java"],
@@ -539,7 +539,7 @@ func TestBinary(t *testing.T) {
 	barWrapperDeps := bar.Output("bar").Implicits.Strings()
 
 	libjni := ctx.ModuleForTests(t, "libjni", buildOS+"_x86_64_shared")
-	libjniSO := libjni.Rule("Cp").Output.String()
+	libjniSO := android.OtherModuleProviderOrDefault(ctx, libjni.Module(), android.InstallFilesProvider).InstallFiles[0].RelativeToTop().String()
 
 	// Test that the install binary wrapper depends on the installed jar file
 	if g, w := barWrapperDeps, barJar; !android.InList(w, g) {
@@ -554,7 +554,7 @@ func TestBinary(t *testing.T) {
 
 func TestTest(t *testing.T) {
 	t.Parallel()
-	ctx, _ := testJava(t, `
+	ctx, _ := testJava(t, cc.GatherRequiredDepsForTest(android.Android)+`
 		java_test_host {
 			name: "foo",
 			srcs: ["a.java"],
@@ -658,7 +658,7 @@ var _ android.ModuleErrorfContext = (*moduleErrorfTestCtx)(nil)
 
 func TestPrebuilts(t *testing.T) {
 	t.Parallel()
-	ctx, _ := testJava(t, `
+	ctx := prepareForJavaAndroidMkTest.RunTestWithBp(t, `
 		java_library {
 			name: "foo",
 			srcs: ["a.java", ":stubs-source"],
@@ -743,12 +743,12 @@ func TestPrebuilts(t *testing.T) {
 	expectedDexJar := "out/soong/.intermediates/baz/android_common/dex/baz.jar"
 	android.AssertPathRelativeToTopEquals(t, "baz dex jar build path", expectedDexJar, bazDexJar)
 
-	ctx.ModuleForTests(t, "qux", "android_common").Rule("Cp")
-
-	entries := android.AndroidMkEntriesForTest(t, ctx, fooModule.Module())[0]
-	android.AssertStringEquals(t, "unexpected LOCAL_SOONG_MODULE_TYPE", "java_library", entries.EntryMap["LOCAL_SOONG_MODULE_TYPE"][0])
-	entries = android.AndroidMkEntriesForTest(t, ctx, barModule.Module())[0]
-	android.AssertStringEquals(t, "unexpected LOCAL_SOONG_MODULE_TYPE", "java_import", entries.EntryMap["LOCAL_SOONG_MODULE_TYPE"][0])
+	info := android.AndroidMkInfoForTest(t, ctx.TestContext, fooModule.Module())
+	android.AssertStringEquals(t, "unexpected LOCAL_SOONG_MODULE_TYPE", "java_library",
+		info.PrimaryInfo.EntryMap["LOCAL_SOONG_MODULE_TYPE"][0])
+	info = android.AndroidMkInfoForTest(t, ctx.TestContext, barModule.Module())
+	android.AssertStringEquals(t, "unexpected LOCAL_SOONG_MODULE_TYPE", "java_import",
+		info.PrimaryInfo.EntryMap["LOCAL_SOONG_MODULE_TYPE"][0])
 }
 
 func assertDeepEquals(t *testing.T, message string, expected interface{}, actual interface{}) {
@@ -1656,7 +1656,7 @@ func TestAidlEnforcePermissionsException(t *testing.T) {
 func TestDataNativeBinaries(t *testing.T) {
 	t.Parallel()
 	ctx := android.GroupFixturePreparers(
-		prepareForJavaTest,
+		prepareForJavaAndroidMkTest,
 		android.PrepareForTestWithAllowMissingDependencies).RunTestWithBp(t, `
 		java_test_host {
 			name: "foo",
@@ -1673,9 +1673,9 @@ func TestDataNativeBinaries(t *testing.T) {
 	buildOS := ctx.Config().BuildOS.String()
 
 	test := ctx.ModuleForTests(t, "foo", buildOS+"_common").Module().(*TestHost)
-	entries := android.AndroidMkEntriesForTest(t, ctx, test)[0]
+	info := android.AndroidMkInfoForTest(t, ctx, test)
 	expected := []string{"out/soong/.intermediates/bin/" + buildOS + "_x86_64/bin:bin"}
-	actual := entries.EntryMap["LOCAL_COMPATIBILITY_SUPPORT_FILES"]
+	actual := info.PrimaryInfo.EntryMap["LOCAL_COMPATIBILITY_SUPPORT_FILES"]
 	android.AssertStringPathsRelativeToTopEquals(t, "LOCAL_COMPATIBILITY_SUPPORT_FILES", ctx.Config(), expected, actual)
 }
 
@@ -1927,7 +1927,10 @@ func TestDataDeviceBinsBuildsDeviceBinary(t *testing.T) {
 		testName := fmt.Sprintf(`data_device_bins_%s with compile_multilib:"%s"`, tc.dataDeviceBinType, tc.depCompileMultilib)
 		t.Run(testName, func(t *testing.T) {
 			t.Parallel()
-			ctx := android.GroupFixturePreparers(PrepareForIntegrationTestWithJava).
+			ctx := android.GroupFixturePreparers(
+				PrepareForIntegrationTestWithJava,
+				android.PrepareForTestWithAndroidMk,
+			).
 				ExtendWithErrorHandler(errorHandler).
 				RunTestWithBp(t, bp)
 			if tc.expectedError != "" {
@@ -1937,7 +1940,7 @@ func TestDataDeviceBinsBuildsDeviceBinary(t *testing.T) {
 			buildOS := ctx.Config.BuildOS.String()
 			fooVariant := ctx.ModuleForTests(t, "foo", buildOS+"_common")
 			fooMod := fooVariant.Module().(*TestHost)
-			entries := android.AndroidMkEntriesForTest(t, ctx.TestContext, fooMod)[0]
+			info := android.AndroidMkInfoForTest(t, ctx.TestContext, fooMod)
 
 			expectedAutogenConfig := `<option name="push-file" key="bar" value="/data/local/tests/unrestricted/foo/bar" />`
 			autogen := fooVariant.Rule("autogen")
@@ -1955,7 +1958,7 @@ func TestDataDeviceBinsBuildsDeviceBinary(t *testing.T) {
 				expectedData = append(expectedData, fmt.Sprintf("out/soong/.intermediates/bar/%s/bar:bar", variant))
 			}
 
-			actualData := entries.EntryMap["LOCAL_COMPATIBILITY_SUPPORT_FILES"]
+			actualData := info.PrimaryInfo.EntryMap["LOCAL_COMPATIBILITY_SUPPORT_FILES"]
 			android.AssertStringPathsRelativeToTopEquals(t, "LOCAL_TEST_DATA", ctx.Config, android.SortedUniqueStrings(expectedData), android.SortedUniqueStrings(actualData))
 		})
 	}
@@ -2740,16 +2743,6 @@ func TestMultiplePrebuilts(t *testing.T) {
 			contents: ["%v"],
 		}
 	`
-	hasDep := func(ctx *android.TestResult, m android.Module, wantDep android.Module) bool {
-		t.Helper()
-		var found bool
-		ctx.VisitDirectDeps(m, func(dep blueprint.Module) {
-			if dep == wantDep {
-				found = true
-			}
-		})
-		return found
-	}
 
 	hasFileWithStem := func(m android.TestingModule, stem string) bool {
 		t.Helper()
@@ -2786,14 +2779,15 @@ func TestMultiplePrebuilts(t *testing.T) {
 
 	for _, tc := range testCases {
 		ctx := android.GroupFixturePreparers(
-			prepareForJavaTest,
+			prepareForJavaAndroidMkTest,
 			android.PrepareForTestWithBuildFlag("RELEASE_APEX_CONTRIBUTIONS_ADSERVICES", "myapex_contributions"),
 		).RunTestWithBp(t, fmt.Sprintf(bp, tc.selectedDependencyName))
 
 		// check that rdep gets the correct variation of dep
 		foo := ctx.ModuleForTests(t, "foo", "android_common")
 		expectedDependency := ctx.ModuleForTests(t, tc.expectedDependencyName, "android_common")
-		android.AssertBoolEquals(t, fmt.Sprintf("expected dependency from %s to %s\n", foo.Module().Name(), tc.expectedDependencyName), true, hasDep(ctx, foo.Module(), expectedDependency.Module()))
+		android.AssertBoolEquals(t, fmt.Sprintf("expected dependency from %s to %s\n", foo.Module().Name(), tc.expectedDependencyName),
+			true, android.HasDirectDep(ctx, foo.Module(), expectedDependency.Module()))
 
 		// check that output file of dep is always bar.jar
 		// The filename should be agnostic to source/prebuilt/prebuilt_version
@@ -2801,8 +2795,8 @@ func TestMultiplePrebuilts(t *testing.T) {
 
 		// check LOCAL_MODULE of the selected module name
 		// the prebuilt should have the same LOCAL_MODULE when exported to make
-		entries := android.AndroidMkEntriesForTest(t, ctx.TestContext, expectedDependency.Module())[0]
-		android.AssertStringEquals(t, "unexpected LOCAL_MODULE", "bar", entries.EntryMap["LOCAL_MODULE"][0])
+		info := android.AndroidMkInfoForTest(t, ctx.TestContext, expectedDependency.Module())
+		android.AssertStringEquals(t, "unexpected LOCAL_MODULE", "bar", info.PrimaryInfo.EntryMap["LOCAL_MODULE"][0])
 	}
 }
 
@@ -2918,6 +2912,59 @@ func TestApiLibraryAconfigDeclarations(t *testing.T) {
 	manifest := m.Output("metalava.sbox.textproto")
 	cmdline := String(android.RuleBuilderSboxProtoForTests(t, result.TestContext, manifest).Commands[0].Command)
 	android.AssertStringDoesContain(t, "flagged api hide command not included", cmdline, "flags-config-exportable.xml")
+}
+
+func TestDroidstubsAconfigPropagation(t *testing.T) {
+	result := android.GroupFixturePreparers(
+		prepareForJavaTest,
+		android.FixtureMergeMockFs(map[string][]byte{
+			"a/A.java":      nil,
+			"a/current.txt": nil,
+			"a/removed.txt": nil,
+		}),
+	).RunTestWithBp(t, `
+	aconfig_declarations {
+		name: "bar",
+		package: "com.example.package",
+		container: "com.android.foo",
+		srcs: [
+			"bar.aconfig",
+		],
+	}
+	droidstubs {
+		name: "foo",
+		srcs: ["a/A.java"],
+		api_surface: "public",
+		check_api: {
+			current: {
+				api_file: "a/current.txt",
+				removed_api_file: "a/removed.txt",
+			}
+		},
+		aconfig_declarations: [
+			"bar",
+		],
+	}
+
+	java_library {
+		name: "baz",
+		srcs: [
+			":foo",
+		],
+	}
+	`)
+
+	bazModule := result.ModuleForTests(t, "baz", "android_common").Module()
+	javaInfo, _ := android.OtherModuleProvider(result, bazModule, JavaInfoProvider)
+	aconfigProtos := javaInfo.AconfigIntermediateCacheOutputPaths
+
+	android.AssertIntEquals(t, "Expected to provide one aconfig proto file", 1, len(aconfigProtos))
+	android.AssertStringDoesContain(
+		t,
+		"Expected to provide bar/aconfig-cache.pb",
+		strings.Join(aconfigProtos.Strings(), " "),
+		"bar/aconfig-cache.pb",
+	)
 }
 
 func TestTestOnly(t *testing.T) {
@@ -3150,7 +3197,7 @@ func assertTestOnlyAndTopLevel(t *testing.T, ctx *android.TestResult, expectedTe
 		}
 	}
 
-	ctx.VisitAllModules(func(m blueprint.Module) {
+	ctx.VisitAllModules(func(m android.Module) {
 		addActuals(m, android.TestOnlyProviderKey)
 
 	})
@@ -3171,7 +3218,7 @@ func TestNativeRequiredDepOfJavaBinary(t *testing.T) {
 	t.Parallel()
 	findDepsOfModule := func(ctx *android.TestContext, module android.Module, depName string) []blueprint.Module {
 		var ret []blueprint.Module
-		ctx.VisitDirectDeps(module, func(dep blueprint.Module) {
+		ctx.VisitDirectDeps(module, func(dep android.Module) {
 			if dep.Name() == depName {
 				ret = append(ret, dep)
 			}
@@ -3201,6 +3248,7 @@ func TestBootJarNotInUsesLibs(t *testing.T) {
 		PrepareForTestWithJavaSdkLibraryFiles,
 		FixtureWithLastReleaseApis("mysdklibrary", "myothersdklibrary"),
 		FixtureConfigureApexBootJars("myapex:mysdklibrary"),
+		android.PrepareForTestWithAndroidMk,
 	).RunTestWithBp(t, `
 		bootclasspath_fragment {
 			name: "myfragment",
@@ -3249,8 +3297,8 @@ func TestBootJarNotInUsesLibs(t *testing.T) {
 	ctx := result.TestContext
 	fooModule := ctx.ModuleForTests(t, "foo", "android_common")
 
-	androidMkEntries := android.AndroidMkEntriesForTest(t, ctx, fooModule.Module())[0]
-	localExportSdkLibraries := androidMkEntries.EntryMap["LOCAL_EXPORT_SDK_LIBRARIES"]
+	androidMkinfo := android.AndroidMkInfoForTest(t, ctx, fooModule.Module())
+	localExportSdkLibraries := androidMkinfo.PrimaryInfo.EntryMap["LOCAL_EXPORT_SDK_LIBRARIES"]
 	android.AssertStringListDoesNotContain(t,
 		"boot jar should not be included in uses libs entries",
 		localExportSdkLibraries,

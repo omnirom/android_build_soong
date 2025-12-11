@@ -115,6 +115,12 @@ func (p *PythonBinaryModule) GenerateAndroidBuildActions(ctx android.ModuleConte
 
 	ctx.SetOutputFiles(android.Paths{p.installSource}, "")
 
+	ctx.SetTestSuiteInfo(android.TestSuiteInfo{
+		TestSuites:   p.binaryProperties.Test_suites,
+		MainFile:     p.installSource,
+		MainFileStem: p.installSource.Base(),
+	})
+
 	moduleInfoJSON := ctx.ModuleInfoJSON()
 	moduleInfoJSON.Class = []string{"EXECUTABLES"}
 	moduleInfoJSON.Dependencies = append(moduleInfoJSON.Dependencies, p.androidMkSharedLibs...)
@@ -166,8 +172,11 @@ func (p *PythonBinaryModule) buildBinary(ctx android.ModuleContext) {
 	}
 	p.androidMkSharedLibs = sharedLibs
 
-	android.SetProvider(ctx, android.TestSuiteInfoProvider, android.TestSuiteInfo{
-		TestSuites: p.binaryProperties.Test_suites,
+	android.SetProvider(ctx, android.TestSuiteSharedLibsInfoProvider, android.TestSuiteSharedLibsInfo{
+		MakeNames: p.androidMkSharedLibs,
+	})
+	android.SetProvider(ctx, android.MakeNameInfoProvider, android.MakeNameInfo{
+		Name: ctx.ModuleName(),
 	})
 }
 

@@ -15,6 +15,7 @@
 package cc
 
 import (
+	"fmt"
 	"path/filepath"
 
 	"android/soong/android"
@@ -22,6 +23,8 @@ import (
 	"github.com/google/blueprint"
 	"github.com/google/blueprint/proptools"
 )
+
+//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
 
 // This file contains support for using cc library modules within an sdk.
 
@@ -64,6 +67,7 @@ func init() {
 	android.RegisterSdkMemberType(staticAndSharedLibrarySdkMemberType)
 }
 
+// @auto-generate: gob
 type librarySdkMemberType struct {
 	android.SdkMemberTypeBase
 
@@ -186,11 +190,11 @@ func (mt *librarySdkMemberType) AddDependencies(ctx android.SdkDependencyContext
 	}
 }
 
-func (mt *librarySdkMemberType) IsInstance(module android.Module) bool {
+func (mt *librarySdkMemberType) IsInstance(ctx android.ModuleContext, module android.ModuleProxy) bool {
 	// Check the module to see if it can be used with this module type.
-	if m, ok := module.(*Module); ok {
-		for _, allowableMemberType := range m.sdkMemberTypes {
-			if allowableMemberType == mt {
+	if m, ok := android.OtherModuleProvider(ctx, module, CcInfoProvider); ok {
+		for _, allowableMemberType := range m.SdkMemberTypes {
+			if allowableMemberType.SdkPropertyName() == mt.SdkPropertyName() {
 				return true
 			}
 		}
@@ -202,7 +206,11 @@ func (mt *librarySdkMemberType) IsInstance(module android.Module) bool {
 func (mt *librarySdkMemberType) AddPrebuiltModule(ctx android.SdkMemberContext, member android.SdkMember) android.BpModule {
 	pbm := ctx.SnapshotBuilder().AddPrebuiltModule(member, mt.prebuiltModuleType)
 
-	ccModule := member.Variants()[0].(*Module)
+	ccModule := member.Variants()[0]
+	info, ok := android.OtherModuleProvider(ctx.SdkModuleContext(), ccModule, CcInfoProvider)
+	if !ok {
+		panic(fmt.Errorf("not a cc module: %s", member.Variants()[0]))
+	}
 
 	if ctx.RequiresTrait(nativeBridgeSdkTrait) {
 		pbm.AddProperty("native_bridge_supported", true)
@@ -216,30 +224,30 @@ func (mt *librarySdkMemberType) AddPrebuiltModule(ctx android.SdkMemberContext, 
 		pbm.AddProperty("recovery_available", true)
 	}
 
-	if proptools.Bool(ccModule.VendorProperties.Vendor_available) {
+	if info.VendorAvailable {
 		pbm.AddProperty("vendor_available", true)
 	}
 
-	if proptools.Bool(ccModule.VendorProperties.Odm_available) {
+	if info.OdmAvailable {
 		pbm.AddProperty("odm_available", true)
 	}
 
-	if proptools.Bool(ccModule.VendorProperties.Product_available) {
+	if info.ProductAvailable {
 		pbm.AddProperty("product_available", true)
 	}
 
-	sdkVersion := ccModule.SdkVersion()
+	sdkVersion := android.OtherModulePointerProviderOrDefault(ctx.SdkModuleContext(),
+		ccModule, android.CommonModuleInfoProvider).SdkVersion
 	if sdkVersion != "" {
 		pbm.AddProperty("sdk_version", sdkVersion)
 	}
 
-	stl := ccModule.stl.Properties.Stl
-	if stl != nil {
-		pbm.AddProperty("stl", proptools.String(stl))
+	if info.StlInfo != nil && info.StlInfo.Stl != nil {
+		pbm.AddProperty("stl", proptools.String(info.StlInfo.Stl))
 	}
 
-	if lib, ok := ccModule.linker.(*libraryDecorator); ok {
-		uhs := lib.Properties.Unique_host_soname
+	if info.LinkerInfo != nil && info.LinkerInfo.LibraryDecoratorInfo != nil {
+		uhs := info.LinkerInfo.LibraryDecoratorInfo.UniqueHostSoname
 		if uhs != nil {
 			pbm.AddProperty("unique_host_soname", proptools.Bool(uhs))
 		}
@@ -374,9 +382,9 @@ func addPossiblyArchSpecificProperties(sdkModuleContext android.ModuleContext, b
 			if propertyInfo.copy {
 				if propertyInfo.dirs {
 					// When copying a directory glob and copy all the headers within it.
-					// TODO(jiyong) copy headers having other suffixes
 					headers, _ := sdkModuleContext.GlobWithDeps(inputPath+"/**/*.h", nil)
-					for _, file := range headers {
+					additionalHeaders, _ := sdkModuleContext.GlobWithDeps(inputPath+"/**/*.hpp", nil)
+					for _, file := range append(headers, additionalHeaders...) {
 						src := android.PathForSource(sdkModuleContext, file)
 
 						// The destination path in the snapshot is constructed from the snapshot relative path
@@ -496,21 +504,21 @@ type nativeLibInfoProperties struct {
 	outputFile android.Path
 }
 
-func (p *nativeLibInfoProperties) PopulateFromVariant(ctx android.SdkMemberContext, variant android.Module) {
+func (p *nativeLibInfoProperties) PopulateFromVariant(ctx android.SdkMemberContext, variant android.ModuleProxy) {
 	addOutputFile := true
-	ccModule := variant.(*Module)
+	ccInfo := android.OtherModulePointerProviderOrDefault(ctx.SdkModuleContext(), variant, CcInfoProvider)
 
-	if s := ccModule.sanitize; s != nil {
+	if s := ccInfo.SanitizeInfo; s != nil {
 		// We currently do not capture sanitizer flags for libs with sanitizers
 		// enabled, because they may vary among variants that cannot be represented
 		// in the input blueprint files. In particular, sanitizerDepsMutator enables
 		// various sanitizers on dependencies, but in many cases only on static
 		// ones, and we cannot specify sanitizer flags at the link type level (i.e.
 		// in StaticOrSharedProperties).
-		if s.isUnsanitizedVariant() {
+		if s.IsUnsanitizedVariant {
 			// This still captures explicitly disabled sanitizers, which may be
 			// necessary to avoid cyclic dependencies.
-			p.Sanitize = s.Properties.Sanitize
+			p.Sanitize = s.Sanitize
 		} else {
 			// Do not add the output file to the snapshot if we don't represent it
 			// properly.
@@ -525,7 +533,7 @@ func (p *nativeLibInfoProperties) PopulateFromVariant(ctx android.SdkMemberConte
 	exportedIncludeDirs, exportedGeneratedIncludeDirs := android.FilterPathListPredicate(
 		exportedInfo.IncludeDirs, isGeneratedHeaderDirectory)
 
-	target := ccModule.Target()
+	target := android.OtherModulePointerProviderOrDefault(ctx.SdkModuleContext(), variant, android.CommonModuleInfoProvider).Target
 	p.archSubDir = target.Arch.ArchType.String()
 	if target.NativeBridge == android.NativeBridgeEnabled {
 		p.archSubDir += "_native_bridge"
@@ -541,12 +549,13 @@ func (p *nativeLibInfoProperties) PopulateFromVariant(ctx android.SdkMemberConte
 	p.ExportedSystemIncludeDirs = android.FirstUniquePaths(dirs)
 
 	p.ExportedFlags = exportedInfo.Flags
-	if ccModule.linker != nil {
+	if linker := ccInfo.LinkerInfo; linker != nil {
 		specifiedDeps := specifiedDeps{}
-		specifiedDeps = ccModule.linker.linkerSpecifiedDeps(ctx.SdkModuleContext(), ccModule, specifiedDeps)
+		setLinkerSpecifiedDeps(linker, &specifiedDeps)
 
-		if lib := ccModule.library; lib != nil {
-			if !lib.HasStubsVariants() {
+		if lib := ccInfo.LibraryInfo; lib != nil {
+			linkableInfo := android.OtherModulePointerProviderOrDefault(ctx.SdkModuleContext(), variant, LinkableInfoProvider)
+			if !linkableInfo.HasStubsVariants {
 				// Propagate dynamic dependencies for implementation libs, but not stubs.
 				p.SharedLibs = specifiedDeps.sharedLibs
 			} else {
@@ -554,11 +563,11 @@ func (p *nativeLibInfoProperties) PopulateFromVariant(ctx android.SdkMemberConte
 				// ccModule.StubsVersion()) if the module is versioned. 2. Ensure that all
 				// the versioned stub libs are retained in the prebuilt tree; currently only
 				// the stub corresponding to ccModule.StubsVersion() is.
-				p.StubsVersions = lib.AllStubsVersions()
-				if lib.BuildStubs() && ccModule.stubsSymbolFilePath() == nil {
+				p.StubsVersions = lib.AllStubsVersions
+				if lib.BuildStubs && linker.LibraryDecoratorInfo.StubsSymbolFilePath == nil {
 					ctx.ModuleErrorf("Could not determine symbol_file")
 				} else {
-					p.StubsSymbolFilePath = ccModule.stubsSymbolFilePath()
+					p.StubsSymbolFilePath = linker.LibraryDecoratorInfo.StubsSymbolFilePath
 				}
 			}
 		}
@@ -567,16 +576,16 @@ func (p *nativeLibInfoProperties) PopulateFromVariant(ctx android.SdkMemberConte
 	p.ExportedGeneratedHeaders = exportedInfo.GeneratedHeaders
 
 	if !p.memberType.noOutputFiles && addOutputFile {
-		p.outputFile = getRequiredMemberOutputFile(ctx, ccModule)
+		p.outputFile = getRequiredMemberOutputFile(ctx, variant)
 	}
 }
 
-func getRequiredMemberOutputFile(ctx android.SdkMemberContext, ccModule *Module) android.Path {
+func getRequiredMemberOutputFile(ctx android.SdkMemberContext, module android.ModuleProxy) android.Path {
 	var path android.Path
-	if info, ok := android.OtherModuleProvider(ctx.SdkModuleContext(), ccModule, LinkableInfoProvider); ok && info.OutputFile.Valid() {
+	if info, ok := android.OtherModuleProvider(ctx.SdkModuleContext(), module, LinkableInfoProvider); ok && info.OutputFile.Valid() {
 		path = info.OutputFile.Path()
 	} else {
-		ctx.SdkModuleContext().ModuleErrorf("member variant %s does not have a valid output file", ccModule)
+		ctx.SdkModuleContext().ModuleErrorf("member variant %s does not have a valid output file", module)
 	}
 	return path
 }

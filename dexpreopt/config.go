@@ -101,6 +101,13 @@ type GlobalConfig struct {
 	// "true" to force preopt with CMC GC (a.k.a., UFFD GC); "false" to force preopt with CC GC;
 	// "default" to determine the GC type based on the kernel version file.
 	EnableUffdGc string
+
+	// The target's `SDK_INT` (ro.build.version.sdk) string value. "" for undefined/indeterminate.
+	// Conditionally used to set assumed values in AOT-compilation.
+	PlatformSdkVersion string
+
+	// To generate profiling code to support low-overhead tracing.
+	AllowProfileCode bool
 }
 
 var allPlatformSystemServerJarsKey = android.NewOnceKey("allPlatformSystemServerJars")
@@ -162,6 +169,8 @@ type GlobalSoongConfig struct {
 	ManifestCheck    android.Path
 	ConstructContext android.Path
 	UffdGcFlag       android.WritablePath
+	AssumeValueFlags android.WritablePath
+	ProfileCodeFlag  android.WritablePath
 }
 
 type ModuleConfig struct {
@@ -469,8 +478,8 @@ func (d dex2oatDependencyTag) AllowDisabledModuleDependency(target android.Modul
 
 func (d dex2oatDependencyTag) AllowDisabledModuleDependencyProxy(
 	ctx android.OtherModuleProviderContext, target android.ModuleProxy) bool {
-	return android.OtherModulePointerProviderOrDefault(
-		ctx, target, android.CommonModuleInfoProvider).ReplacedByPrebuilt
+	return android.OtherModuleProviderOrDefault(
+		ctx, target, android.PrebuiltInfoProvider).ReplacedByPrebuilt
 }
 
 // Dex2oatDepTag represents the dependency onto the dex2oatd module. It is added to any module that
@@ -514,7 +523,11 @@ func dex2oatPathFromDep(ctx android.ModuleContext) android.Path {
 	// prebuilt explicitly here instead.
 	var dex2oatModule android.ModuleProxy
 	ctx.WalkDepsProxy(func(child, parent android.ModuleProxy) bool {
-		prebuiltInfo, isPrebuilt := android.OtherModuleProvider(ctx, child, android.PrebuiltModuleInfoProvider)
+		var isPrebuilt, usePrebuilt bool
+		if prebuiltInfo, ok := android.OtherModuleProvider(ctx, child, android.PrebuiltInfoProvider); ok {
+			isPrebuilt = prebuiltInfo.IsPrebuilt
+			usePrebuilt = prebuiltInfo.UsePrebuilt
+		}
 		if android.EqualModules(parent, ctx.Module()) && ctx.OtherModuleDependencyTag(child) == Dex2oatDepTag {
 			// Found the source module, or prebuilt module that has replaced the source.
 			dex2oatModule = child
@@ -525,7 +538,7 @@ func dex2oatPathFromDep(ctx android.ModuleContext) android.Path {
 			}
 		}
 		if android.EqualModules(parent, dex2oatModule) && ctx.OtherModuleDependencyTag(child) == android.PrebuiltDepTag {
-			if isPrebuilt && prebuiltInfo.UsePrebuilt {
+			if isPrebuilt && usePrebuilt {
 				dex2oatModule = child // Found a prebuilt that should be used.
 			}
 		}
@@ -557,6 +570,8 @@ func createGlobalSoongConfig(ctx android.ModuleContext) *GlobalSoongConfig {
 		ManifestCheck:    ctx.Config().HostToolPath(ctx, "manifest_check"),
 		ConstructContext: ctx.Config().HostToolPath(ctx, "construct_context"),
 		UffdGcFlag:       getUffdGcFlagPath(ctx),
+		AssumeValueFlags: getAssumeValueFlagsPath(ctx),
+		ProfileCodeFlag:  getProfileCodeFlagPath(ctx),
 	}
 }
 
@@ -609,6 +624,8 @@ type globalJsonSoongConfig struct {
 	ManifestCheck    string
 	ConstructContext string
 	UffdGcFlag       string
+	AssumeValueFlags string
+	ProfileCodeFlag  string
 }
 
 // ParseGlobalSoongConfig parses the given data assumed to be read from the
@@ -631,6 +648,8 @@ func ParseGlobalSoongConfig(ctx android.PathContext, data []byte) (*GlobalSoongC
 		ManifestCheck:    constructPath(ctx, jc.ManifestCheck),
 		ConstructContext: constructPath(ctx, jc.ConstructContext),
 		UffdGcFlag:       constructWritablePath(ctx, jc.UffdGcFlag),
+		AssumeValueFlags: constructWritablePath(ctx, jc.AssumeValueFlags),
+		ProfileCodeFlag:  constructWritablePath(ctx, jc.ProfileCodeFlag),
 	}
 
 	return config, nil
@@ -671,6 +690,10 @@ func (s *globalSoongConfigSingleton) GenerateBuildActions(ctx android.SingletonC
 		return
 	}
 
+	buildAssumedValues(ctx, global, config)
+
+	buildAllowProfileCode(ctx, global, config)
+
 	jc := globalJsonSoongConfig{
 		Profman:          config.Profman.String(),
 		Dex2oat:          config.Dex2oat.String(),
@@ -680,6 +703,8 @@ func (s *globalSoongConfigSingleton) GenerateBuildActions(ctx android.SingletonC
 		ManifestCheck:    config.ManifestCheck.String(),
 		ConstructContext: config.ConstructContext.String(),
 		UffdGcFlag:       config.UffdGcFlag.String(),
+		AssumeValueFlags: config.AssumeValueFlags.String(),
+		ProfileCodeFlag:  config.ProfileCodeFlag.String(),
 	}
 
 	data, err := json.Marshal(jc)
@@ -711,6 +736,8 @@ func (s *globalSoongConfigSingleton) MakeVars(ctx android.MakeVarsContext) {
 		config.ManifestCheck.String(),
 		config.ConstructContext.String(),
 		config.UffdGcFlag.String(),
+		config.AssumeValueFlags.String(),
+		config.ProfileCodeFlag.String(),
 	}, " "))
 }
 
@@ -734,6 +761,47 @@ func buildUffdGcFlag(ctx android.BuilderContext, global *GlobalConfig) {
 		rule.Restat().Build("dexpreopt_uffd_gc_flag", "dexpreopt_uffd_gc_flag")
 	} else {
 		panic(fmt.Sprintf("Unknown value of PRODUCT_ENABLE_UFFD_GC: %s", global.EnableUffdGc))
+	}
+}
+
+func buildAssumedValues(ctx android.BuilderContext, global *GlobalConfig, globalSoong *GlobalSoongConfig) {
+	assumeValueFlags := getAssumeValueFlagsPath(ctx)
+
+	if global.PlatformSdkVersion != "" {
+		maybeAssumedValues := fmt.Sprintf(`'--assume-value=Landroid/os/Build$VERSION;->SDK_INT:%s'`, global.PlatformSdkVersion)
+		rule := android.NewRuleBuilder(pctx, ctx)
+		cmd := rule.Command()
+		// First check dex2oat to see if it supports `--assume-value=` arguments.
+		// If it does, stash the assumed value args in a reusable output file for compilation.
+		// Otherwise, just create an empty placeholder file that becomes a no-op.
+		// TODO(b/204924812): Remove the args check after prebuilt ART modules are updated from source.
+		cmd.Text("if (").Tool(globalSoong.Dex2oat).Text("--help 2>&1 | grep -q -- --assume-value)").
+			Text("; then echo").Text(maybeAssumedValues).Text(">").Output(assumeValueFlags).
+			Text("; else >").Output(assumeValueFlags).
+			Text("; fi")
+		rule.Restat().Build("dexpreopt_assume_value_flags", "dexpreopt_assume_value_flags")
+	} else {
+		android.WriteFileRuleVerbatim(ctx, assumeValueFlags, "")
+	}
+}
+
+func buildAllowProfileCode(ctx android.BuilderContext, global *GlobalConfig, globalSoong *GlobalSoongConfig) {
+	profileCodeFlag := getProfileCodeFlagPath(ctx)
+
+	if global.AllowProfileCode {
+		rule := android.NewRuleBuilder(pctx, ctx)
+		cmd := rule.Command()
+		// First check dex2oat to see if it supports `--allow-profile-code` arguments.
+		// If it does, stash the assumed value args in a reusable output file for compilation.
+		// Otherwise, just create an empty placeholder file that becomes a no-op.
+		// TODO(b/204924812): Remove the args check after prebuilt ART modules are updated from source.
+		cmd.Text("if (").Tool(globalSoong.Dex2oat).Text("--help 2>&1 | grep -q -- --allow-profile-code)").
+			Text("; then echo --allow-profile-code >").Output(profileCodeFlag).
+			Text("; else >").Output(profileCodeFlag).
+			Text("; fi")
+		rule.Restat().Build("dexpreopt_profile_code_flag", "dexpreopt_profile_code_flag")
+	} else {
+		android.WriteFileRuleVerbatim(ctx, profileCodeFlag, "")
 	}
 }
 
@@ -791,6 +859,8 @@ func globalSoongConfigForTests(ctx android.BuilderContext) *GlobalSoongConfig {
 		ManifestCheck:    android.PathForTesting("manifest_check"),
 		ConstructContext: android.PathForTesting("construct_context"),
 		UffdGcFlag:       android.PathForOutput(ctx, "dexpreopt_test", "uffd_gc_flag.txt"),
+		AssumeValueFlags: android.PathForOutput(ctx, "dexpreopt_test", "assume_value_flags.txt"),
+		ProfileCodeFlag:  android.PathForOutput(ctx, "dexpreopt_test", "allow_profile_code_flag.txt"),
 	}
 }
 
@@ -805,4 +875,12 @@ func GetDexpreoptDirName(ctx android.PathContext) string {
 
 func getUffdGcFlagPath(ctx android.PathContext) android.WritablePath {
 	return android.PathForOutput(ctx, "dexpreopt/uffd_gc_flag.txt")
+}
+
+func getAssumeValueFlagsPath(ctx android.PathContext) android.WritablePath {
+	return android.PathForOutput(ctx, "dexpreopt/assume_value_flags.txt")
+}
+
+func getProfileCodeFlagPath(ctx android.PathContext) android.WritablePath {
+	return android.PathForOutput(ctx, "dexpreopt/allow_profile_code_flag.txt")
 }

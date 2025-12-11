@@ -16,6 +16,7 @@ package java
 
 import (
 	"fmt"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -43,7 +44,7 @@ func RegisterDocsBuildComponents(ctx android.RegistrationContext) {
 type JavadocProperties struct {
 	// list of source files used to compile the Java module.  May be .java, .logtags, .proto,
 	// or .aidl files.
-	Srcs []string `android:"path,arch_variant"`
+	Srcs proptools.Configurable[[]string] `android:"path,arch_variant"`
 
 	// list of source files that should not be used to build the Java module.
 	// This is most useful in the arch/multilib variants to remove non-common files
@@ -102,6 +103,11 @@ type JavadocProperties struct {
 }
 
 type ApiToCheck struct {
+	// If set to `false` this will prevent `api_file` and `removed_api_file` from
+	// being used in compatibility checks, but they will continue to provide the
+	// previously released API to which flagged APIs can be reverted.
+	Enabled *bool
+
 	// path to the API txt file that the new API extracted from source code is checked
 	// against. The path can be local to the module or from other module (via :module syntax).
 	Api_file *string `android:"path"`
@@ -160,6 +166,9 @@ type DroiddocProperties struct {
 
 	// Compat config XML. Generates compat change documentation if set.
 	Compat_config *string `android:"path"`
+
+	// The directory name to publish the generated documentation under out/target/common/docs.
+	Publish_dir *string
 }
 
 // Common flags passed down to build rule
@@ -194,9 +203,6 @@ func apiCheckEnabled(ctx android.ModuleContext, apiToCheck ApiToCheck, apiVersio
 				"Consider updating the api signature files and generating the stubs from " +
 				"them instead.")
 		}
-		return false
-	} else if ctx.Config().PartialCompileFlags().Disable_stub_validation &&
-		!ctx.Config().BuildFromTextStub() {
 		return false
 	} else if String(apiToCheck.Api_file) != "" && String(apiToCheck.Removed_api_file) != "" {
 		return true
@@ -247,7 +253,7 @@ func JavadocHostFactory() android.Module {
 	return module
 }
 
-func (j *Javadoc) SdkVersion(ctx android.EarlyModuleContext) android.SdkSpec {
+func (j *Javadoc) SdkVersion(ctx android.ConfigContext) android.SdkSpec {
 	return android.SdkSpecFrom(ctx, String(j.properties.Sdk_version))
 }
 
@@ -255,7 +261,7 @@ func (j *Javadoc) SystemModules() string {
 	return proptools.String(j.properties.System_modules)
 }
 
-func (j *Javadoc) MinSdkVersion(ctx android.EarlyModuleContext) android.ApiLevel {
+func (j *Javadoc) MinSdkVersion(ctx android.MinSdkVersionFromValueContext) android.ApiLevel {
 	return j.SdkVersion(ctx).ApiLevel
 }
 
@@ -424,16 +430,16 @@ func (j *Javadoc) collectDeps(ctx android.ModuleContext) deps {
 	})
 	// do not pass exclude_srcs directly when expanding srcFiles since exclude_srcs
 	// may contain filegroup or genrule.
-	srcFiles := android.PathsForModuleSrcExcludes(ctx, j.properties.Srcs, j.properties.Exclude_srcs)
+	srcFiles := android.PathsForModuleSrcExcludes(ctx, j.properties.Srcs.GetOrDefault(ctx, nil), j.properties.Exclude_srcs)
 	j.implicits = append(j.implicits, srcFiles...)
 
 	// Module can depend on a java_aconfig_library module using the ":module_name{.tag}" syntax.
 	// Find the corresponding aconfig_declarations module name for such case.
-	for _, src := range j.properties.Srcs {
+	for _, src := range j.properties.Srcs.GetOrDefault(ctx, nil) {
 		if moduleName, tag := android.SrcIsModuleWithTag(src); moduleName != "" {
 			otherModule := android.GetModuleProxyFromPathDep(ctx, moduleName, tag)
-			if otherModule != nil {
-				if dep, ok := android.OtherModuleProvider(ctx, *otherModule, android.CodegenInfoProvider); ok {
+			if !otherModule.IsNil() {
+				if dep, ok := android.OtherModuleProvider(ctx, otherModule, android.CodegenInfoProvider); ok {
 					deps.aconfigProtoFiles = append(deps.aconfigProtoFiles, dep.IntermediateCacheOutputPaths...)
 				}
 			}
@@ -651,9 +657,9 @@ func (d *Droiddoc) doclavaDocsFlags(ctx android.ModuleContext, cmd *android.Rule
 		ctx.PropertyErrorf("custom_template", "must specify a template")
 	}
 
-	ctx.VisitDirectDepsWithTag(droiddocTemplateTag, func(m android.Module) {
-		if t, ok := m.(*ExportedDroiddocDir); ok {
-			cmd.FlagWithArg("-templatedir ", t.dir.String()).Implicits(t.deps)
+	ctx.VisitDirectDepsProxyWithTag(droiddocTemplateTag, func(m android.ModuleProxy) {
+		if t, ok := android.OtherModuleProvider(ctx, m, ExportedDroiddocDirInfoProvider); ok {
+			cmd.FlagWithArg("-templatedir ", t.Dir.String()).Implicits(t.Deps)
 		} else {
 			ctx.PropertyErrorf("custom_template", "module %q is not a droiddoc_exported_dir", ctx.OtherModuleName(m))
 		}
@@ -859,6 +865,12 @@ func (d *Droiddoc) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		FlagWithOutput("-o ", d.docZip).
 		FlagWithArg("-C ", outDir.String()).
 		FlagWithArg("-D ", outDir.String())
+
+	if String(d.properties.Publish_dir) != "" {
+		publishDir := path.Join("out/target/common/docs", String(d.properties.Publish_dir))
+		rule.Command().Text("mkdir -p").Text(publishDir)
+		rule.Command().Text("unzip -qo").Input(d.docZip).Text("-d").Text(publishDir)
+	}
 
 	rule.Restat()
 

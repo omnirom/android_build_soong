@@ -76,15 +76,16 @@ NDK. For APIs exposed by the platform *for* APEX, use `systemapi`.
 May be used in combination with `llndk` if the symbol is exposed to both APEX
 and the LL-NDK.
 
-### future
+### draft
 
-Indicates that the version or symbol is first introduced in the "future" API
-level. This is an arbitrarily high API level used to define APIs that have not
-yet been added to a specific release.
+Indicates that the version or symbol is intended to be introduced in a future
+API level, but the API has not been finalized yet.
 
-Warning: APIs marked `future` will be usable in any module with `sdk: "current"`
-but **will not be included in the NDK**. `future` should generally not be used,
-but is useful when developing APIs for an unknown future release.
+Currently, `draft` behaves like `platform-only` and hides the symbol from all
+NDK stubs, and requires dlsym() to be accessed from CTS. Future changes to stub
+handling may make these symbols directly accessible from the CTS, thus `draft`
+should be used over `platform-only` if there is an intent to stabilize the API
+later.
 
 ### introduced
 

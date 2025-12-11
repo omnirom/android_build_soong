@@ -16,7 +16,6 @@ package filesystem
 
 import (
 	"android/soong/android"
-	"strconv"
 	"strings"
 
 	"github.com/google/blueprint"
@@ -35,7 +34,6 @@ var (
 
 	subPartitionsInPartition = map[string][]string{
 		"system": {"system_ext", "product", "vendor"},
-		"vendor": {"odm"},
 	}
 )
 
@@ -45,6 +43,7 @@ func (f *filesystem) buildAconfigFlagsFiles(
 	specs map[string]android.PackagingSpec,
 	dir android.OutputPath,
 	fullInstallPaths *[]FullInstallPathInfo,
+	platformGeneratedFiles *[]string,
 ) {
 	if !proptools.Bool(f.properties.Gen_aconfig_flags_pb) {
 		return
@@ -88,18 +87,15 @@ func (f *filesystem) buildAconfigFlagsFiles(
 		installAconfigFlagsPath := installEtcDir.Join(ctx, "aconfig_flags.pb")
 		builder.Command().Text("mkdir -p ").Text(installEtcDir.String())
 		builder.Command().Text("cp").Input(aconfigFlagsPb).Text(installAconfigFlagsPath.String())
+		installPath := fullInstallPath.Join(ctx, "etc/aconfig_flags.pb")
 		*fullInstallPaths = append(*fullInstallPaths, FullInstallPathInfo{
-			FullInstallPath: fullInstallPath.Join(ctx, "etc/aconfig_flags.pb"),
+			FullInstallPath: installPath,
 			SourcePath:      aconfigFlagsPb,
 		})
 		f.appendToEntry(ctx, installAconfigFlagsPath)
+		*platformGeneratedFiles = append(*platformGeneratedFiles, installPath.String())
 
-		// To enable fingerprint, we need to have v2 storage files. The default version is 1.
-		storageFilesVersion := 1
-		if ctx.Config().ReleaseFingerprintAconfigPackages() {
-			storageFilesVersion = 2
-		}
-
+		storageFilesVersion := ctx.Config().ReleaseAconfigStorageVersion()
 		installAconfigStorageDir := installEtcDir.Join(ctx, "aconfig")
 		builder.Command().Text("mkdir -p").Text(installAconfigStorageDir.String())
 
@@ -113,16 +109,18 @@ func (f *filesystem) buildAconfigFlagsFiles(
 				Args: map[string]string{
 					"container": container,
 					"fileType":  fileType,
-					"version":   strconv.Itoa(storageFilesVersion),
+					"version":   storageFilesVersion,
 				},
 			})
 			builder.Command().
 				Text("cp").Input(outPath).Text(installPath.String())
+			fip := fullInstallPath.Join(ctx, "etc/aconfig", fileName)
 			*fullInstallPaths = append(*fullInstallPaths, FullInstallPathInfo{
 				SourcePath:      outPath,
-				FullInstallPath: fullInstallPath.Join(ctx, "etc/aconfig", fileName),
+				FullInstallPath: fip,
 			})
 			f.appendToEntry(ctx, installPath)
+			*platformGeneratedFiles = append(*platformGeneratedFiles, fip.String())
 		}
 
 		if ctx.Config().ReleaseCreateAconfigStorageFile() {

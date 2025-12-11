@@ -31,9 +31,11 @@ import (
 var soongMetricsOnceKey = NewOnceKey("soong metrics")
 
 type soongMetrics struct {
-	modules       int
-	variants      int
-	perfCollector perfCollector
+	modules              int
+	variants             int
+	incrementalSupported int
+	incrementalRestored  int
+	perfCollector        perfCollector
 }
 
 type perfCollector struct {
@@ -61,6 +63,13 @@ func (soongMetricsSingleton) GenerateBuildActions(ctx SingletonContext) {
 		if ctx.PrimaryModuleProxy(m) == m {
 			metrics.modules++
 		}
+		supported, restored := m.IncrementalInfo()
+		if supported {
+			metrics.incrementalSupported++
+		}
+		if restored {
+			metrics.incrementalRestored++
+		}
 		metrics.variants++
 	})
 }
@@ -73,6 +82,8 @@ func collectMetrics(config Config, eventHandler *metrics.EventHandler) *soong_me
 		metrics.Modules = proto.Uint32(uint32(soongMetrics.modules))
 		metrics.Variants = proto.Uint32(uint32(soongMetrics.variants))
 	}
+	metrics.IncrementalSupported = proto.Uint32(uint32(soongMetrics.incrementalSupported))
+	metrics.IncrementalRestored = proto.Uint32(uint32(soongMetrics.incrementalRestored))
 
 	soongMetrics.perfCollector.stop <- true
 	metrics.PerfCounters = soongMetrics.perfCollector.events

@@ -40,6 +40,8 @@ type packageProperties struct {
 
 type PackageInfo struct {
 	Properties packageProperties
+	// The primary licenses, may be empty, records license metadata for the module.
+	PrimaryLicenses []string
 }
 
 var PackageInfoProvider = blueprint.NewProvider[PackageInfo]()
@@ -63,12 +65,12 @@ func (p *packageModule) DepsMutator(ctx BottomUpMutatorContext) {
 
 func (p *packageModule) GenerateBuildActions(ctx blueprint.ModuleContext) {
 	ctx.SetProvider(CommonModuleInfoProvider, &CommonModuleInfo{
-		Enabled:                 true,
-		PrimaryLicensesProperty: p.primaryLicensesProperty,
+		Enabled: true,
 	})
 
 	ctx.SetProvider(PackageInfoProvider, PackageInfo{
-		Properties: p.properties,
+		Properties:      p.properties,
+		PrimaryLicenses: p.primaryLicensesProperty.getStrings(),
 	})
 }
 

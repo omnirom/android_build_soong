@@ -55,7 +55,7 @@ func TestPlatformSystemServerClasspath_ClasspathFragmentPaths(t *testing.T) {
 	android.AssertPathRelativeToTopEquals(t, "install filepath", "out/target/product/test_device/system/etc/classpaths", p.ClasspathFragmentBase.installDirPath)
 }
 
-func TestPlatformSystemServerClasspathModule_AndroidMkEntries(t *testing.T) {
+func TestPlatformSystemServerClasspathModule_AndroidMkInfo(t *testing.T) {
 	t.Parallel()
 	preparer := android.GroupFixturePreparers(
 		prepareForTestWithSystemServerClasspath,
@@ -64,15 +64,16 @@ func TestPlatformSystemServerClasspathModule_AndroidMkEntries(t *testing.T) {
 				name: "platform-systemserverclasspath",
 			}
 		`),
+		android.PrepareForTestWithAndroidMk,
 	)
 
-	t.Run("AndroidMkEntries", func(t *testing.T) {
+	t.Run("AndroidMkInfo", func(t *testing.T) {
 		result := preparer.RunTest(t)
 
 		p := result.Module("platform-systemserverclasspath", "android_common").(*platformSystemServerClasspathModule)
 
-		entries := android.AndroidMkEntriesForTest(t, result.TestContext, p)
-		android.AssertIntEquals(t, "AndroidMkEntries count", 1, len(entries))
+		info := android.AndroidMkInfoForTest(t, result.TestContext, p)
+		android.AssertIntEquals(t, "AndroidMkInfo.ExtraInfo count", 0, len(info.ExtraInfo))
 	})
 
 	t.Run("classpath-fragment-entry", func(t *testing.T) {
@@ -87,8 +88,8 @@ func TestPlatformSystemServerClasspathModule_AndroidMkEntries(t *testing.T) {
 
 		p := result.Module("platform-systemserverclasspath", "android_common").(*platformSystemServerClasspathModule)
 
-		entries := android.AndroidMkEntriesForTest(t, result.TestContext, p)
-		got := entries[0]
+		info := android.AndroidMkInfoForTest(t, result.TestContext, p)
+		got := &info.PrimaryInfo
 		for k, expectedValue := range want {
 			if value, ok := got.EntryMap[k]; ok {
 				android.AssertDeepEquals(t, k, expectedValue, value)

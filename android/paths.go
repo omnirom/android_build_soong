@@ -24,9 +24,10 @@ import (
 	"strings"
 
 	"github.com/google/blueprint"
-	"github.com/google/blueprint/gobtools"
 	"github.com/google/blueprint/pathtools"
 )
+
+//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
 
 var absSrcDir string
 
@@ -60,7 +61,7 @@ type EarlyModulePathContext interface {
 
 	ModuleDir() string
 	ModuleErrorf(fmt string, args ...interface{})
-	OtherModulePropertyErrorf(module Module, property, fmt string, args ...interface{})
+	OtherModulePropertyErrorf(module ModuleOrProxy, property, fmt string, args ...interface{})
 }
 
 var _ EarlyModulePathContext = ModuleContext(nil)
@@ -90,10 +91,9 @@ func GlobFiles(ctx EarlyModulePathContext, globPattern string, excludes []string
 type ModuleWithDepsPathContext interface {
 	EarlyModulePathContext
 	OtherModuleProviderContext
-	VisitDirectDeps(visit func(Module))
 	VisitDirectDepsProxy(visit func(ModuleProxy))
 	VisitDirectDepsProxyWithTag(tag blueprint.DependencyTag, visit func(ModuleProxy))
-	OtherModuleDependencyTag(m blueprint.Module) blueprint.DependencyTag
+	OtherModuleDependencyTag(m ModuleOrProxy) blueprint.DependencyTag
 	HasMutatorFinished(mutatorName string) bool
 }
 
@@ -113,7 +113,10 @@ type ModuleInstallPathContext interface {
 	InstallInSanitizerDir() bool
 	InstallInRamdisk() bool
 	InstallInVendorRamdisk() bool
+	InstallPathSkipFirstStageRamdisk() bool
+	InstallInVendorKernelRamdisk() bool
 	InstallInDebugRamdisk() bool
+	InstallInTestHarnessRamdisk() bool
 	InstallInRecovery() bool
 	InstallInRoot() bool
 	InstallInOdm() bool
@@ -151,8 +154,20 @@ func (ctx *baseModuleContextToModuleInstallPathContext) InstallInVendorRamdisk()
 	return ctx.Module().InstallInVendorRamdisk()
 }
 
+func (ctx *baseModuleContextToModuleInstallPathContext) InstallPathSkipFirstStageRamdisk() bool {
+	return ctx.Module().InstallPathSkipFirstStageRamdisk()
+}
+
+func (ctx *baseModuleContextToModuleInstallPathContext) InstallInVendorKernelRamdisk() bool {
+	return ctx.Module().InstallInVendorKernelRamdisk()
+}
+
 func (ctx *baseModuleContextToModuleInstallPathContext) InstallInDebugRamdisk() bool {
 	return ctx.Module().InstallInDebugRamdisk()
+}
+
+func (ctx *baseModuleContextToModuleInstallPathContext) InstallInTestHarnessRamdisk() bool {
+	return ctx.Module().InstallInTestHarnessRamdisk()
 }
 
 func (ctx *baseModuleContextToModuleInstallPathContext) InstallInRecovery() bool {
@@ -235,12 +250,14 @@ func ReportPathErrorf(ctx PathContext, format string, args ...interface{}) {
 	}
 }
 
-// TODO(b/397766191): Change the signature to take ModuleProxy
-// Please only access the module's internal data through providers.
-func pathContextName(ctx PathContext, module blueprint.Module) string {
-	if x, ok := ctx.(interface{ ModuleName(blueprint.Module) string }); ok {
+func pathContextName(ctx PathContext, module ModuleOrProxy) string {
+	if x, ok := ctx.(interface {
+		ModuleName(ModuleOrProxy) string
+	}); ok {
 		return x.ModuleName(module)
-	} else if x, ok := ctx.(interface{ OtherModuleName(blueprint.Module) string }); ok {
+	} else if x, ok := ctx.(interface {
+		OtherModuleName(ModuleOrProxy) string
+	}); ok {
 		return x.OtherModuleName(module)
 	}
 	return "unknown"
@@ -304,7 +321,11 @@ type WritablePath interface {
 	// but it allows a struct to distinguish between whether or not it implements the WritablePath interface
 	writablePath()
 
+	// ReplaceExtension creates a new OutputPath with the extension replaced with ext.
 	ReplaceExtension(ctx PathContext, ext string) OutputPath
+
+	// AddExtension creates a new OutputPath with a "." and ext added to the file name.
+	AddExtension(ctx PathContext, ext string) OutputPath
 }
 
 type genPathProvider interface {
@@ -360,14 +381,10 @@ func ResPathWithName(ctx ModuleOutPathContext, p Path, name string) ModuleResPat
 }
 
 // OptionalPath is a container that may or may not contain a valid Path.
+// @auto-generate: gob
 type OptionalPath struct {
 	path          Path   // nil if invalid.
 	invalidReason string // Not applicable if path != nil. "" if the reason is unknown.
-}
-
-type optionalPathGob struct {
-	Path          Path
-	InvalidReason string
 }
 
 // OptionalPathForPath returns an OptionalPath containing the path.
@@ -379,26 +396,6 @@ func OptionalPathForPath(path Path) OptionalPath {
 func InvalidOptionalPath(reason string) OptionalPath {
 
 	return OptionalPath{invalidReason: reason}
-}
-
-func (p *OptionalPath) ToGob() *optionalPathGob {
-	return &optionalPathGob{
-		Path:          p.path,
-		InvalidReason: p.invalidReason,
-	}
-}
-
-func (p *OptionalPath) FromGob(data *optionalPathGob) {
-	p.path = data.Path
-	p.invalidReason = data.InvalidReason
-}
-
-func (p OptionalPath) GobEncode() ([]byte, error) {
-	return gobtools.CustomGobEncode[optionalPathGob](&p)
-}
-
-func (p *OptionalPath) GobDecode(data []byte) error {
-	return gobtools.CustomGobDecode[optionalPathGob](data, p)
 }
 
 // Valid returns whether there is a valid path
@@ -461,6 +458,7 @@ func (p OptionalPath) String() string {
 }
 
 // Paths is a slice of Path objects, with helpers to operate on the collection.
+// @auto-generate: gob
 type Paths []Path
 
 // RelativeToTop creates a new Paths containing the result of calling Path.RelativeToTop on each
@@ -598,6 +596,14 @@ var _ DirectoryPath = (*directoryPath)(nil)
 
 type DirectoryPaths []DirectoryPath
 
+func (paths DirectoryPaths) Strings() []string {
+	ret := make([]string, 0, len(paths))
+	for _, path := range paths {
+		ret = append(ret, path.String())
+	}
+	return ret
+}
+
 // DirectoryPathsForModuleSrcExcludes returns a Paths{} containing the resolved references in
 // directory paths. Elements of paths are resolved as:
 //   - filepath, relative to local module directory, resolves as a filepath relative to the local
@@ -609,7 +615,7 @@ func DirectoryPathsForModuleSrc(ctx ModuleMissingDepsPathContext, paths []string
 	for _, path := range paths {
 		if m, t := SrcIsModuleWithTag(path); m != "" {
 			module := GetModuleProxyFromPathDep(ctx, m, t)
-			if module == nil {
+			if module.IsNil() {
 				ctx.ModuleErrorf(`missing dependency on %q, is the property annotated with android:"path"?`, m)
 				continue
 			}
@@ -621,7 +627,7 @@ func DirectoryPathsForModuleSrc(ctx ModuleMissingDepsPathContext, paths []string
 			if !ok {
 				panic(fmt.Errorf("%s is not an OtherModuleProviderContext", ctx))
 			}
-			if dirProvider, ok := OtherModuleProvider(mctx, *module, DirProvider); ok {
+			if dirProvider, ok := OtherModuleProvider(mctx, module, DirProvider); ok {
 				ret = append(ret, dirProvider.Dirs...)
 			} else {
 				ReportPathErrorf(ctx, "module %q does not implement DirProvider", module)
@@ -680,14 +686,14 @@ func (p OutputPaths) Strings() []string {
 // If the module dependency is not a SourceFileProducer or OutputFileProducer, appropriate errors will be returned.
 func getPathsFromModuleDep(ctx ModuleWithDepsPathContext, path, moduleName, tag string) (Paths, error) {
 	module := GetModuleProxyFromPathDep(ctx, moduleName, tag)
-	if module == nil {
+	if module.IsNil() {
 		return nil, missingDependencyError{[]string{moduleName}}
 	}
-	if !OtherModulePointerProviderOrDefault(ctx, *module, CommonModuleInfoProvider).Enabled {
+	if !OtherModulePointerProviderOrDefault(ctx, module, CommonModuleInfoProvider).Enabled {
 		return nil, missingDependencyError{[]string{moduleName}}
 	}
 
-	outputFiles, err := outputFilesForModule(ctx, *module, tag)
+	outputFiles, err := outputFilesForModule(ctx, module, tag)
 	if outputFiles != nil && err == nil {
 		return outputFiles, nil
 	} else {
@@ -705,8 +711,8 @@ func getPathsFromModuleDep(ctx ModuleWithDepsPathContext, path, moduleName, tag 
 //
 // If tag is "" then the returned module will be the dependency that was added for ":moduleName".
 // Otherwise, it is the dependency that was added for ":moduleName{tag}".
-func GetModuleProxyFromPathDep(ctx ModuleWithDepsPathContext, moduleName, tag string) *ModuleProxy {
-	var found *ModuleProxy
+func GetModuleProxyFromPathDep(ctx ModuleWithDepsPathContext, moduleName, tag string) ModuleProxy {
+	var found ModuleProxy
 	// The sourceOrOutputDepTag uniquely identifies the module dependency as it contains both the
 	// module name and the tag. Dependencies added automatically for properties tagged with
 	// `android:"path"` are deduped so are guaranteed to be unique. It is possible for duplicate
@@ -720,31 +726,7 @@ func GetModuleProxyFromPathDep(ctx ModuleWithDepsPathContext, moduleName, tag st
 	// this finds the matching dependency module.
 	expectedTag := sourceOrOutputDepTag(moduleName, tag)
 	ctx.VisitDirectDepsProxyWithTag(expectedTag, func(module ModuleProxy) {
-		found = &module
-	})
-	return found
-}
-
-// Deprecated: use GetModuleProxyFromPathDep
-func GetModuleFromPathDep(ctx ModuleWithDepsPathContext, moduleName, tag string) blueprint.Module {
-	var found blueprint.Module
-	// The sourceOrOutputDepTag uniquely identifies the module dependency as it contains both the
-	// module name and the tag. Dependencies added automatically for properties tagged with
-	// `android:"path"` are deduped so are guaranteed to be unique. It is possible for duplicate
-	// dependencies to be added manually using ExtractSourcesDeps or ExtractSourceDeps but even then
-	// it will always be the case that the dependencies will be identical, i.e. the same tag and same
-	// moduleName referring to the same dependency module.
-	//
-	// It does not matter whether the moduleName is a fully qualified name or if the module
-	// dependency is a prebuilt module. All that matters is the same information is supplied to
-	// create the tag here as was supplied to create the tag when the dependency was added so that
-	// this finds the matching dependency module.
-	expectedTag := sourceOrOutputDepTag(moduleName, tag)
-	ctx.VisitDirectDeps(func(module Module) {
-		depTag := ctx.OtherModuleDependencyTag(module)
-		if depTag == expectedTag {
-			found = module
-		}
+		found = module
 	})
 	return found
 }
@@ -1202,34 +1184,10 @@ func (p WritablePaths) Paths() Paths {
 	return ret
 }
 
+// @auto-generate: gob
 type basePath struct {
 	path string
 	rel  string
-}
-
-type basePathGob struct {
-	Path string
-	Rel  string
-}
-
-func (p *basePath) ToGob() *basePathGob {
-	return &basePathGob{
-		Path: p.path,
-		Rel:  p.rel,
-	}
-}
-
-func (p *basePath) FromGob(data *basePathGob) {
-	p.path = data.Path
-	p.rel = data.Rel
-}
-
-func (p basePath) GobEncode() ([]byte, error) {
-	return gobtools.CustomGobEncode[basePathGob](&p)
-}
-
-func (p *basePath) GobDecode(data []byte) error {
-	return gobtools.CustomGobDecode[basePathGob](data, p)
 }
 
 func (p basePath) Ext() string {
@@ -1263,6 +1221,8 @@ func (p basePath) withoutRel() basePath {
 }
 
 // SourcePath is a Path representing a file path rooted from SrcDir
+//
+// @auto-generate: gob
 type SourcePath struct {
 	basePath
 }
@@ -1496,6 +1456,8 @@ func (p SourcePath) join(ctx PathContext, paths ...string) SourcePath {
 }
 
 // OutputPath is a Path representing an intermediates file path rooted from the build directory
+//
+// @auto-generate: gob
 type OutputPath struct {
 	basePath
 
@@ -1503,34 +1465,6 @@ type OutputPath struct {
 	outDir string
 
 	fullPath string
-}
-
-type outputPathGob struct {
-	BasePath basePath
-	OutDir   string
-	FullPath string
-}
-
-func (p *OutputPath) ToGob() *outputPathGob {
-	return &outputPathGob{
-		BasePath: p.basePath,
-		OutDir:   p.outDir,
-		FullPath: p.fullPath,
-	}
-}
-
-func (p *OutputPath) FromGob(data *outputPathGob) {
-	p.basePath = data.BasePath
-	p.outDir = data.OutDir
-	p.fullPath = data.FullPath
-}
-
-func (p OutputPath) GobEncode() ([]byte, error) {
-	return gobtools.CustomGobEncode[outputPathGob](&p)
-}
-
-func (p *OutputPath) GobDecode(data []byte) error {
-	return gobtools.CustomGobDecode[outputPathGob](data, p)
 }
 
 func (p OutputPath) withRel(rel string) OutputPath {
@@ -1572,6 +1506,7 @@ var _ WritablePath = OutputPath{}
 var _ objPathProvider = OutputPath{}
 
 // toolDepPath is a Path representing a dependency of the build tool.
+// @auto-generate: gob
 type toolDepPath struct {
 	basePath
 }
@@ -1645,6 +1580,16 @@ func (p OutputPath) ReplaceExtension(ctx PathContext, ext string) OutputPath {
 	return ret
 }
 
+// AddExtension creates a new OutputPath with ext added to the extension.
+func (p OutputPath) AddExtension(ctx PathContext, ext string) OutputPath {
+	if strings.Contains(ext, "/") {
+		ReportPathErrorf(ctx, "extension %q cannot contain /", ext)
+	}
+	ret := PathForOutput(ctx, p.path+"."+ext)
+	ret.rel = p.rel + "." + ext
+	return ret
+}
+
 // InSameDir creates a new OutputPath from the directory of the current OutputPath joined with the elements in paths.
 func (p OutputPath) InSameDir(ctx PathContext, paths ...string) OutputPath {
 	path, err := validatePath(paths...)
@@ -1690,10 +1635,10 @@ func PathForModuleSrc(ctx ModuleMissingDepsPathContext, pathComponents ...string
 		} else {
 			reportPathError(ctx, err)
 		}
-		return nil
+		return pathForModuleSrc(ctx, "Missing_PathForModuleSrc_file")
 	} else if len(paths) == 0 {
 		ReportPathErrorf(ctx, "%q produced no files, expected exactly one", p)
-		return nil
+		return pathForModuleSrc(ctx, "Missing_PathForModuleSrc_file")
 	} else if len(paths) > 1 {
 		ReportPathErrorf(ctx, "%q produced %d files, expected exactly one", p, len(paths))
 	}
@@ -1771,6 +1716,7 @@ func (p SourcePath) resPathWithName(ctx ModuleOutPathContext, name string) Modul
 }
 
 // ModuleOutPath is a Path representing a module's output directory.
+// @auto-generate: gob
 type ModuleOutPath struct {
 	OutputPath
 }
@@ -1814,6 +1760,7 @@ func PathForModuleOut(ctx ModuleOutPathContext, paths ...string) ModuleOutPath {
 
 // ModuleGenPath is a Path representing the 'gen' directory in a module's output
 // directory. Mainly used for generated sources.
+// @auto-generate: gob
 type ModuleGenPath struct {
 	ModuleOutPath
 }
@@ -1864,6 +1811,7 @@ func (p ModuleGenPath) objPathWithExt(ctx ModuleOutPathContext, subdir, ext stri
 
 // ModuleObjPath is a Path representing the 'obj' directory in a module's output
 // directory. Used for compiled objects.
+// @auto-generate: gob
 type ModuleObjPath struct {
 	ModuleOutPath
 }
@@ -1888,6 +1836,7 @@ func PathForModuleObj(ctx ModuleOutPathContext, pathComponents ...string) Module
 
 // ModuleResPath is a a Path representing the 'res' directory in a module's
 // output directory.
+// @auto-generate: gob
 type ModuleResPath struct {
 	ModuleOutPath
 }
@@ -1912,6 +1861,8 @@ func PathForModuleRes(ctx ModuleOutPathContext, pathComponents ...string) Module
 }
 
 // InstallPath is a Path representing a installed file path rooted from the build directory
+//
+// @auto-generate: gob
 type InstallPath struct {
 	basePath
 
@@ -1928,43 +1879,6 @@ type InstallPath struct {
 	makePath bool
 
 	fullPath string
-}
-
-type installPathGob struct {
-	BasePath     basePath
-	SoongOutDir  string
-	PartitionDir string
-	Partition    string
-	MakePath     bool
-	FullPath     string
-}
-
-func (p *InstallPath) ToGob() *installPathGob {
-	return &installPathGob{
-		BasePath:     p.basePath,
-		SoongOutDir:  p.soongOutDir,
-		PartitionDir: p.partitionDir,
-		Partition:    p.partition,
-		MakePath:     p.makePath,
-		FullPath:     p.fullPath,
-	}
-}
-
-func (p *InstallPath) FromGob(data *installPathGob) {
-	p.basePath = data.BasePath
-	p.soongOutDir = data.SoongOutDir
-	p.partitionDir = data.PartitionDir
-	p.partition = data.Partition
-	p.makePath = data.MakePath
-	p.fullPath = data.FullPath
-}
-
-func (p InstallPath) GobEncode() ([]byte, error) {
-	return gobtools.CustomGobEncode[installPathGob](&p)
-}
-
-func (p *InstallPath) GobDecode(data []byte) error {
-	return gobtools.CustomGobDecode[installPathGob](data, p)
 }
 
 // Will panic if called from outside a test environment.
@@ -1996,6 +1910,9 @@ func (p InstallPath) getSoongOutDir() string {
 }
 
 func (p InstallPath) ReplaceExtension(ctx PathContext, ext string) OutputPath {
+	panic("Not implemented")
+}
+func (p InstallPath) AddExtension(ctx PathContext, ext string) OutputPath {
 	panic("Not implemented")
 }
 
@@ -2057,13 +1974,25 @@ func PathForModuleInstall(ctx ModuleInstallPathContext, pathComponents ...string
 // PathForHostDexInstall returns an InstallPath representing the install path for the
 // module appended with paths...
 func PathForHostDexInstall(ctx ModuleInstallPathContext, pathComponents ...string) InstallPath {
-	return pathForInstall(ctx, ctx.Config().BuildOS, ctx.Config().BuildArch, "", pathComponents...)
+	return PathForHostInstall(ctx, pathComponents...)
 }
 
 // PathForModuleInPartitionInstall is similar to PathForModuleInstall but partition is provided by the caller
 func PathForModuleInPartitionInstall(ctx ModuleInstallPathContext, partition string, pathComponents ...string) InstallPath {
 	os, arch := osAndArch(ctx)
 	return pathForInstall(ctx, os, arch, partition, pathComponents...)
+}
+
+// PathForHostInstall returns an InstallPath representing the install path for a host file.
+// Equivalent to $(HOST_OUT) from make.
+func PathForHostInstall(ctx PathContext, pathComponents ...string) InstallPath {
+	return pathForInstall(ctx, ctx.Config().BuildOS, ctx.Config().BuildArch, "", pathComponents...)
+}
+
+// PathForDeviceFirstInstall returns an InstallPath representing the install path for a device file
+// in the first arch folder. Equivalent to $(TARGET_OUT) from make.
+func PathForDeviceFirstInstall(ctx PathContext, pathComponents ...string) InstallPath {
+	return pathForInstall(ctx, ctx.Config().AndroidFirstDeviceTarget.Os, ctx.Config().AndroidFirstDeviceTarget.Arch.ArchType, "", pathComponents...)
 }
 
 func osAndArch(ctx ModuleInstallPathContext) (OsType, ArchType) {
@@ -2178,7 +2107,7 @@ func modulePartition(ctx ModuleInstallPathContext, device bool) string {
 			// /first_stage_ramdisk. To expose the module before switching root
 			// on a device without a dedicated recovery partition, install the
 			// recovery variant.
-			if ctx.DeviceConfig().BoardMoveRecoveryResourcesToVendorBoot() {
+			if ctx.DeviceConfig().BoardMoveRecoveryResourcesToVendorBoot() && !ctx.InstallPathSkipFirstStageRamdisk() {
 				partition = "vendor_ramdisk/first_stage_ramdisk"
 			} else {
 				partition = "vendor_ramdisk"
@@ -2211,6 +2140,10 @@ func modulePartition(ctx ModuleInstallPathContext, device bool) string {
 			partition = ctx.DeviceConfig().VendorDlkmPath()
 		} else if ctx.InstallInOdmDlkm() {
 			partition = ctx.DeviceConfig().OdmDlkmPath()
+		} else if ctx.InstallInVendorKernelRamdisk() {
+			partition = "vendor_kernel_ramdisk"
+		} else if ctx.InstallInTestHarnessRamdisk() {
+			partition = "test_harness_ramdisk"
 		} else {
 			partition = "system"
 		}
@@ -2303,6 +2236,7 @@ func PathForPhony(ctx PathContext, phony string) WritablePath {
 	return PhonyPath{basePath{phony, ""}}
 }
 
+// @auto-generate: gob
 type PhonyPath struct {
 	basePath
 }
@@ -2329,10 +2263,14 @@ func (p PhonyPath) WithoutRel() Path {
 func (p PhonyPath) ReplaceExtension(ctx PathContext, ext string) OutputPath {
 	panic("Not implemented")
 }
+func (p PhonyPath) AddExtension(ctx PathContext, ext string) OutputPath {
+	panic("Not implemented")
+}
 
 var _ Path = PhonyPath{}
 var _ WritablePath = PhonyPath{}
 
+// @auto-generate: gob
 type testPath struct {
 	basePath
 }
@@ -2447,8 +2385,20 @@ func (m testModuleInstallPathContext) InstallInVendorRamdisk() bool {
 	return m.inVendorRamdisk
 }
 
+func (m testModuleInstallPathContext) InstallPathSkipFirstStageRamdisk() bool {
+	return false
+}
+
+func (m testModuleInstallPathContext) InstallInVendorKernelRamdisk() bool {
+	return false
+}
+
 func (m testModuleInstallPathContext) InstallInDebugRamdisk() bool {
 	return m.inDebugRamdisk
+}
+
+func (m testModuleInstallPathContext) InstallInTestHarnessRamdisk() bool {
+	return false
 }
 
 func (m testModuleInstallPathContext) InstallInRecovery() bool {
@@ -2578,6 +2528,7 @@ func absolutePath(path string) string {
 // The data file should be installed (copied from `<SrcPath>`) to
 // `<install_root>/<RelativeInstallPath>/<filename>`, or
 // `<install_root>/<filename>` if RelativeInstallPath is empty.
+// @auto-generate: gob
 type DataPath struct {
 	// The path of the data file that should be copied into the data directory
 	SrcPath Path

@@ -19,9 +19,13 @@ package {
 blueprint_go_binary {
     name: "soong_ui",
     deps: [
+        "soong-shared",
         "soong-ui-build",
-        "soong-ui-signal",
         "soong-ui-logger",
+        "soong-ui-metrics",
+        "soong-ui-execution-metrics",
+        "soong-ui-signal",
+        "soong-ui-status",
         "soong-ui-terminal",
         "soong-ui-tracer",
     ],

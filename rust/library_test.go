@@ -25,27 +25,27 @@ import (
 func TestLibraryVariants(t *testing.T) {
 
 	ctx := testRust(t, `
-		rust_library_host {
+		rust_library {
 			name: "libfoo",
 			srcs: ["foo.rs"],
 			crate_name: "foo",
 		}
-		rust_ffi_host {
+		rust_ffi {
 			name: "libfoo.ffi",
 			srcs: ["foo.rs"],
 			crate_name: "foo"
 		}
-		rust_ffi_host_static {
+		rust_ffi_static {
 			name: "libfoo.ffi_static",
 			srcs: ["foo.rs"],
 			crate_name: "foo"
 		}`)
 
 	// Test all variants are being built.
-	libfooRlib := ctx.ModuleForTests(t, "libfoo", "linux_glibc_x86_64_rlib_rlib-std").Rule("rustc")
-	libfooDylib := ctx.ModuleForTests(t, "libfoo", "linux_glibc_x86_64_dylib").Rule("rustc")
-	libfooFFIRlib := ctx.ModuleForTests(t, "libfoo.ffi", "linux_glibc_x86_64_rlib_rlib-std").Rule("rustc")
-	libfooShared := ctx.ModuleForTests(t, "libfoo.ffi", "linux_glibc_x86_64_shared").Rule("rustc")
+	libfooRlib := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_rlib_rlib-std").Rule("rustc")
+	libfooDylib := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_dylib").Rule("rustc")
+	libfooFFIRlib := ctx.ModuleForTests(t, "libfoo.ffi", "android_arm64_armv8-a_rlib_rlib-std").Rule("rustc")
+	libfooShared := ctx.ModuleForTests(t, "libfoo.ffi", "android_arm64_armv8-a_shared").Rule("rustc")
 
 	rlibCrateType := "rlib"
 	dylibCrateType := "dylib"
@@ -76,13 +76,13 @@ func TestLibraryVariants(t *testing.T) {
 // Test that dylibs are not statically linking the standard library.
 func TestDylibPreferDynamic(t *testing.T) {
 	ctx := testRust(t, `
-		rust_library_host_dylib {
+		rust_library_dylib {
 			name: "libfoo",
 			srcs: ["foo.rs"],
 			crate_name: "foo",
 		}`)
 
-	libfooDylib := ctx.ModuleForTests(t, "libfoo", "linux_glibc_x86_64_dylib").Rule("rustc")
+	libfooDylib := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_dylib").Rule("rustc")
 
 	if !strings.Contains(libfooDylib.Args["rustcFlags"], "prefer-dynamic") {
 		t.Errorf("missing prefer-dynamic flag for libfoo dylib, rustcFlags: %#v", libfooDylib.Args["rustcFlags"])
@@ -247,17 +247,17 @@ func TestNativeDependencyOfRlib(t *testing.T) {
 func TestAutoDeps(t *testing.T) {
 
 	ctx := testRust(t, `
-		rust_library_host {
+		rust_library {
 			name: "libbar",
 			srcs: ["bar.rs"],
 			crate_name: "bar",
 		}
-		rust_library_host_rlib {
+		rust_library_rlib {
 			name: "librlib_only",
 			srcs: ["bar.rs"],
 			crate_name: "rlib_only",
 		}
-		rust_library_host {
+		rust_library {
 			name: "libfoo",
 			srcs: ["foo.rs"],
 			crate_name: "foo",
@@ -266,7 +266,7 @@ func TestAutoDeps(t *testing.T) {
 				"librlib_only",
 			],
 		}
-		rust_ffi_host {
+		rust_ffi {
 			name: "libfoo.ffi",
 			srcs: ["foo.rs"],
 			crate_name: "foo",
@@ -275,7 +275,7 @@ func TestAutoDeps(t *testing.T) {
 				"librlib_only",
 			],
 		}
-		rust_ffi_host_static {
+		rust_ffi_static {
 			name: "libfoo.ffi.static",
 			srcs: ["foo.rs"],
 			crate_name: "foo",
@@ -285,10 +285,10 @@ func TestAutoDeps(t *testing.T) {
 			],
 		}`)
 
-	libfooRlib := ctx.ModuleForTests(t, "libfoo", "linux_glibc_x86_64_rlib_rlib-std")
-	libfooDylib := ctx.ModuleForTests(t, "libfoo", "linux_glibc_x86_64_dylib")
-	libfooFFIRlib := ctx.ModuleForTests(t, "libfoo.ffi", "linux_glibc_x86_64_rlib_rlib-std")
-	libfooShared := ctx.ModuleForTests(t, "libfoo.ffi", "linux_glibc_x86_64_shared")
+	libfooRlib := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_rlib_rlib-std")
+	libfooDylib := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_dylib")
+	libfooFFIRlib := ctx.ModuleForTests(t, "libfoo.ffi", "android_arm64_armv8-a_rlib_rlib-std")
+	libfooShared := ctx.ModuleForTests(t, "libfoo.ffi", "android_arm64_armv8-a_shared")
 
 	for _, static := range []android.TestingModule{libfooRlib, libfooFFIRlib} {
 		if !android.InList("libbar.rlib-std", static.Module().(*Module).Properties.AndroidMkRlibs) {
@@ -489,14 +489,14 @@ func TestRustVersionScript(t *testing.T) {
 		t.Errorf("missing expected -Wl,--version-script= linker flag for libextended shared lib, linkFlags: %#v",
 			librs.Args["linkFlags"])
 	}
-	if strings.Contains(librs.Args["linkFlags"], "-Wl,--android-version-script=librs.map.txt") {
+	if strings.Contains(librs.Args["linkerScriptFlags"], "-Wl,--android-version-script=librs.map.txt") {
 		t.Errorf("unexpected -Wl,--android-version-script= linker flag for libextended shared lib, linkFlags: %#v",
-			librs.Args["linkFlags"])
+			librs.Args["linkerScriptFlags"])
 	}
 
-	if !strings.Contains(libffi.Args["linkFlags"], "-Wl,--android-version-script=libffi.map.txt") {
+	if !strings.Contains(libffi.Args["linkerScriptFlags"], "-Wl,--android-version-script=libffi.map.txt") {
 		t.Errorf("missing -Wl,--android-version-script= linker flag for libreplaced shared lib, linkFlags: %#v",
-			libffi.Args["linkFlags"])
+			libffi.Args["linkerScriptFlags"])
 	}
 	if strings.Contains(libffi.Args["linkFlags"], "-Wl,--version-script=libffi.map.txt") {
 		t.Errorf("unexpected -Wl,--version-script= linker flag for libextended shared lib, linkFlags: %#v",
@@ -807,3 +807,161 @@ func TestRustStubsFFIOnly(t *testing.T) {
 
 // TODO: When rust_ffi libraries support export_*_lib_headers,
 // add a test similar to cc.TestStubsLibReexportsHeaders
+
+// Test that no_stdlibs libraries produce a rlib-core variant which is picked up by dependencies.
+func TestNoStdLib(t *testing.T) {
+	ctx := testRust(t, `
+		rust_library_rlib {
+			name: "libno_std",
+			srcs: ["foo.rs"],
+			crate_name: "no_std",
+			no_stdlibs: true,
+		}
+		rust_library {
+			name: "libstd_dep",
+			srcs: ["foo.rs"],
+			crate_name: "std_dep",
+			rustlibs: ["libno_std"],
+			prefer_rlib: true,
+		}
+		rust_library_rlib {
+			name: "libnostd_dep",
+			srcs: ["foo.rs"],
+			crate_name: "nostd_dep",
+			no_stdlibs: true,
+			rustlibs: ["libno_std"],
+			vendor_available: true,
+		}
+	`)
+
+	// Test that only the rlib-core variant is created for libno_std
+	variants := ctx.ModuleVariantsForTests("libno_std")
+	if !android.InList("android_arm64_armv8-a_rlib_rlib-core", variants) {
+		t.Errorf("missing expected variant: %q", "android_arm64_armv8-a_rlib_rlib-core")
+	}
+	if android.InList("android_arm64_armv8-a_rlib_rlib-std", variants) {
+		t.Errorf("unexpected variant: %q", "android_arm64_armv8-a_rlib_rlib-std")
+	}
+
+	libstdDep := ctx.ModuleForTests(t, "libstd_dep", "android_arm64_armv8-a_rlib_rlib-std").Module().(*Module)
+	if !android.InList("libno_std.rlib-core", libstdDep.Properties.AndroidMkRlibs) {
+		t.Errorf("rlib-std variant for device rust_library does not link libno_std as an rlib-core variant")
+		t.Errorf("All rlibs: %v", libstdDep.Properties.AndroidMkRlibs)
+	}
+
+	libnostdDep := ctx.ModuleForTests(t, "libnostd_dep", "android_arm64_armv8-a_rlib_rlib-core").Module().(*Module)
+	if !android.InList("libno_std.rlib-core", libnostdDep.Properties.AndroidMkRlibs) {
+		t.Errorf("rlib-core variant for device rust_library does not link libno_std as an rlib-core variant")
+	}
+}
+
+func TestNoStdVariant(t *testing.T) {
+	ctx := testRust(t, `
+	rust_library_rlib {
+		name: "libmaybe_std",
+		srcs: ["foo.rs"],
+		crate_name: "maybe_std",
+		no_std: {
+			enabled: true,
+		}
+	}
+	rust_library_rlib {
+		name: "libno_std",
+		srcs: ["foo.rs"],
+		crate_name: "no_std",
+		rustlibs: ["libmaybe_std"],
+		no_stdlibs: true
+	}
+	rust_library_rlib {
+		name: "libyes_std",
+		srcs: ["foo.rs"],
+		crate_name: "yes_std",
+		rustlibs: ["libmaybe_std"],
+	}
+	`)
+	variants := ctx.ModuleVariantsForTests("libmaybe_std")
+	// We should have both a core linkage variant and a std linkage variant
+	if !android.InList("android_arm64_armv8-a_rlib_rlib-core", variants) {
+		t.Errorf("missing expected variant: %q", "android_arm64_armv8-a_rlib_rlib-core")
+	}
+	if !android.InList("android_arm64_armv8-a_rlib_rlib-std", variants) {
+		t.Errorf("missing expected variant: %q", "android_arm64_armv8-a_rlib_rlib-std")
+	}
+
+	// The std variant should depend on std
+	maybe_std_std := ctx.ModuleForTests(t, "libmaybe_std", "android_arm64_armv8-a_rlib_rlib-std").Module().(*Module)
+	if !android.InList("libstd", maybe_std_std.Properties.AndroidMkRlibs) {
+		t.Errorf("missing expected dependency on libstd")
+	}
+	// The nostd variant should not
+	maybe_std_core := ctx.ModuleForTests(t, "libmaybe_std", "android_arm64_armv8-a_rlib_rlib-core").Module().(*Module)
+	if android.InList("libstd", maybe_std_core.Properties.AndroidMkRlibs) {
+		t.Errorf("unexpected dependency on libstd")
+	}
+
+	// The nostd library should select the nostd variant
+	no_std := ctx.ModuleForTests(t, "libno_std", "android_arm64_armv8-a_rlib_rlib-core").Module().(*Module)
+	if !android.InList("libmaybe_std.rlib-core", no_std.Properties.AndroidMkRlibs) {
+		t.Errorf("missing expected dependency on libmaybe_std.rlib-core")
+	}
+	if android.InList("libmaybe_std.rlib-std", no_std.Properties.AndroidMkRlibs) {
+		t.Errorf("unexpected dependency on libmaybe_std.rlib-std")
+	}
+
+	// The nostd library should select the nostd variant
+	yes_std := ctx.ModuleForTests(t, "libyes_std", "android_arm64_armv8-a_rlib_rlib-std").Module().(*Module)
+	if android.InList("libmaybe_std.rlib-core", yes_std.Properties.AndroidMkRlibs) {
+		t.Errorf("unexpected dependency on libmaybe_std.rlib-core")
+	}
+	if !android.InList("libmaybe_std.rlib-std", yes_std.Properties.AndroidMkRlibs) {
+		t.Errorf("missing expected dependency on libmaybe_std.rlib-std")
+	}
+}
+
+// Test that feature and rustlib overrides are applied correctly.
+func TestLibraryFeatureAndRustlibOverrides(t *testing.T) {
+	ctx := testRust(t, `
+		rust_library {
+			name: "libfoo",
+			srcs: ["foo.rs"],
+			features: ["c"],
+			crate_name: "foo",
+			no_std: {
+				enabled: true,
+				features: [],
+			},
+			rlib: {
+				features: ["a", "b"],
+				rustlibs: ["libbar"],
+			},
+		}
+		rust_library {
+			name: "libbar",
+			srcs: ["bar.rs"],
+			crate_name: "bar",
+		}
+	`)
+
+	libfooRlib := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_rlib_rlib-std").Rule("rustc")
+
+	if !strings.Contains(libfooRlib.Args["rustcFlags"], "--cfg 'feature=\"a\"' --cfg 'feature=\"b\"'") {
+		t.Errorf("missing expected features for rlib variant, rustcFlags: %#v", libfooRlib.Args["rustcFlags"])
+	}
+	if strings.Contains(libfooRlib.Args["rustcFlags"], "--cfg 'feature=\"c\"'") {
+		t.Errorf("unexpected feature for rlib variant, rustcFlags: %#v", libfooRlib.Args["rustcFlags"])
+	}
+
+	if !strings.Contains(libfooRlib.Args["libFlags"], "--extern bar=out/soong/.intermediates/libbar/android_arm64_armv8-a_rlib_rlib-std/libbar.rlib") {
+		t.Errorf("missing expected rustlibs for rlib variant, libFlags: %#v", libfooRlib.Args["libFlags"])
+	}
+
+	libfooNoStd := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_rlib_rlib-core").Rule("rustc")
+	if strings.Contains(libfooNoStd.Args["rustcFlags"], "--cfg 'feature=\"c\"'") {
+		t.Errorf("unexpected feature for no_std variant, rustcFlags: %#v", libfooRlib.Args["rustcFlags"])
+	}
+	if strings.Contains(libfooNoStd.Args["rustcFlags"], "--cfg 'feature=\"a\"'") {
+		t.Errorf("unexpected feature for no_std variant, rustcFlags: %#v", libfooRlib.Args["rustcFlags"])
+	}
+}
+
+// TODO once we can enforce that rlib-core does not depend on rlib-std or dylib-std, test it

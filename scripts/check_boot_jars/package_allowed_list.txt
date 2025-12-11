@@ -10,6 +10,7 @@ java\.lang
 java\.lang\.annotation
 java\.lang\.constant
 java\.lang\.invoke
+java\.lang\.foreign
 java\.lang\.ref
 java\.lang\.reflect
 java\.lang\.runtime
@@ -75,6 +76,8 @@ javax\.xml\.xpath
 jdk\.internal
 jdk\.internal\.access
 jdk\.internal\.event
+jdk\.internal\.foreign
+jdk\.internal\.invoke
 jdk\.internal\.math
 jdk\.internal\.misc
 jdk\.internal\.ref
@@ -261,14 +264,15 @@ com\.google\.i18n\.phonenumbers
 org\.chromium\.arc
 org\.chromium\.arc\..*
 
-# OmniROM adds
-omnirom\.platform
-org\.omnirom\.omnilib
-org\.omnirom\.omnilib\..*
 ###################################################
 # Packages used for wear-sdk in Wear OS
 com\.google\.wear
 com\.google\.wear\..*
+
+# OmniROM adds
+omnirom\.platform
+org\.omnirom\.omnilib
+org\.omnirom\.omnilib\..*
 
 # QC adds
 com.qualcomm.qti

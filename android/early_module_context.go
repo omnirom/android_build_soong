@@ -39,6 +39,10 @@ type EarlyModuleContext interface {
 	// reference to itself.
 	Module() Module
 
+	// Module returns the current module as a ModuleProxy.  It should rarely be necessary, as the
+	// module already has a reference to itself.
+	ModuleProxy() ModuleProxy
+
 	// ModuleName returns the name of the module.  This is generally the value that was returned by Module.Name() when
 	// the module was created, but may have been modified by calls to BottomUpMutatorContext.Rename.
 	ModuleName() string
@@ -61,7 +65,7 @@ type EarlyModuleContext interface {
 	Errorf(pos scanner.Position, fmt string, args ...interface{})
 
 	// OtherModulePropertyErrorf reports an error at the line number of a property in the given module definition.
-	OtherModulePropertyErrorf(module Module, property, fmt string, args ...interface{})
+	OtherModulePropertyErrorf(module ModuleOrProxy, property, fmt string, args ...interface{})
 
 	// Failed returns true if any errors have been reported.  In most cases the module can continue with generating
 	// build rules after an error, allowing it to report additional errors in a single run, but in cases where the error
@@ -98,6 +102,7 @@ type EarlyModuleContext interface {
 	// Namespace returns the Namespace object provided by the NameInterface set by Context.SetNameInterface, or the
 	// default SimpleNameInterface if Context.SetNameInterface was not called.
 	Namespace() *Namespace
+	OtherModuleNamespace(ModuleOrProxy) *Namespace
 
 	// HasMutatorFinished returns true if the given mutator has finished running.
 	// It will panic if given an invalid mutator name.
@@ -145,12 +150,16 @@ func (e *earlyModuleContext) Module() Module {
 	return module
 }
 
+func (e *earlyModuleContext) ModuleProxy() ModuleProxy {
+	return CreateModuleProxy(e.Module())
+}
+
 func (e *earlyModuleContext) Config() Config {
 	// Only the system image may use the generic config.
 	// If a module builds multiple image variations, provide the generic config only for the core
 	// variant which is installed in the system partition. Other image variant may still read the
 	// original configurations.
-	if e.Module().base().UseGenericConfig() && e.Module().base().commonProperties.ImageVariation == "" {
+	if e.Module().UseGenericConfig() && e.Module().base().commonProperties.ImageVariation == "" {
 		return e.EarlyModuleContext.Config().(Config).genericConfig()
 	}
 	return e.EarlyModuleContext.Config().(Config)
@@ -188,8 +197,12 @@ func (e *earlyModuleContext) Namespace() *Namespace {
 	return e.EarlyModuleContext.Namespace().(*Namespace)
 }
 
-func (e *earlyModuleContext) OtherModulePropertyErrorf(module Module, property string, fmt string, args ...interface{}) {
-	e.EarlyModuleContext.OtherModulePropertyErrorf(getWrappedModule(module), property, fmt, args...)
+func (e *earlyModuleContext) OtherModuleNamespace(m ModuleOrProxy) *Namespace {
+	return e.EarlyModuleContext.OtherModuleNamespace(m).(*Namespace)
+}
+
+func (e *earlyModuleContext) OtherModulePropertyErrorf(module ModuleOrProxy, property string, fmt string, args ...interface{}) {
+	e.EarlyModuleContext.OtherModulePropertyErrorf(module, property, fmt, args...)
 }
 
 func (e *earlyModuleContext) HasMutatorFinished(mutatorName string) bool {

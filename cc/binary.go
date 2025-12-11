@@ -551,10 +551,6 @@ func (binary *binaryDecorator) moduleInfoJSON(ctx ModuleContext, moduleInfoJSON 
 	binary.baseLinker.moduleInfoJSON(ctx, moduleInfoJSON)
 }
 
-func (binary *binaryDecorator) testSuiteInfo(ctx ModuleContext) {
-	// not a test
-}
-
 var _ overridable = (*binaryDecorator)(nil)
 
 func init() {

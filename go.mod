@@ -3,6 +3,7 @@ module android/soong
 go 1.23
 
 require (
+	github.com/akrylysov/pogreb v0.10.0
 	github.com/google/blueprint v0.0.0
 	google.golang.org/protobuf v0.0.0
 	go.starlark.net v0.0.0

@@ -15,6 +15,7 @@
 package java
 
 import (
+	"android/soong/aconfig"
 	"runtime"
 	"testing"
 
@@ -27,6 +28,9 @@ var prepareRavenwoodRuntime = android.GroupFixturePreparers(
 		RegisterRavenwoodBuildComponents(ctx)
 	}),
 	android.FixtureAddTextFile("ravenwood/Android.bp", `
+		all_aconfig_declarations {
+			name: "all_aconfig_declarations",
+		}
 		cc_library_shared {
 			name: "ravenwood-runtime-jni1",
 			host_supported: true,
@@ -55,6 +59,11 @@ var prepareRavenwoodRuntime = android.GroupFixturePreparers(
 			srcs: ["Services.java"],
 		}
 		java_library_static {
+			name: "ravenwood-runtime-extra",
+			stem: "runtime-extra",
+			srcs: ["Extra.java"],
+		}
+		java_library_static {
 			name: "framework-rules.ravenwood",
 			srcs: ["Rules.java"],
 		}
@@ -66,10 +75,6 @@ var prepareRavenwoodRuntime = android.GroupFixturePreparers(
 			name: "app2",
 			sdk_version: "current",
 		}
-		android_app {
-			name: "app3",
-			sdk_version: "current",
-		}
 		prebuilt_font {
 			name: "Font.ttf",
 			src: "Font.ttf",
@@ -79,6 +84,7 @@ var prepareRavenwoodRuntime = android.GroupFixturePreparers(
 			libs: [
 				"framework-minus-apex.ravenwood",
 				"framework-services.ravenwood",
+				"ravenwood-runtime-extra",
 			],
 			jni_libs: [
 				"ravenwood-runtime-jni1",
@@ -111,6 +117,7 @@ func TestRavenwoodRuntime(t *testing.T) {
 	ctx := android.GroupFixturePreparers(
 		PrepareForIntegrationTestWithJava,
 		etc.PrepareForTestWithPrebuiltEtc,
+		aconfig.PrepareForTestWithAconfigBuildComponents,
 		prepareRavenwoodRuntime,
 	).RunTest(t)
 
@@ -124,11 +131,20 @@ func TestRavenwoodRuntime(t *testing.T) {
 	runtime := ctx.ModuleForTests(t, "ravenwood-runtime", "android_common")
 	runtime.Output(installPathPrefix + "/ravenwood-runtime/framework-minus-apex.ravenwood.jar")
 	runtime.Output(installPathPrefix + "/ravenwood-runtime/framework-services.ravenwood.jar")
+	runtime.Output(installPathPrefix + "/ravenwood-runtime/runtime-extra.jar")
 	runtime.Output(installPathPrefix + "/ravenwood-runtime/lib64/ravenwood-runtime-jni1.so")
 	runtime.Output(installPathPrefix + "/ravenwood-runtime/lib64/libred.so")
 	runtime.Output(installPathPrefix + "/ravenwood-runtime/lib64/ravenwood-runtime-jni3.so")
 	runtime.Output(installPathPrefix + "/ravenwood-runtime/ravenwood-data/app1.apk")
 	runtime.Output(installPathPrefix + "/ravenwood-runtime/fonts/Font.ttf")
+
+	runtime.Output(installPathPrefix + "/ravenwood-runtime/aconfig/metadata/aconfig/etc/all_aconfig_declarations.pb")
+	runtime.Output(installPathPrefix + "/ravenwood-runtime/aconfig/metadata/aconfig/etc/all_aconfig_declarations.textproto")
+	runtime.Output(installPathPrefix + "/ravenwood-runtime/aconfig/metadata/aconfig/maps/all_aconfig_declarations.package.map")
+	runtime.Output(installPathPrefix + "/ravenwood-runtime/aconfig/metadata/aconfig/maps/all_aconfig_declarations.flag.map")
+	runtime.Output(installPathPrefix + "/ravenwood-runtime/aconfig/metadata/aconfig/boot/all_aconfig_declarations.flag.info")
+	runtime.Output(installPathPrefix + "/ravenwood-runtime/aconfig/metadata/aconfig/boot/all_aconfig_declarations.val")
+
 	utils := ctx.ModuleForTests(t, "ravenwood-utils", "android_common")
 	utils.Output(installPathPrefix + "/ravenwood-utils/framework-rules.ravenwood.jar")
 }
@@ -142,6 +158,7 @@ func TestRavenwoodTest(t *testing.T) {
 	ctx := android.GroupFixturePreparers(
 		PrepareForIntegrationTestWithJava,
 		etc.PrepareForTestWithPrebuiltEtc,
+		aconfig.PrepareForTestWithAconfigBuildComponents,
 		prepareRavenwoodRuntime,
 	).RunTestWithBp(t, `
 		cc_library_shared {
@@ -176,12 +193,18 @@ func TestRavenwoodTest(t *testing.T) {
 				"jni-lib1",
 				"ravenwood-runtime-jni2",
 			],
-			resource_apk: "app2",
-			inst_resource_apk: "app3",
+			data: [
+				"data/file1.txt",
+				"data2/sub/file2",
+			],
+			build_resources: true,
+			manifest: "AndroidManifest.xml",
+			target_resource_apk: "app2",
 			sdk_version: "test_current",
 			target_sdk_version: "34",
 			package_name: "a.b.c",
-			inst_package_name: "x.y.z",
+			target_package_name: "x.y.z",
+			instrumentation_class: "androidx.test.runner.AndroidJUnitRunner",
 		}
 		android_ravenwood_test {
 			name: "ravenwood-test-empty",
@@ -212,7 +235,9 @@ func TestRavenwoodTest(t *testing.T) {
 	module.Output(installPathPrefix + "/ravenwood-test/lib64/libblue.so")
 	module.Output(installPathPrefix + "/ravenwood-test/lib64/libpink.so")
 	module.Output(installPathPrefix + "/ravenwood-test/ravenwood-res-apks/ravenwood-res.apk")
-	module.Output(installPathPrefix + "/ravenwood-test/ravenwood-res-apks/ravenwood-inst-res.apk")
+	module.Output(installPathPrefix + "/ravenwood-test/ravenwood-res-apks/ravenwood-target-res.apk")
+	module.Output(installPathPrefix + "/ravenwood-test/data/file1.txt")
+	module.Output(installPathPrefix + "/ravenwood-test/data2/sub/file2")
 
 	module = ctx.ModuleForTests(t, "ravenwood-test-empty", "android_common")
 	module.Output(installPathPrefix + "/ravenwood-test-empty/ravenwood.properties")

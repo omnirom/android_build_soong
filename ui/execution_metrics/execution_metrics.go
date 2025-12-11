@@ -42,12 +42,13 @@ import (
 
 	"android/soong/ui/logger"
 
+	"google.golang.org/protobuf/encoding/protowire"
+	"google.golang.org/protobuf/proto"
+
 	fid_proto "android/soong/cmd/find_input_delta/find_input_delta_proto"
 	"android/soong/ui/metrics"
 	soong_execution_proto "android/soong/ui/metrics/execution_metrics_proto"
 	soong_metrics_proto "android/soong/ui/metrics/metrics_proto"
-	"google.golang.org/protobuf/encoding/protowire"
-	"google.golang.org/protobuf/proto"
 )
 
 type ExecutionMetrics struct {
@@ -126,14 +127,17 @@ func (c *ExecutionMetrics) Start() {
 }
 
 type hasTrace interface {
-	BeginTrace(name, desc string)
-	EndTrace()
+	BeginTrace(name, desc string) Event
+}
+
+type Event interface {
+	End()
 }
 
 // Aggregate any execution metrics.
 func (c *ExecutionMetrics) Finish(ctx hasTrace) {
-	ctx.BeginTrace(metrics.RunSoong, "execution_metrics.Finish")
-	defer ctx.EndTrace()
+	e := ctx.BeginTrace(metrics.RunSoong, "execution_metrics.Finish")
+	defer e.End()
 	if c.MetricsAggregationDir == "" {
 		return
 	}

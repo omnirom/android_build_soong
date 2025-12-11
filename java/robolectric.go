@@ -149,6 +149,7 @@ func (r *robolectricTest) GenerateAndroidBuildActions(ctx android.ModuleContext)
 	if proptools.BoolDefault(r.robolectricProperties.Strict_mode, true) {
 		extraTestRunnerOptions = append(extraTestRunnerOptions, tradefed.Option{Name: "java-flags", Value: "-Drobolectric.strict.mode=true"})
 	}
+	extraTestRunnerOptions = append(extraTestRunnerOptions, r.testProperties.Test_options.Test_runner_options...)
 
 	var extraOptions []tradefed.Option
 	var javaHome = ctx.Config().Getenv("ANDROID_JAVA_HOME")
@@ -169,6 +170,7 @@ func (r *robolectricTest) GenerateAndroidBuildActions(ctx android.ModuleContext)
 	r.data = append(r.data, android.PathsForModuleSrc(ctx, r.testProperties.Device_first_data)...)
 	r.data = append(r.data, android.PathsForModuleSrc(ctx, r.testProperties.Device_first_prefer32_data)...)
 	r.data = append(r.data, android.PathsForModuleSrc(ctx, r.testProperties.Host_common_data)...)
+	r.data = append(r.data, android.PathsForModuleSrc(ctx, r.testProperties.Host_first_data)...)
 
 	var ok bool
 	var instrumentedApp *JavaInfo
@@ -197,12 +199,12 @@ func (r *robolectricTest) GenerateAndroidBuildActions(ctx android.ModuleContext)
 	roboTestConfigJar := android.PathForModuleOut(ctx, "robolectric_samedir", "samedir_config.jar")
 	generateSameDirRoboTestConfigJar(ctx, roboTestConfigJar)
 
-	extraCombinedJars := android.Paths{roboTestConfigJar}
+	r.extraDepCombinedJars = append(r.extraDepCombinedJars, roboTestConfigJar)
 
 	handleLibDeps := func(dep android.ModuleProxy) {
 		if !android.InList(ctx.OtherModuleName(dep), config.FrameworkLibraries) {
 			if m, ok := android.OtherModuleProvider(ctx, dep, JavaInfoProvider); ok {
-				extraCombinedJars = append(extraCombinedJars, m.ImplementationAndResourcesJars...)
+				r.extraDepCombinedJars = append(r.extraDepCombinedJars, m.ImplementationAndResourcesJars...)
 			}
 		}
 	}
@@ -219,13 +221,13 @@ func (r *robolectricTest) GenerateAndroidBuildActions(ctx android.ModuleContext)
 	}
 
 	if appInfo != nil {
-		extraCombinedJars = append(extraCombinedJars, instrumentedApp.ImplementationAndResourcesJars...)
+		r.extraDepCombinedJars = append(r.extraDepCombinedJars, instrumentedApp.ImplementationAndResourcesJars...)
 	}
 
 	r.stem = proptools.StringDefault(r.overridableProperties.Stem, ctx.ModuleName())
 	r.classLoaderContexts = r.usesLibrary.classLoaderContextForUsesLibDeps(ctx)
 	r.dexpreopter.disableDexpreopt()
-	javaInfo := r.compile(ctx, nil, nil, nil, extraCombinedJars)
+	javaInfo := r.compile(ctx)
 
 	installPath := android.PathForModuleInstall(ctx, r.BaseModuleName())
 	var installDeps android.InstallPaths
@@ -313,18 +315,20 @@ func generateSameDirRoboTestConfigJar(ctx android.ModuleContext, outputFile andr
 	rule.Build("generate_test_config_samedir", "generate test_config.properties")
 }
 
-func (r *robolectricTest) AndroidMkEntries() []android.AndroidMkEntries {
-	entriesList := r.Library.AndroidMkEntries()
-	entries := &entriesList[0]
-	entries.ExtraEntries = append(entries.ExtraEntries,
-		func(ctx android.AndroidMkExtraEntriesContext, entries *android.AndroidMkEntries) {
-			entries.SetBool("LOCAL_UNINSTALLABLE_MODULE", true)
-			entries.AddStrings("LOCAL_COMPATIBILITY_SUITE", "robolectric-tests")
-			if r.testConfig != nil {
-				entries.SetPath("LOCAL_FULL_TEST_CONFIG", r.testConfig)
-			}
-		})
-	return entriesList
+func (r *robolectricTest) PrepareAndroidMKProviderInfo(config android.Config) *android.AndroidMkProviderInfo {
+	info := r.Library.prepareAndroidMKProviderInfo(config)
+
+	if info.PrimaryInfo.OutputFile.Valid() {
+		info.PrimaryInfo.SetBool("LOCAL_UNINSTALLABLE_MODULE", true)
+		info.PrimaryInfo.AddStrings("LOCAL_COMPATIBILITY_SUITE", "robolectric-tests")
+		if r.testConfig != nil {
+			info.PrimaryInfo.SetPath("LOCAL_FULL_TEST_CONFIG", r.testConfig)
+		}
+	}
+
+	r.addHostDexAndroidMkInfo(info)
+
+	return info
 }
 
 // An android_robolectric_test module compiles tests against the Robolectric framework that can run on the local host
@@ -406,7 +410,7 @@ func (r *robolectricRuntimes) GenerateAndroidBuildActions(ctx android.ModuleCont
 
 	if !ctx.Config().AlwaysUsePrebuiltSdks() && r.props.Lib != nil {
 		runtimeFromSourceModule := ctx.GetDirectDepProxyWithTag(String(r.props.Lib), libTag)
-		if runtimeFromSourceModule == nil {
+		if runtimeFromSourceModule.IsNil() {
 			if ctx.Config().AllowMissingDependencies() {
 				ctx.AddMissingDependencies([]string{String(r.props.Lib)})
 			} else {

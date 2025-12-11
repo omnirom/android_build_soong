@@ -33,9 +33,10 @@ var (
 
 		// Use C99-compliant printf functions (%zd).
 		"-D__USE_MINGW_ANSI_STDIO=1",
-		// Admit to using >= Windows 7. Both are needed because of <_mingw.h>.
-		"-D_WIN32_WINNT=0x0601",
-		"-DWINVER=0x0601",
+		// Admit to using >= Windows 10.
+		// Both #defines are needed: https://learn.microsoft.com/en-us/cpp/porting/modifying-winver-and-win32-winnt
+		"-D_WIN32_WINNT=0x0A00",
+		"-DWINVER=0x0A00",
 		// Get 64-bit off_t and related functions.
 		"-D_FILE_OFFSET_BITS=64",
 
@@ -68,10 +69,18 @@ var (
 	windowsLdflags = []string{
 		"-Wl,--dynamicbase",
 		"-Wl,--nxcompat",
-	}
-	windowsLldflags = append(windowsLdflags, []string{
+
 		"-Wl,--Xlink=-Brepro", // Enable deterministic build
-	}...)
+
+		// ntdll has a broken implementation of wcstombs that causes b/439152273.
+		// ucrt provides an implementation of wcstombs that is not broken,
+		// make sure to include ucrt before ntdll.
+		"-lucrt",
+		// Additional libraries required for generated static rustlibs
+		"-lssp",
+		"-ladvapi32",
+		"-lntdll",
+	}
 
 	windowsX86Cflags = []string{
 		"-m32",
@@ -119,6 +128,7 @@ var (
 		"powrprof",
 		"psapi",
 		"pthread",
+		"ucrt",
 		"userenv",
 		"uuid",
 		"version",
@@ -141,15 +151,12 @@ func init() {
 
 	pctx.StaticVariable("WindowsCflags", strings.Join(windowsCflags, " "))
 	pctx.StaticVariable("WindowsLdflags", strings.Join(windowsLdflags, " "))
-	pctx.StaticVariable("WindowsLldflags", strings.Join(windowsLldflags, " "))
 	pctx.StaticVariable("WindowsCppflags", strings.Join(windowsCppflags, " "))
 
 	pctx.StaticVariable("WindowsX86Cflags", strings.Join(windowsX86Cflags, " "))
 	pctx.StaticVariable("WindowsX8664Cflags", strings.Join(windowsX8664Cflags, " "))
 	pctx.StaticVariable("WindowsX86Ldflags", strings.Join(windowsX86Ldflags, " "))
-	pctx.StaticVariable("WindowsX86Lldflags", strings.Join(windowsX86Ldflags, " "))
 	pctx.StaticVariable("WindowsX8664Ldflags", strings.Join(windowsX8664Ldflags, " "))
-	pctx.StaticVariable("WindowsX8664Lldflags", strings.Join(windowsX8664Ldflags, " "))
 	pctx.StaticVariable("WindowsX86Cppflags", strings.Join(windowsX86Cppflags, " "))
 	pctx.StaticVariable("WindowsX8664Cppflags", strings.Join(windowsX8664Cppflags, " "))
 
@@ -223,16 +230,8 @@ func (t *toolchainWindowsX86) Ldflags() string {
 	return "${config.WindowsLdflags} ${config.WindowsX86Ldflags}"
 }
 
-func (t *toolchainWindowsX86) Lldflags() string {
-	return "${config.WindowsLldflags} ${config.WindowsX86Lldflags}"
-}
-
 func (t *toolchainWindowsX8664) Ldflags() string {
 	return "${config.WindowsLdflags} ${config.WindowsX8664Ldflags}"
-}
-
-func (t *toolchainWindowsX8664) Lldflags() string {
-	return "${config.WindowsLldflags} ${config.WindowsX8664Lldflags}"
 }
 
 func (t *toolchainWindowsX86) YasmFlags() string {

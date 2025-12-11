@@ -17,6 +17,7 @@ package cc
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"android/soong/android"
 	"android/soong/cc/config"
@@ -68,9 +69,6 @@ type BaseLinkerProperties struct {
 
 	// don't link in libclang_rt.builtins-*.a
 	No_libcrt *bool `android:"arch_variant"`
-
-	// Use clang lld instead of gnu ld.
-	Use_clang_lld *bool `android:"arch_variant"`
 
 	// -l arguments to pass to linker for host-provided shared libraries
 	Host_ldlibs []string `android:"arch_variant"`
@@ -298,22 +296,27 @@ func (linker *baseLinker) baseLinkerProps() BaseLinkerProperties {
 	return linker.Properties
 }
 
-func (linker *baseLinker) linkerDeps(ctx DepsContext, deps Deps) Deps {
-	deps.WholeStaticLibs = append(deps.WholeStaticLibs, linker.Properties.Whole_static_libs.GetOrDefault(ctx, nil)...)
-	deps.HeaderLibs = append(deps.HeaderLibs, linker.Properties.Header_libs.GetOrDefault(ctx, nil)...)
-	deps.StaticLibs = append(deps.StaticLibs, linker.Properties.Static_libs.GetOrDefault(ctx, nil)...)
-	deps.SharedLibs = append(deps.SharedLibs, linker.Properties.Shared_libs.GetOrDefault(ctx, nil)...)
-	deps.RuntimeLibs = append(deps.RuntimeLibs, linker.Properties.Runtime_libs...)
+func CoalesceLibs(ctx android.BaseModuleContext, props *BaseLinkerProperties, deps Deps) Deps {
+	mod, ok := ctx.Module().(*Module)
+	if !ok {
+		ctx.ModuleErrorf("CoalesceLibs can only be called from a cc module")
+	}
 
-	deps.ReexportHeaderLibHeaders = append(deps.ReexportHeaderLibHeaders, linker.Properties.Export_header_lib_headers.GetOrDefault(ctx, nil)...)
-	deps.ReexportStaticLibHeaders = append(deps.ReexportStaticLibHeaders, linker.Properties.Export_static_lib_headers...)
-	deps.ReexportSharedLibHeaders = append(deps.ReexportSharedLibHeaders, linker.Properties.Export_shared_lib_headers...)
-	deps.ReexportGeneratedHeaders = append(deps.ReexportGeneratedHeaders, linker.Properties.Export_generated_headers...)
+	deps.WholeStaticLibs = append(deps.WholeStaticLibs, props.Whole_static_libs.GetOrDefault(ctx, nil)...)
+	deps.HeaderLibs = append(deps.HeaderLibs, props.Header_libs.GetOrDefault(ctx, nil)...)
+	deps.StaticLibs = append(deps.StaticLibs, props.Static_libs.GetOrDefault(ctx, nil)...)
+	deps.SharedLibs = append(deps.SharedLibs, props.Shared_libs.GetOrDefault(ctx, nil)...)
+	deps.RuntimeLibs = append(deps.RuntimeLibs, props.Runtime_libs...)
 
-	deps.SharedLibs = removeListFromList(deps.SharedLibs, linker.Properties.Exclude_shared_libs)
-	deps.StaticLibs = removeListFromList(deps.StaticLibs, linker.Properties.Exclude_static_libs)
-	deps.WholeStaticLibs = removeListFromList(deps.WholeStaticLibs, linker.Properties.Exclude_static_libs)
-	deps.RuntimeLibs = removeListFromList(deps.RuntimeLibs, linker.Properties.Exclude_runtime_libs)
+	deps.ReexportHeaderLibHeaders = append(deps.ReexportHeaderLibHeaders, props.Export_header_lib_headers.GetOrDefault(ctx, nil)...)
+	deps.ReexportStaticLibHeaders = append(deps.ReexportStaticLibHeaders, props.Export_static_lib_headers...)
+	deps.ReexportSharedLibHeaders = append(deps.ReexportSharedLibHeaders, props.Export_shared_lib_headers...)
+	deps.ReexportGeneratedHeaders = append(deps.ReexportGeneratedHeaders, props.Export_generated_headers...)
+
+	deps.SharedLibs = removeListFromList(deps.SharedLibs, props.Exclude_shared_libs)
+	deps.StaticLibs = removeListFromList(deps.StaticLibs, props.Exclude_static_libs)
+	deps.WholeStaticLibs = removeListFromList(deps.WholeStaticLibs, props.Exclude_static_libs)
+	deps.RuntimeLibs = removeListFromList(deps.RuntimeLibs, props.Exclude_runtime_libs)
 
 	// Record the libraries that need to be excluded when building for APEX. Unlike other
 	// target.*.exclude_* properties, SharedLibs and StaticLibs are not modified here because
@@ -322,83 +325,90 @@ func (linker *baseLinker) linkerDeps(ctx DepsContext, deps Deps) Deps {
 	// used to mark the dependency tag when adding dependencies to the deps. Then inside
 	// GenerateAndroidBuildActions, the marked dependencies are ignored (i.e. not used) for APEX
 	// variants.
-	deps.ExcludeLibsForApex = append(deps.ExcludeLibsForApex, linker.Properties.Target.Apex.Exclude_shared_libs...)
-	deps.ExcludeLibsForApex = append(deps.ExcludeLibsForApex, linker.Properties.Target.Apex.Exclude_static_libs...)
+	deps.ExcludeLibsForApex = append(deps.ExcludeLibsForApex, props.Target.Apex.Exclude_shared_libs...)
+	deps.ExcludeLibsForApex = append(deps.ExcludeLibsForApex, props.Target.Apex.Exclude_static_libs...)
 	// Record the libraries that need to be excluded when building for non-APEX variants
 	// for the same reason above. This is used for marking deps and marked deps are
 	// ignored for non-apex variants.
-	deps.ExcludeLibsForNonApex = append(deps.ExcludeLibsForNonApex, linker.Properties.Target.Non_apex.Exclude_shared_libs...)
+	deps.ExcludeLibsForNonApex = append(deps.ExcludeLibsForNonApex, props.Target.Non_apex.Exclude_shared_libs...)
 
-	if Bool(linker.Properties.Use_version_lib) {
+	if Bool(props.Use_version_lib) {
 		deps.WholeStaticLibs = append(deps.WholeStaticLibs, "libbuildversion")
 	}
 
-	if ctx.inVendor() {
-		deps.SharedLibs = append(deps.SharedLibs, linker.Properties.Target.Vendor.Shared_libs...)
-		deps.SharedLibs = removeListFromList(deps.SharedLibs, linker.Properties.Target.Vendor.Exclude_shared_libs)
-		deps.ReexportSharedLibHeaders = removeListFromList(deps.ReexportSharedLibHeaders, linker.Properties.Target.Vendor.Exclude_shared_libs)
-		deps.StaticLibs = append(deps.StaticLibs, linker.Properties.Target.Vendor.Static_libs...)
-		deps.StaticLibs = removeListFromList(deps.StaticLibs, linker.Properties.Target.Vendor.Exclude_static_libs)
-		deps.HeaderLibs = append(deps.HeaderLibs, linker.Properties.Target.Vendor.Header_libs...)
-		deps.HeaderLibs = removeListFromList(deps.HeaderLibs, linker.Properties.Target.Vendor.Exclude_header_libs)
-		deps.ReexportHeaderLibHeaders = removeListFromList(deps.ReexportHeaderLibHeaders, linker.Properties.Target.Vendor.Exclude_header_libs)
-		deps.ReexportStaticLibHeaders = removeListFromList(deps.ReexportStaticLibHeaders, linker.Properties.Target.Vendor.Exclude_static_libs)
-		deps.WholeStaticLibs = removeListFromList(deps.WholeStaticLibs, linker.Properties.Target.Vendor.Exclude_static_libs)
-		deps.RuntimeLibs = removeListFromList(deps.RuntimeLibs, linker.Properties.Target.Vendor.Exclude_runtime_libs)
+	if mod.InVendor() {
+		deps.SharedLibs = append(deps.SharedLibs, props.Target.Vendor.Shared_libs...)
+		deps.SharedLibs = removeListFromList(deps.SharedLibs, props.Target.Vendor.Exclude_shared_libs)
+		deps.ReexportSharedLibHeaders = removeListFromList(deps.ReexportSharedLibHeaders, props.Target.Vendor.Exclude_shared_libs)
+		deps.StaticLibs = append(deps.StaticLibs, props.Target.Vendor.Static_libs...)
+		deps.StaticLibs = removeListFromList(deps.StaticLibs, props.Target.Vendor.Exclude_static_libs)
+		deps.HeaderLibs = append(deps.HeaderLibs, props.Target.Vendor.Header_libs...)
+		deps.HeaderLibs = removeListFromList(deps.HeaderLibs, props.Target.Vendor.Exclude_header_libs)
+		deps.ReexportHeaderLibHeaders = removeListFromList(deps.ReexportHeaderLibHeaders, props.Target.Vendor.Exclude_header_libs)
+		deps.ReexportStaticLibHeaders = removeListFromList(deps.ReexportStaticLibHeaders, props.Target.Vendor.Exclude_static_libs)
+		deps.WholeStaticLibs = removeListFromList(deps.WholeStaticLibs, props.Target.Vendor.Exclude_static_libs)
+		deps.RuntimeLibs = removeListFromList(deps.RuntimeLibs, props.Target.Vendor.Exclude_runtime_libs)
 	}
 
-	if ctx.inProduct() {
-		deps.SharedLibs = append(deps.SharedLibs, linker.Properties.Target.Product.Shared_libs...)
-		deps.SharedLibs = removeListFromList(deps.SharedLibs, linker.Properties.Target.Product.Exclude_shared_libs)
-		deps.ReexportSharedLibHeaders = removeListFromList(deps.ReexportSharedLibHeaders, linker.Properties.Target.Product.Exclude_shared_libs)
-		deps.StaticLibs = append(deps.StaticLibs, linker.Properties.Target.Product.Static_libs...)
-		deps.StaticLibs = removeListFromList(deps.StaticLibs, linker.Properties.Target.Product.Exclude_static_libs)
-		deps.HeaderLibs = removeListFromList(deps.HeaderLibs, linker.Properties.Target.Product.Exclude_header_libs)
-		deps.ReexportHeaderLibHeaders = removeListFromList(deps.ReexportHeaderLibHeaders, linker.Properties.Target.Product.Exclude_header_libs)
-		deps.ReexportStaticLibHeaders = removeListFromList(deps.ReexportStaticLibHeaders, linker.Properties.Target.Product.Exclude_static_libs)
-		deps.WholeStaticLibs = removeListFromList(deps.WholeStaticLibs, linker.Properties.Target.Product.Exclude_static_libs)
-		deps.RuntimeLibs = removeListFromList(deps.RuntimeLibs, linker.Properties.Target.Product.Exclude_runtime_libs)
+	if mod.InProduct() {
+		deps.SharedLibs = append(deps.SharedLibs, props.Target.Product.Shared_libs...)
+		deps.SharedLibs = removeListFromList(deps.SharedLibs, props.Target.Product.Exclude_shared_libs)
+		deps.ReexportSharedLibHeaders = removeListFromList(deps.ReexportSharedLibHeaders, props.Target.Product.Exclude_shared_libs)
+		deps.StaticLibs = append(deps.StaticLibs, props.Target.Product.Static_libs...)
+		deps.StaticLibs = removeListFromList(deps.StaticLibs, props.Target.Product.Exclude_static_libs)
+		deps.HeaderLibs = removeListFromList(deps.HeaderLibs, props.Target.Product.Exclude_header_libs)
+		deps.ReexportHeaderLibHeaders = removeListFromList(deps.ReexportHeaderLibHeaders, props.Target.Product.Exclude_header_libs)
+		deps.ReexportStaticLibHeaders = removeListFromList(deps.ReexportStaticLibHeaders, props.Target.Product.Exclude_static_libs)
+		deps.WholeStaticLibs = removeListFromList(deps.WholeStaticLibs, props.Target.Product.Exclude_static_libs)
+		deps.RuntimeLibs = removeListFromList(deps.RuntimeLibs, props.Target.Product.Exclude_runtime_libs)
 	}
 
-	if ctx.inRecovery() {
-		deps.SharedLibs = append(deps.SharedLibs, linker.Properties.Target.Recovery.Shared_libs...)
-		deps.SharedLibs = removeListFromList(deps.SharedLibs, linker.Properties.Target.Recovery.Exclude_shared_libs)
-		deps.ReexportSharedLibHeaders = removeListFromList(deps.ReexportSharedLibHeaders, linker.Properties.Target.Recovery.Exclude_shared_libs)
-		deps.StaticLibs = append(deps.StaticLibs, linker.Properties.Target.Recovery.Static_libs...)
-		deps.StaticLibs = removeListFromList(deps.StaticLibs, linker.Properties.Target.Recovery.Exclude_static_libs)
-		deps.HeaderLibs = removeListFromList(deps.HeaderLibs, linker.Properties.Target.Recovery.Exclude_header_libs)
-		deps.ReexportHeaderLibHeaders = removeListFromList(deps.ReexportHeaderLibHeaders, linker.Properties.Target.Recovery.Exclude_header_libs)
-		deps.ReexportStaticLibHeaders = removeListFromList(deps.ReexportStaticLibHeaders, linker.Properties.Target.Recovery.Exclude_static_libs)
-		deps.WholeStaticLibs = removeListFromList(deps.WholeStaticLibs, linker.Properties.Target.Recovery.Exclude_static_libs)
-		deps.RuntimeLibs = removeListFromList(deps.RuntimeLibs, linker.Properties.Target.Recovery.Exclude_runtime_libs)
+	if mod.InRecovery() {
+		deps.SharedLibs = append(deps.SharedLibs, props.Target.Recovery.Shared_libs...)
+		deps.SharedLibs = removeListFromList(deps.SharedLibs, props.Target.Recovery.Exclude_shared_libs)
+		deps.ReexportSharedLibHeaders = removeListFromList(deps.ReexportSharedLibHeaders, props.Target.Recovery.Exclude_shared_libs)
+		deps.StaticLibs = append(deps.StaticLibs, props.Target.Recovery.Static_libs...)
+		deps.StaticLibs = removeListFromList(deps.StaticLibs, props.Target.Recovery.Exclude_static_libs)
+		deps.HeaderLibs = removeListFromList(deps.HeaderLibs, props.Target.Recovery.Exclude_header_libs)
+		deps.ReexportHeaderLibHeaders = removeListFromList(deps.ReexportHeaderLibHeaders, props.Target.Recovery.Exclude_header_libs)
+		deps.ReexportStaticLibHeaders = removeListFromList(deps.ReexportStaticLibHeaders, props.Target.Recovery.Exclude_static_libs)
+		deps.WholeStaticLibs = removeListFromList(deps.WholeStaticLibs, props.Target.Recovery.Exclude_static_libs)
+		deps.RuntimeLibs = removeListFromList(deps.RuntimeLibs, props.Target.Recovery.Exclude_runtime_libs)
 	}
 
-	if ctx.inRamdisk() {
-		deps.SharedLibs = removeListFromList(deps.SharedLibs, linker.Properties.Target.Ramdisk.Exclude_shared_libs)
-		deps.ReexportSharedLibHeaders = removeListFromList(deps.ReexportSharedLibHeaders, linker.Properties.Target.Ramdisk.Exclude_shared_libs)
-		deps.StaticLibs = append(deps.StaticLibs, linker.Properties.Target.Ramdisk.Static_libs...)
-		deps.StaticLibs = removeListFromList(deps.StaticLibs, linker.Properties.Target.Ramdisk.Exclude_static_libs)
-		deps.ReexportStaticLibHeaders = removeListFromList(deps.ReexportStaticLibHeaders, linker.Properties.Target.Ramdisk.Exclude_static_libs)
-		deps.WholeStaticLibs = removeListFromList(deps.WholeStaticLibs, linker.Properties.Target.Ramdisk.Exclude_static_libs)
-		deps.RuntimeLibs = removeListFromList(deps.RuntimeLibs, linker.Properties.Target.Ramdisk.Exclude_runtime_libs)
+	if mod.InRamdisk() {
+		deps.SharedLibs = removeListFromList(deps.SharedLibs, props.Target.Ramdisk.Exclude_shared_libs)
+		deps.ReexportSharedLibHeaders = removeListFromList(deps.ReexportSharedLibHeaders, props.Target.Ramdisk.Exclude_shared_libs)
+		deps.StaticLibs = append(deps.StaticLibs, props.Target.Ramdisk.Static_libs...)
+		deps.StaticLibs = removeListFromList(deps.StaticLibs, props.Target.Ramdisk.Exclude_static_libs)
+		deps.ReexportStaticLibHeaders = removeListFromList(deps.ReexportStaticLibHeaders, props.Target.Ramdisk.Exclude_static_libs)
+		deps.WholeStaticLibs = removeListFromList(deps.WholeStaticLibs, props.Target.Ramdisk.Exclude_static_libs)
+		deps.RuntimeLibs = removeListFromList(deps.RuntimeLibs, props.Target.Ramdisk.Exclude_runtime_libs)
 	}
 
-	if ctx.inVendorRamdisk() {
-		deps.SharedLibs = removeListFromList(deps.SharedLibs, linker.Properties.Target.Vendor_ramdisk.Exclude_shared_libs)
-		deps.ReexportSharedLibHeaders = removeListFromList(deps.ReexportSharedLibHeaders, linker.Properties.Target.Vendor_ramdisk.Exclude_shared_libs)
-		deps.StaticLibs = removeListFromList(deps.StaticLibs, linker.Properties.Target.Vendor_ramdisk.Exclude_static_libs)
-		deps.ReexportStaticLibHeaders = removeListFromList(deps.ReexportStaticLibHeaders, linker.Properties.Target.Vendor_ramdisk.Exclude_static_libs)
-		deps.WholeStaticLibs = removeListFromList(deps.WholeStaticLibs, linker.Properties.Target.Vendor_ramdisk.Exclude_static_libs)
-		deps.RuntimeLibs = removeListFromList(deps.RuntimeLibs, linker.Properties.Target.Vendor_ramdisk.Exclude_runtime_libs)
+	if mod.InVendorRamdisk() {
+		deps.SharedLibs = removeListFromList(deps.SharedLibs, props.Target.Vendor_ramdisk.Exclude_shared_libs)
+		deps.ReexportSharedLibHeaders = removeListFromList(deps.ReexportSharedLibHeaders, props.Target.Vendor_ramdisk.Exclude_shared_libs)
+		deps.StaticLibs = removeListFromList(deps.StaticLibs, props.Target.Vendor_ramdisk.Exclude_static_libs)
+		deps.ReexportStaticLibHeaders = removeListFromList(deps.ReexportStaticLibHeaders, props.Target.Vendor_ramdisk.Exclude_static_libs)
+		deps.WholeStaticLibs = removeListFromList(deps.WholeStaticLibs, props.Target.Vendor_ramdisk.Exclude_static_libs)
+		deps.RuntimeLibs = removeListFromList(deps.RuntimeLibs, props.Target.Vendor_ramdisk.Exclude_runtime_libs)
 	}
 
-	if !ctx.useSdk() {
-		deps.SharedLibs = append(deps.SharedLibs, linker.Properties.Target.Platform.Shared_libs...)
-		deps.SharedLibs = removeListFromList(deps.SharedLibs, linker.Properties.Target.Platform.Exclude_shared_libs)
-		deps.HeaderLibs = append(deps.HeaderLibs, linker.Properties.Target.Platform.Header_libs...)
+	if !mod.UseSdk() {
+		deps.SharedLibs = append(deps.SharedLibs, props.Target.Platform.Shared_libs...)
+		deps.SharedLibs = removeListFromList(deps.SharedLibs, props.Target.Platform.Exclude_shared_libs)
+		deps.HeaderLibs = append(deps.HeaderLibs, props.Target.Platform.Header_libs...)
 	}
 
-	deps.SystemSharedLibs = linker.Properties.System_shared_libs
+	deps.SystemSharedLibs = props.System_shared_libs
+
+	return deps
+}
+
+func (linker *baseLinker) linkerDeps(ctx DepsContext, deps Deps) Deps {
+	deps = CoalesceLibs(ctx, &linker.Properties, deps)
+
 	if deps.SystemSharedLibs == nil {
 		// Provide a default system_shared_libs if it is unspecified. Note: If an
 		// empty list [] is specified, it implies that the module declines the
@@ -434,6 +444,9 @@ func (linker *baseLinker) linkerDeps(ctx DepsContext, deps Deps) Deps {
 		if linker.Properties.libCrt() && !ctx.header() {
 			deps.UnexportedStaticLibs = append(deps.UnexportedStaticLibs, config.BuiltinsRuntimeLibrary())
 		}
+	} else if ctx.Os() == android.Linux && !ctx.header() && !ctx.static() {
+		// TODO(b/440132952): This should be handled by the clang driver once we use --rtlib=compiler-rt
+		deps.UnexportedStaticLibs = append(deps.UnexportedStaticLibs, config.BuiltinsRuntimeLibrary())
 	}
 
 	deps.LateSharedLibs = append(deps.LateSharedLibs, deps.SystemSharedLibs...)
@@ -443,13 +456,6 @@ func (linker *baseLinker) linkerDeps(ctx DepsContext, deps Deps) Deps {
 	}
 
 	return deps
-}
-
-func (linker *baseLinker) useClangLld(ctx ModuleContext) bool {
-	if linker.Properties.Use_clang_lld != nil {
-		return Bool(linker.Properties.Use_clang_lld)
-	}
-	return true
 }
 
 // Check whether the SDK version is not older than the specific one
@@ -471,8 +477,7 @@ func CheckSdkVersionAtLeast(ctx ModuleContext, SdkVersion android.ApiLevel) bool
 
 // ModuleContext extends BaseModuleContext
 // BaseModuleContext should know if LLD is used?
-func CommonLinkerFlags(ctx android.ModuleContext, flags Flags, useClangLld bool,
-	toolchain config.Toolchain, allow_undefined_symbols bool) Flags {
+func CommonLinkerFlags(ctx android.ModuleContext, flags Flags, toolchain config.Toolchain, allow_undefined_symbols bool) Flags {
 	hod := "Host"
 	if ctx.Os().Class == android.Device {
 		hod = "Device"
@@ -483,11 +488,7 @@ func CommonLinkerFlags(ctx android.ModuleContext, flags Flags, useClangLld bool,
 		ctx.ModuleErrorf("trying to add CommonLinkerFlags to non-LinkableInterface module.")
 		return flags
 	}
-	if useClangLld {
-		flags.Global.LdFlags = append(flags.Global.LdFlags, fmt.Sprintf("${config.%sGlobalLldflags}", hod))
-	} else {
-		flags.Global.LdFlags = append(flags.Global.LdFlags, fmt.Sprintf("${config.%sGlobalLdflags}", hod))
-	}
+	flags.Global.LdFlags = append(flags.Global.LdFlags, fmt.Sprintf("${config.%sGlobalLdflags}", hod))
 
 	if allow_undefined_symbols {
 		if ctx.Darwin() {
@@ -498,11 +499,7 @@ func CommonLinkerFlags(ctx android.ModuleContext, flags Flags, useClangLld bool,
 		flags.Global.LdFlags = append(flags.Global.LdFlags, "-Wl,--no-undefined")
 	}
 
-	if useClangLld {
-		flags.Global.LdFlags = append(flags.Global.LdFlags, toolchain.Lldflags())
-	} else {
-		flags.Global.LdFlags = append(flags.Global.LdFlags, toolchain.Ldflags())
-	}
+	flags.Global.LdFlags = append(flags.Global.LdFlags, toolchain.Ldflags())
 
 	if !toolchain.Bionic() && ctx.Os() != android.LinuxMusl {
 		if !ctx.Windows() {
@@ -531,8 +528,7 @@ func (linker *baseLinker) linkerFlags(ctx ModuleContext, flags Flags) Flags {
 	toolchain := ctx.toolchain()
 	allow_undefined_symbols := Bool(linker.Properties.Allow_undefined_symbols)
 
-	flags = CommonLinkerFlags(ctx, flags, linker.useClangLld(ctx), toolchain,
-		allow_undefined_symbols)
+	flags = CommonLinkerFlags(ctx, flags, toolchain, allow_undefined_symbols)
 
 	if !toolchain.Bionic() && ctx.Os() != android.LinuxMusl {
 		CheckBadHostLdlibs(ctx, "host_ldlibs", linker.Properties.Host_ldlibs)
@@ -541,23 +537,21 @@ func (linker *baseLinker) linkerFlags(ctx ModuleContext, flags Flags) Flags {
 
 	CheckBadLinkerFlags(ctx, "ldflags", linker.Properties.Ldflags)
 
-	if linker.useClangLld(ctx) {
-		if !BoolDefault(linker.Properties.Pack_relocations, packRelocationsDefault) {
-			flags.Global.LdFlags = append(flags.Global.LdFlags, "-Wl,--pack-dyn-relocs=none")
-		} else if ctx.Device() {
-			// SHT_RELR relocations are only supported at API level >= 30.
-			// ANDROID_RELR relocations were supported at API level >= 28.
-			// Relocation packer was supported at API level >= 23.
-			// Do the best we can...
-			if (!ctx.useSdk() && ctx.minSdkVersion() == "") || CheckSdkVersionAtLeast(ctx, android.FirstShtRelrVersion) {
-				flags.Global.LdFlags = append(flags.Global.LdFlags, "-Wl,--pack-dyn-relocs=android+relr")
-			} else if CheckSdkVersionAtLeast(ctx, android.FirstAndroidRelrVersion) {
-				flags.Global.LdFlags = append(flags.Global.LdFlags,
-					"-Wl,--pack-dyn-relocs=android+relr",
-					"-Wl,--use-android-relr-tags")
-			} else if CheckSdkVersionAtLeast(ctx, android.FirstPackedRelocationsVersion) {
-				flags.Global.LdFlags = append(flags.Global.LdFlags, "-Wl,--pack-dyn-relocs=android")
-			}
+	if !BoolDefault(linker.Properties.Pack_relocations, packRelocationsDefault) {
+		flags.Global.LdFlags = append(flags.Global.LdFlags, "-Wl,--pack-dyn-relocs=none")
+	} else if ctx.Device() {
+		// SHT_RELR relocations are only supported at API level >= 30.
+		// ANDROID_RELR relocations were supported at API level >= 28.
+		// Relocation packer was supported at API level >= 23.
+		// Do the best we can...
+		if (!ctx.useSdk() && ctx.minSdkVersion() == "") || CheckSdkVersionAtLeast(ctx, android.FirstShtRelrVersion) {
+			flags.Global.LdFlags = append(flags.Global.LdFlags, "-Wl,--pack-dyn-relocs=android+relr")
+		} else if CheckSdkVersionAtLeast(ctx, android.FirstAndroidRelrVersion) {
+			flags.Global.LdFlags = append(flags.Global.LdFlags,
+				"-Wl,--pack-dyn-relocs=android+relr",
+				"-Wl,--use-android-relr-tags")
+		} else if CheckSdkVersionAtLeast(ctx, android.FirstPackedRelocationsVersion) {
+			flags.Global.LdFlags = append(flags.Global.LdFlags, "-Wl,--pack-dyn-relocs=android")
 		}
 	}
 
@@ -716,4 +710,58 @@ func (linker *baseLinker) injectVersionSymbol(ctx ModuleContext, in android.Path
 			"buildNumberFile": buildNumberFile.String(),
 		},
 	})
+}
+
+var checkElfFileRule = pctx.AndroidStaticRule("checkElfFile",
+	blueprint.RuleParams{
+		Command: "${checkElfFileCmd} --skip-unknown-elf-machine $args" +
+			" --llvm-readobj=${config.ClangBin}/llvm-readobj $in" +
+			" && touch $out",
+		CommandDeps: []string{"$checkElfFileCmd", "${config.ClangBin}/llvm-readobj"},
+	}, "args")
+
+// checkElfFile creates a rule that runs a prebuilt ELF file (shared library or binary) through the check_elf_file
+// command to verify that the DT_NEEDED entries in the prebuilt match the shared_libs listed in the Android.bp file,
+// the DT_SONAME matches the module name, that symbols can be resolved and that the alignment matches the page size.
+// The output file should be used as a validation dependency of the rule that copies the prebuilt.
+func (linker *baseLinker) checkElfFile(ctx ModuleContext, sharedLibStem string, deps PathDeps, elfFile android.Path) android.Path {
+	var args []string
+	var implicits android.Paths
+	if !Bool(linker.Properties.Ignore_max_page_size) && ctx.Config().DeviceCheckPrebuiltMaxPageSize() {
+		args = append(args, "--max-page-size "+ctx.Config().MaxPageSizeSupported())
+	}
+	if Bool(linker.Properties.Allow_undefined_symbols) {
+		args = append(args, "--allow-undefined-symbols")
+	}
+	if sharedLibStem != "" {
+		args = append(args, "--soname "+sharedLibStem)
+	}
+	for _, sharedLib := range deps.EarlySharedLibs {
+		args = append(args, "--shared-lib "+sharedLib.String())
+		implicits = append(implicits, sharedLib)
+	}
+	for _, sharedLib := range deps.SharedLibs {
+		args = append(args, "--shared-lib "+sharedLib.String())
+		implicits = append(implicits, sharedLib)
+	}
+	for _, sharedLib := range deps.LateSharedLibs {
+		args = append(args, "--shared-lib "+sharedLib.String())
+		args = append(args, "--system-shared-lib "+sharedLib.Base())
+		implicits = append(implicits, sharedLib)
+	}
+
+	outputFile := android.PathForModuleOut(ctx, elfFile.Base()+".check_elf_file")
+
+	ctx.Build(pctx, android.BuildParams{
+		Rule:        checkElfFileRule,
+		Description: "check elf file",
+		Output:      outputFile,
+		Input:       elfFile,
+		Implicits:   implicits,
+		Args: map[string]string{
+			"args": strings.Join(args, " "),
+		},
+	})
+
+	return outputFile
 }

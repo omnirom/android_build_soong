@@ -29,6 +29,9 @@ type FlagArtifact struct {
 	// The flag_declaration message.
 	FlagDeclaration *rc_proto.FlagDeclaration
 
+	// The path to the flag declaration.
+	DeclarationPath *string
+
 	// The index of the config directory where this flag was declared.
 	// Flag values cannot be set in a location with a lower index.
 	DeclarationIndex int
@@ -47,19 +50,23 @@ type FlagArtifact struct {
 // Key is flag name.
 type FlagArtifacts map[string]*FlagArtifact
 
-func FlagArtifactFactory(declPath string) *FlagArtifact {
-	fd := &rc_proto.FlagDeclaration{}
-	fa := &FlagArtifact{
+func FlagArtifactFactory(declPath string, dirIndex int) (fa *FlagArtifact, err error) {
+	fd, err := FlagDeclarationFactory(declPath)
+	if err != nil {
+		return nil, err
+	}
+	source := proto.String(declPath)
+	fa = &FlagArtifact{
 		FlagDeclaration:  fd,
-		DeclarationIndex: -1,
+		DeclarationPath:  source,
+		DeclarationIndex: dirIndex,
 		Traces:           []*rc_proto.Tracepoint{},
 	}
 	if declPath != "" {
-		LoadMessage(declPath, fd)
 		fa.Value = fd.GetValue()
-		fa.Traces = append(fa.Traces, &rc_proto.Tracepoint{Source: proto.String(declPath), Value: fa.Value})
+		fa.Traces = append(fa.Traces, &rc_proto.Tracepoint{Source: source, Value: fa.Value})
 	}
-	return fa
+	return fa, nil
 }
 
 func FlagArtifactsFactory(artifactsPath string) *FlagArtifacts {
@@ -150,7 +157,7 @@ func (src *FlagArtifact) Clone() *FlagArtifact {
 	proto.Merge(value, src.Value)
 	return &FlagArtifact{
 		FlagDeclaration:  src.FlagDeclaration,
-		Traces:           src.Traces,
+		Traces:           slices.Clone(src.Traces),
 		Value:            value,
 		DeclarationIndex: src.DeclarationIndex,
 		Redacted:         src.Redacted,

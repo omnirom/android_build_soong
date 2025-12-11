@@ -26,8 +26,8 @@ import (
 	"testing"
 
 	"android/soong/aconfig/codegen"
+	"android/soong/provenance"
 
-	"github.com/google/blueprint"
 	"github.com/google/blueprint/proptools"
 
 	"android/soong/android"
@@ -5197,8 +5197,9 @@ func TestPrebuilt(t *testing.T) {
 	if prebuilt.inputApex.String() != expectedInput {
 		t.Errorf("inputApex invalid. expected: %q, actual: %q", expectedInput, prebuilt.inputApex.String())
 	}
+	provenanceInfo, _ := android.OtherModuleProvider(ctx, prebuilt, provenance.ProvenanceMetadataInfoProvider)
 	android.AssertStringDoesContain(t, "Invalid provenance metadata file",
-		prebuilt.ProvenanceMetaDataFile().String(), "soong/.intermediates/provenance_metadata/myapex/provenance_metadata.textproto")
+		provenanceInfo.ProvenanceMetaDataFile.String(), "soong/.intermediates/provenance_metadata/myapex/provenance_metadata.textproto")
 	rule := testingModule.Rule("genProvenanceMetaData")
 	android.AssertStringEquals(t, "Invalid input", "myapex-arm64.apex", rule.Inputs[0].String())
 	android.AssertStringEquals(t, "Invalid output", "out/soong/.intermediates/provenance_metadata/myapex/provenance_metadata.textproto", rule.Output.String())
@@ -7195,14 +7196,14 @@ func TestApexAvailable_CheckForPlatform(t *testing.T) {
 	// libfoo shouldn't be available to platform even though it has "//apex_available:platform",
 	// because it depends on libbar which isn't available to platform
 	libfoo := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_shared").Module().(*cc.Module)
-	if libfoo.NotAvailableForPlatform() != true {
+	if android.OtherModuleProviderOrDefault(ctx, libfoo, android.PlatformAvailabilityInfoProvider).NotAvailableToPlatform != true {
 		t.Errorf("%q shouldn't be available to platform", libfoo.String())
 	}
 
 	// libfoo2 however can be available to platform because it depends on libbaz which provides
 	// stubs
 	libfoo2 := ctx.ModuleForTests(t, "libfoo2", "android_arm64_armv8-a_shared").Module().(*cc.Module)
-	if libfoo2.NotAvailableForPlatform() == true {
+	if android.OtherModuleProviderOrDefault(ctx, libfoo2, android.PlatformAvailabilityInfoProvider).NotAvailableToPlatform == true {
 		t.Errorf("%q should be available to platform", libfoo2.String())
 	}
 }
@@ -7234,11 +7235,11 @@ func TestApexAvailable_CreatedForApex(t *testing.T) {
 	}`)
 
 	libfooShared := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_shared").Module().(*cc.Module)
-	if libfooShared.NotAvailableForPlatform() != true {
+	if android.OtherModuleProviderOrDefault(ctx, libfooShared, android.PlatformAvailabilityInfoProvider).NotAvailableToPlatform != true {
 		t.Errorf("%q shouldn't be available to platform", libfooShared.String())
 	}
 	libfooStatic := ctx.ModuleForTests(t, "libfoo", "android_arm64_armv8-a_static").Module().(*cc.Module)
-	if libfooStatic.NotAvailableForPlatform() != false {
+	if android.OtherModuleProviderOrDefault(ctx, libfooStatic, android.PlatformAvailabilityInfoProvider).NotAvailableToPlatform != false {
 		t.Errorf("%q should be available to platform", libfooStatic.String())
 	}
 }
@@ -7737,6 +7738,8 @@ var filesForSdkLibrary = android.MockFS{
 	"100/public/api/foo-removed.txt": nil,
 	"100/system/api/foo.txt":         nil,
 	"100/system/api/foo-removed.txt": nil,
+	"100/test/api/foo.txt":           nil,
+	"100/test/api/foo-removed.txt":   nil,
 
 	// For java_sdk_library_import
 	"a.jar": nil,
@@ -9260,7 +9263,8 @@ func TestCompressedApex(t *testing.T) {
 			name: "myapex",
 			key: "myapex.key",
 			compressible: true,
-			updatable: false,
+			updatable: true,
+			min_sdk_version: "29",
 		}
 		apex_key {
 			name: "myapex.key",
@@ -9291,31 +9295,38 @@ func TestCompressedApex(t *testing.T) {
 	ensureContains(t, androidMk, "LOCAL_MODULE_STEM := myapex.capex\n")
 }
 
-func TestCompressedApexIsDisabledWhenUsingErofs(t *testing.T) {
+func TestCompressedApex_NonUpdatable(t *testing.T) {
 	t.Parallel()
-	ctx := testApex(t, `
+
+	testApexError(t, `do not compress non-updatable`, `
 		apex {
 			name: "myapex",
 			key: "myapex.key",
 			compressible: true,
 			updatable: false,
-			payload_fs_type: "erofs",
 		}
 		apex_key {
 			name: "myapex.key",
 			public_key: "testkey.avbpubkey",
 			private_key: "testkey.pem",
 		}
-	`,
-		android.FixtureModifyProductVariables(func(variables android.FixtureProductVariables) {
-			variables.CompressedApex = proptools.BoolPtr(true)
-		}),
-	)
+	`)
 
-	compressRule := ctx.ModuleForTests(t, "myapex", "android_common_myapex").MaybeRule("compressRule")
-	if compressRule.Rule != nil {
-		t.Error("erofs apex should not be compressed")
-	}
+	testApexError(t, `do not compress non-system`, `
+		apex {
+			name: "myapex",
+			key: "myapex.key",
+			compressible: true,
+			updatable: true,
+			min_sdk_version: "29",
+			vendor: true,
+		}
+		apex_key {
+			name: "myapex.key",
+			public_key: "testkey.avbpubkey",
+			private_key: "testkey.pem",
+		}
+	`)
 }
 
 func TestApexSet_ShouldRespectCompressedApexFlag(t *testing.T) {
@@ -9546,7 +9557,8 @@ func TestPrebuiltStubLibDep(t *testing.T) {
 			for _, otherApexEnabled := range test.otherApexEnabled {
 				t.Run("otherapex_enabled_"+otherApexEnabled, func(t *testing.T) {
 					t.Parallel()
-					ctx := testApex(t, fmt.Sprintf(bpBase, otherApexEnabled)+test.stublibBp)
+					ctx := testApex(t, fmt.Sprintf(bpBase, otherApexEnabled)+test.stublibBp,
+						android.PrepareForTestWithAndroidMk)
 
 					type modAndMkEntries struct {
 						mod       *cc.Module
@@ -9568,9 +9580,6 @@ func TestPrebuiltStubLibDep(t *testing.T) {
 							ents := []android.AndroidMkInfo{info.PrimaryInfo}
 							ents = append(ents, info.ExtraInfo...)
 							for _, ent := range ents {
-								if ent.Disabled {
-									continue
-								}
 								entries = append(entries, &modAndMkEntries{
 									mod:       mod,
 									mkEntries: ent,
@@ -9879,7 +9888,8 @@ func TestApexOutputFileProducer(t *testing.T) {
 						name: "myapex",
 						key: "myapex.key",
 						compressible: true,
-						updatable: false,
+						updatable: true,
+						min_sdk_version: "29",
 					}
 
 					apex_key {
@@ -9896,9 +9906,10 @@ func TestApexOutputFileProducer(t *testing.T) {
 				`,
 				android.FixtureModifyProductVariables(func(variables android.FixtureProductVariables) {
 					variables.CompressedApex = proptools.BoolPtr(true)
-				}))
+				}),
+				android.PrepareForTestWithAndroidMk)
 			javaTest := ctx.ModuleForTests(t, tc.name, "android_common").Module().(*java.Test)
-			data := android.AndroidMkEntriesForTest(t, ctx, javaTest)[0].EntryMap["LOCAL_COMPATIBILITY_SUPPORT_FILES"]
+			data := android.AndroidMkInfoForTest(t, ctx, javaTest).PrimaryInfo.EntryMap["LOCAL_COMPATIBILITY_SUPPORT_FILES"]
 			android.AssertStringPathsRelativeToTopEquals(t, "data", ctx.Config(), tc.expected_data, data)
 		})
 	}
@@ -10635,8 +10646,8 @@ func TestAconfigFilesJavaDeps(t *testing.T) {
 	ensureListContainsMatch(t, copyCmds, "^cp -f .*/flag.info.*/image.apex/etc/flag.info")
 
 	inputs := []string{
-		"my_aconfig_declarations_foo/intermediate.pb",
-		"my_aconfig_declarations_bar/intermediate.pb",
+		"my_aconfig_declarations_foo/aconfig-cache.pb",
+		"my_aconfig_declarations_bar/aconfig-cache.pb",
 	}
 	VerifyAconfigRule(t, &mod, "combine_aconfig_declarations", inputs, "android_common_myapex/aconfig_flags.pb", "", "")
 	VerifyAconfigRule(t, &mod, "create_aconfig_package_map_file", inputs, "android_common_myapex/package.map", "myapex", "package_map")
@@ -10774,9 +10785,9 @@ func TestAconfigFilesJavaAndCcDeps(t *testing.T) {
 	ensureListContainsMatch(t, copyCmds, "^cp -f .*/flag.info .*/image.apex/etc/flag.info")
 
 	inputs := []string{
-		"my_aconfig_declarations_foo/intermediate.pb",
-		"my_cc_library_bar/android_arm64_armv8-a_shared_apex10000/myapex/aconfig_merged.pb",
-		"my_aconfig_declarations_baz/intermediate.pb",
+		"my_aconfig_declarations_foo/aconfig-cache.pb",
+		"my_cc_library_bar/android_arm64_armv8-a_shared_apex10000/merged_aconfig_files/myapex/aconfig_merged.pb",
+		"my_aconfig_declarations_baz/aconfig-cache.pb",
 	}
 	VerifyAconfigRule(t, &mod, "combine_aconfig_declarations", inputs, "android_common_myapex/aconfig_flags.pb", "", "")
 	VerifyAconfigRule(t, &mod, "create_aconfig_package_map_file", inputs, "android_common_myapex/package.map", "myapex", "package_map")
@@ -10936,10 +10947,10 @@ func TestAconfigFilesRustDeps(t *testing.T) {
 	ensureListContainsMatch(t, copyCmds, "^cp -f .*/flag.info .*/image.apex/etc/flag.info")
 
 	inputs := []string{
-		"my_aconfig_declarations_foo/intermediate.pb",
-		"my_aconfig_declarations_bar/intermediate.pb",
-		"my_aconfig_declarations_baz/intermediate.pb",
-		"my_rust_binary/android_arm64_armv8-a_apex10000/myapex/aconfig_merged.pb",
+		"my_aconfig_declarations_foo/aconfig-cache.pb",
+		"my_aconfig_declarations_bar/aconfig-cache.pb",
+		"my_aconfig_declarations_baz/aconfig-cache.pb",
+		"my_rust_binary/android_arm64_armv8-a_apex10000/merged_aconfig_files/myapex/aconfig_merged.pb",
 	}
 	VerifyAconfigRule(t, &mod, "combine_aconfig_declarations", inputs, "android_common_myapex/aconfig_flags.pb", "", "")
 	VerifyAconfigRule(t, &mod, "create_aconfig_package_map_file", inputs, "android_common_myapex/package.map", "myapex", "package_map")
@@ -11045,13 +11056,13 @@ func TestAconfigFilesOnlyMatchCurrentApex(t *testing.T) {
 	if len(aconfigArgs) != 1 {
 		t.Fatalf("Expected 1 commands, got %d in:\n%s", len(aconfigArgs), s)
 	}
-	android.EnsureListContainsSuffix(t, aconfigArgs, "my_aconfig_declarations_foo/intermediate.pb")
+	android.EnsureListContainsSuffix(t, aconfigArgs, "my_aconfig_declarations_foo/aconfig-cache.pb")
 
 	buildParams := combineAconfigRule.BuildParams
 	if len(buildParams.Inputs) != 1 {
 		t.Fatalf("Expected 1 input, got %d", len(buildParams.Inputs))
 	}
-	android.EnsureListContainsSuffix(t, buildParams.Inputs.Strings(), "my_aconfig_declarations_foo/intermediate.pb")
+	android.EnsureListContainsSuffix(t, buildParams.Inputs.Strings(), "my_aconfig_declarations_foo/aconfig-cache.pb")
 	ensureContains(t, buildParams.Output.String(), "android_common_myapex/aconfig_flags.pb")
 }
 
@@ -11125,13 +11136,13 @@ func TestAconfigFilesRemoveDuplicates(t *testing.T) {
 	if len(aconfigArgs) != 1 {
 		t.Fatalf("Expected 1 commands, got %d in:\n%s", len(aconfigArgs), s)
 	}
-	android.EnsureListContainsSuffix(t, aconfigArgs, "my_aconfig_declarations_foo/intermediate.pb")
+	android.EnsureListContainsSuffix(t, aconfigArgs, "my_aconfig_declarations_foo/aconfig-cache.pb")
 
 	buildParams := combineAconfigRule.BuildParams
 	if len(buildParams.Inputs) != 1 {
 		t.Fatalf("Expected 1 input, got %d", len(buildParams.Inputs))
 	}
-	android.EnsureListContainsSuffix(t, buildParams.Inputs.Strings(), "my_aconfig_declarations_foo/intermediate.pb")
+	android.EnsureListContainsSuffix(t, buildParams.Inputs.Strings(), "my_aconfig_declarations_foo/aconfig-cache.pb")
 	ensureContains(t, buildParams.Output.String(), "android_common_myapex/aconfig_flags.pb")
 }
 
@@ -11684,27 +11695,27 @@ func TestAconfifDeclarationsValidation(t *testing.T) {
 	// to aconfig.
 	android.AssertStringDoesContain(t, "cache file of a java_aconfig_library static_lib "+
 		"passed as an input",
-		aconfigFlagArgs, fmt.Sprintf("%s/%s/intermediate.pb", outDir, "bar"))
+		aconfigFlagArgs, fmt.Sprintf("%s/%s/aconfig-cache.pb", outDir, "bar"))
 
 	// "baz-java-lib", which statically depends on "baz-lib", is a lib of "foo" and is passed
 	// to metalava as classpath. Thus the cache file provided by the associated
 	// aconfig_declarations module "baz" should be passed to aconfig.
 	android.AssertStringDoesContain(t, "cache file of a lib that statically depends on "+
 		"java_aconfig_library passed as an input",
-		aconfigFlagArgs, fmt.Sprintf("%s/%s/intermediate.pb", outDir, "baz"))
+		aconfigFlagArgs, fmt.Sprintf("%s/%s/aconfig-cache.pb", outDir, "baz"))
 
 	// "qux-lib" is passed to metalava as src via the filegroup, thus the cache file provided by
 	// the associated aconfig_declarations module "qux" should be passed to aconfig.
 	android.AssertStringDoesContain(t, "cache file of srcs java_aconfig_library passed as an "+
 		"input",
-		aconfigFlagArgs, fmt.Sprintf("%s/%s/intermediate.pb", outDir, "qux"))
+		aconfigFlagArgs, fmt.Sprintf("%s/%s/aconfig-cache.pb", outDir, "qux"))
 
 	// "quux-java-lib" is a lib of "foo" and is passed to metalava as classpath, but does not
 	// statically depend on "quux-lib". Therefore, the cache file provided by the associated
 	// aconfig_declarations module "quux" should not be passed to aconfig.
 	android.AssertStringDoesNotContain(t, "cache file of a lib that does not statically "+
 		"depend on java_aconfig_library not passed as an input",
-		aconfigFlagArgs, fmt.Sprintf("%s/%s/intermediate.pb", outDir, "quux"))
+		aconfigFlagArgs, fmt.Sprintf("%s/%s/aconfig-cache.pb", outDir, "quux"))
 }
 
 func TestMultiplePrebuiltsWithSameBase(t *testing.T) {
@@ -11757,19 +11768,6 @@ func TestApexMinSdkVersionOverride(t *testing.T) {
 		}
 	}
 
-	checkHasDep := func(t *testing.T, ctx *android.TestContext, m android.Module, wantDep android.Module) {
-		t.Helper()
-		found := false
-		ctx.VisitDirectDeps(m, func(dep blueprint.Module) {
-			if dep == wantDep {
-				found = true
-			}
-		})
-		if !found {
-			t.Errorf("Could not find a dependency from %v to %v\n", m, wantDep)
-		}
-	}
-
 	ctx := testApex(t, `
 		apex {
 			name: "com.android.apex30",
@@ -11816,13 +11814,13 @@ func TestApexMinSdkVersionOverride(t *testing.T) {
 	overridingModuleSameMinSdkVersion := ctx.ModuleForTests(t, "com.android.apex30", "android_common_com.mycompany.android.apex30_com.mycompany.android.apex30")
 	javalibApex30Variant := ctx.ModuleForTests(t, "javalib", "android_common_apex30")
 	checkMinSdkVersion(t, overridingModuleSameMinSdkVersion, "30")
-	checkHasDep(t, ctx, overridingModuleSameMinSdkVersion.Module(), javalibApex30Variant.Module())
+	android.AssertHasDirectDep(t, ctx, overridingModuleSameMinSdkVersion.Module(), javalibApex30Variant.Module())
 
 	// Override module, uses different min_sdk_version
 	overridingModuleDifferentMinSdkVersion := ctx.ModuleForTests(t, "com.android.apex30", "android_common_com.mycompany.android.apex31_com.mycompany.android.apex31")
 	javalibApex31Variant := ctx.ModuleForTests(t, "javalib", "android_common_apex31")
 	checkMinSdkVersion(t, overridingModuleDifferentMinSdkVersion, "31")
-	checkHasDep(t, ctx, overridingModuleDifferentMinSdkVersion.Module(), javalibApex31Variant.Module())
+	android.AssertHasDirectDep(t, ctx, overridingModuleDifferentMinSdkVersion.Module(), javalibApex31Variant.Module())
 }
 
 func TestOverrideApexWithPrebuiltApexPreferred(t *testing.T) {
@@ -12250,6 +12248,37 @@ func TestNoVintfFragmentInUpdatableApex(t *testing.T) {
 		vintf_fragment {
 			name: "my_vintf_fragment.xml",
 			src: "my_vintf_fragment.xml",
+		}
+	`)
+}
+
+// Repro of b/407641069, just test that it reports an error instead of crashing soong
+func TestNoPanicWithNilApexfile(t *testing.T) {
+	t.Parallel()
+	testApexError(t, "Dependency .* had nil builtFile. Make sure the module has an output file. \\(the installable and compile_dex properties can affect this\\)", apex_default_bp+`
+		apex {
+			name: "myapex",
+			manifest: ":myapex.manifest",
+			androidManifest: ":myapex.androidmanifest",
+			key: "myapex.key",
+			updatable: false,
+			systemserverclasspath_fragments: ["my-systemserverclasspath-fragment"],
+		}
+
+		systemserverclasspath_fragment {
+			name: "my-systemserverclasspath-fragment",
+			standalone_contents: ["my_java_library_foo"],
+			apex_available: ["myapex"],
+		}
+
+		java_library {
+			name: "my_java_library_foo",
+			srcs: ["foo/bar/MyClass.java"],
+			sdk_version: "system_server_current",
+			apex_available: [
+				"myapex",
+			],
+			installable: false, // Removing this line makes the build successful
 		}
 	`)
 }

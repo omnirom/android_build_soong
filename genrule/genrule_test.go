@@ -19,7 +19,6 @@ import (
 	"os"
 	"regexp"
 	"strconv"
-	"strings"
 	"testing"
 
 	"android/soong/android"
@@ -436,9 +435,6 @@ func TestGenruleCmd(t *testing.T) {
 				android.FixtureModifyProductVariables(func(variables android.FixtureProductVariables) {
 					variables.Allow_missing_dependencies = proptools.BoolPtr(test.allowMissingDependencies)
 				}),
-				android.FixtureModifyProductVariables(func(variables android.FixtureProductVariables) {
-					variables.GenruleSandboxing = proptools.BoolPtr(true)
-				}),
 				android.FixtureModifyContext(func(ctx *android.TestContext) {
 					ctx.SetAllowMissingDependencies(test.allowMissingDependencies)
 				}),
@@ -720,7 +716,7 @@ func TestGenruleAllowMissingDependencies(t *testing.T) {
 			})).RunTestWithBp(t, bp)
 
 	gen := result.ModuleForTests(t, "gen", "").Output("out")
-	if gen.Rule != android.ErrorRule {
+	if !android.IsErrorRule(gen.Rule) {
 		t.Errorf("Expected missing dependency error rule for gen, got %q", gen.Rule.String())
 	}
 }
@@ -1190,7 +1186,7 @@ func TestGenruleWithGlobPaths(t *testing.T) {
 	}
 }
 
-func TestGenruleUsesOrderOnlyBuildNumberFile(t *testing.T) {
+func TestGenruleUsesOrderOnlyBuildNumberOrDateFile(t *testing.T) {
 	testCases := []struct {
 		name            string
 		bp              string
@@ -1199,7 +1195,7 @@ func TestGenruleUsesOrderOnlyBuildNumberFile(t *testing.T) {
 		expectedCommand string
 	}{
 		{
-			name: "not allowed when not in allowlist",
+			name: "buld number not allowed when not in allowlist",
 			fs: android.MockFS{
 				"foo/Android.bp": []byte(`
 genrule {
@@ -1213,7 +1209,7 @@ genrule {
 			expectedError: `Only allowlisted modules may use uses_order_only_build_number_file: true`,
 		},
 		{
-			name: "normal",
+			name: "build number normal",
 			fs: android.MockFS{
 				"build/soong/tests/Android.bp": []byte(`
 genrule {
@@ -1224,7 +1220,35 @@ genrule {
 }
 `),
 			},
-			expectedCommand: `cp BUILD_NUMBER_FILE __SBOX_SANDBOX_DIR__/out/out.txt`,
+			expectedCommand: `cp __SBOX_SANDBOX_DIR__/out/soong/build_number.txt __SBOX_SANDBOX_DIR__/out/out.txt`,
+		},
+		{
+			name: "build date not allowed when not in allowlist",
+			fs: android.MockFS{
+				"foo/Android.bp": []byte(`
+				genrule {
+					name: "gen",
+					uses_order_only_build_date_file: true,
+					cmd: "cp $(build_date_file) $(out)",
+					out: ["out.txt"],
+				}
+				`),
+			},
+			expectedError: `Only allowlisted modules may use uses_order_only_build_date_file: true`,
+		},
+		{
+			name: "build date normal",
+			fs: android.MockFS{
+				"build/soong/tests/Android.bp": []byte(`
+				genrule {
+					name: "gen",
+					uses_order_only_build_date_file: true,
+					cmd: "cp $(build_date_file) $(out)",
+					out: ["out.txt"],
+				}
+				`),
+			},
+			expectedCommand: `cp __SBOX_SANDBOX_DIR__/out/build_date.txt __SBOX_SANDBOX_DIR__/out/out.txt`,
 		},
 	}
 
@@ -1237,6 +1261,7 @@ genrule {
 				android.FixtureModifyConfigAndContext(func(config android.Config, ctx *android.TestContext) {
 					config.TestProductVariables.BuildNumberFile = proptools.StringPtr("build_number.txt")
 				}),
+				android.SetBuildDateFileEnvVarForTests(),
 			)
 			if tc.expectedError != "" {
 				fixtures = fixtures.ExtendWithErrorHandler(android.FixtureExpectsOneErrorPattern(tc.expectedError))
@@ -1244,7 +1269,6 @@ genrule {
 			result := fixtures.RunTest(t)
 
 			if tc.expectedError == "" {
-				tc.expectedCommand = strings.ReplaceAll(tc.expectedCommand, "BUILD_NUMBER_FILE", result.Config.SoongOutDir()+"/build_number.txt")
 				gen := result.Module("gen", "").(*Module)
 				android.AssertStringEquals(t, "raw commands", tc.expectedCommand, gen.rawCommands[0])
 			}

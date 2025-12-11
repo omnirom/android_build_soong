@@ -32,7 +32,7 @@ func (s *productPackagesFileSingleton) GenerateBuildActions(ctx SingletonContext
 	// There's no HasDeviceName() function, but the device name and device product should always
 	// both be present or not.
 	if ctx.Config().HasDeviceProduct() {
-		productPackages := ctx.Config().productVariables.PartitionVarsForSoongMigrationOnlyDoNotUse.ProductPackages
+		productPackages := ctx.Config().productVariables.PartitionVarsForSoongMigrationOnlyDoNotUse.ProductPackagesSet["all"].ProductPackages
 		output := PathForArbitraryOutput(ctx, "target", "product", ctx.Config().DeviceName(), "product_packages.txt")
 		WriteFileRule(ctx, output, strings.Join(productPackages, "\n"))
 	}

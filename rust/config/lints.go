@@ -48,6 +48,8 @@ var (
 		"-D missing-docs",
 		"-D warnings",
 		"-D unsafe_op_in_unsafe_fn",
+		// b/438512272
+		"-A mismatched_lifetime_syntaxes",
 	}
 	// Default Clippy lints. These are applied on top of defaultRustcLints.
 	// It should be assumed that any warning lint will be promoted to a
@@ -61,6 +63,8 @@ var (
 		"-A clippy::unnecessary-wraps",
 		"-A clippy::unusual-byte-groupings",
 		"-A clippy::upper-case-acronyms",
+		// uninlined_format_args was moved from "pedantic" to "style" in 1.88.0, but then back to pedantic.
+		"-A clippy::uninlined_format_args",
 		"-D clippy::undocumented_unsafe_blocks",
 	}
 

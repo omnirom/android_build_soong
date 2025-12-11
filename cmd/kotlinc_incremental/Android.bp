@@ -34,9 +34,13 @@ java_library_host {
         "src/com/**/*.kt",
     ],
     static_libs: [
+        "kotlin-build-tools-api",
+        "kotlin-build-tools-impl",
         "kotlin-compiler-embeddable",
         "kotlin-compiler-runner",
         "kotlin-daemon-client",
+        "kotlinx_coroutines",
+        "kotlinc-trove4j",
     ],
 
     plugins: [],
@@ -44,18 +48,40 @@ java_library_host {
     kotlincflags: [
         "-Werror",
     ],
+    kotlin_incremental: false,
 }
 
 java_binary_host {
     name: "kotlin-incremental-client",
     manifest: "kotlin-incremental-client.mf",
     static_libs: ["kotlin-incremental-client-lib"],
+    libs: ["kotlin-build-tools-impl"],
+    required: [
+        "kotlin-build-tools-impl",
+        "kotlin-compose-compiler-embeddable",
+    ],
+    kotlin_incremental: false,
+}
+
+java_binary_host {
+    name: "kotlin-jar-snapshotter",
+    manifest: "kotlin-jar-snapshotter.mf",
+    static_libs: ["kotlin-incremental-client-lib"],
+    libs: ["kotlin-build-tools-impl"],
+    required: [
+        "kotlin-build-tools-impl",
+        "kotlin-compose-compiler-embeddable",
+    ],
+    kotlin_incremental: false,
 }
 
 java_test_host {
     name: "kotlin-incremental-client-tests",
     srcs: [
         "tests/src/com/**/*.kt",
+    ],
+    data: [
+        "tests/resources/test_build.xml",
     ],
     static_libs: [
         "kotlin-incremental-client-lib",

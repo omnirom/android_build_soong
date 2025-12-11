@@ -21,19 +21,8 @@ import (
 	"strings"
 
 	"android/soong/android"
-	"android/soong/cc"
 	"android/soong/java"
-	"android/soong/rust"
 )
-
-func (a *apexBundle) AndroidMk() android.AndroidMkData {
-	if a.properties.HideFromMake {
-		return android.AndroidMkData{
-			Disabled: true,
-		}
-	}
-	return a.androidMkForType()
-}
 
 // nameInMake converts apexFileClass into the corresponding class name in Make.
 func (class apexFileClass) nameInMake() string {
@@ -118,8 +107,8 @@ func (a *apexBundle) androidMkForFiles(w io.Writer, apexBundleName, moduleDir st
 		}
 		fmt.Fprintln(w, "LOCAL_MODULE :=", moduleName)
 
-		if fi.module != nil && fi.module.Owner() != "" {
-			fmt.Fprintln(w, "LOCAL_MODULE_OWNER :=", fi.module.Owner())
+		if fi.providers != nil && fi.providers.commonInfo.Owner != "" {
+			fmt.Fprintln(w, "LOCAL_MODULE_OWNER :=", fi.providers.commonInfo.Owner)
 		}
 		// /apex/<apexBundleName>/{lib|framework|...}
 		pathForSymbol := filepath.Join("$(PRODUCT_OUT)", "apex", apexBundleName, fi.installDir)
@@ -143,15 +132,15 @@ func (a *apexBundle) androidMkForFiles(w io.Writer, apexBundleName, moduleDir st
 			fmt.Fprintln(w, "LOCAL_CHECKED_MODULE :=", fi.builtFile.String())
 		}
 		fmt.Fprintln(w, "LOCAL_MODULE_CLASS :=", fi.class.nameInMake())
-		if fi.module != nil {
+		if fi.providers != nil {
 			// This apexFile's module comes from Soong
-			if fi.module.Target().Arch.ArchType != android.Common {
-				archStr := fi.module.Target().Arch.ArchType.String()
+			if fi.providers.commonInfo.Target.Arch.ArchType != android.Common {
+				archStr := fi.providers.commonInfo.Target.Arch.ArchType.String()
 				fmt.Fprintln(w, "LOCAL_MODULE_TARGET_ARCH :=", archStr)
 			}
 		}
-		if fi.jacocoReportClassesFile != nil {
-			fmt.Fprintln(w, "LOCAL_SOONG_JACOCO_REPORT_CLASSES_JAR :=", fi.jacocoReportClassesFile.String())
+		if fi.jacocoInfo.ReportClassesFile != nil {
+			fmt.Fprintln(w, "LOCAL_SOONG_JACOCO_REPORT_CLASSES_JAR :=", fi.jacocoInfo.ReportClassesFile.String())
 		}
 		switch fi.class {
 		case javaSharedLib:
@@ -159,9 +148,10 @@ func (a *apexBundle) androidMkForFiles(w io.Writer, apexBundleName, moduleDir st
 			// we need to remove the suffix from LOCAL_MODULE_STEM, otherwise
 			// we will have foo.jar.jar
 			fmt.Fprintln(w, "LOCAL_MODULE_STEM :=", strings.TrimSuffix(fi.stem(), ".jar"))
-			if javaModule, ok := fi.module.(java.ApexDependency); ok {
-				fmt.Fprintln(w, "LOCAL_SOONG_CLASSES_JAR :=", javaModule.ImplementationAndResourcesJars()[0].String())
-				fmt.Fprintln(w, "LOCAL_SOONG_HEADER_JAR :=", javaModule.HeaderJars()[0].String())
+			if fi.providers != nil && fi.providers.javaInfo != nil && fi.providers.javaInfo.ApexDependencyInfo != nil {
+				apexInfo := fi.providers.javaInfo.ApexDependencyInfo
+				fmt.Fprintln(w, "LOCAL_SOONG_CLASSES_JAR :=", apexInfo.ImplementationAndResourcesJars[0].String())
+				fmt.Fprintln(w, "LOCAL_SOONG_HEADER_JAR :=", apexInfo.HeaderJars[0].String())
 			} else {
 				fmt.Fprintln(w, "LOCAL_SOONG_CLASSES_JAR :=", fi.builtFile.String())
 				fmt.Fprintln(w, "LOCAL_SOONG_HEADER_JAR :=", fi.builtFile.String())
@@ -175,38 +165,42 @@ func (a *apexBundle) androidMkForFiles(w io.Writer, apexBundleName, moduleDir st
 			// we need to remove the suffix from LOCAL_MODULE_STEM, otherwise
 			// we will have foo.apk.apk
 			fmt.Fprintln(w, "LOCAL_MODULE_STEM :=", strings.TrimSuffix(fi.stem(), ".apk"))
-			if app, ok := fi.module.(*java.AndroidApp); ok {
-				android.AndroidMkEmitAssignList(w, "LOCAL_PREBUILT_COVERAGE_ARCHIVE", app.JniCoverageOutputs().Strings())
-				if jniLibSymbols := app.JNISymbolsInstalls(modulePath); len(jniLibSymbols) > 0 {
+			if fi.providers != nil && fi.providers.appInfo != nil {
+				appInfo := fi.providers.appInfo
+				android.AndroidMkEmitAssignList(w, "LOCAL_PREBUILT_COVERAGE_ARCHIVE", appInfo.JniCoverageOutputs.Strings())
+				if jniLibSymbols := java.JNISymbolsInstalls(appInfo.JniLibs, modulePath); len(jniLibSymbols) > 0 {
 					fmt.Fprintln(w, "LOCAL_SOONG_JNI_LIBS_SYMBOLS :=", jniLibSymbols.String())
 				}
 			}
 			fmt.Fprintln(w, "include $(BUILD_SYSTEM)/soong_app_prebuilt.mk")
 		case appSet:
-			as, ok := fi.module.(*java.AndroidAppSet)
-			if !ok {
+			if fi.providers == nil || fi.providers.appInfo == nil {
 				panic(fmt.Sprintf("Expected %s to be AndroidAppSet", fi.module))
 			}
-			fmt.Fprintln(w, "LOCAL_APK_SET_INSTALL_FILE :=", as.PackedAdditionalOutputs().String())
-			fmt.Fprintln(w, "LOCAL_APKCERTS_FILE :=", as.APKCertsFile().String())
+			appInfo := fi.providers.appInfo
+			fmt.Fprintln(w, "LOCAL_APK_SET_INSTALL_FILE :=", appInfo.PackedAdditionalOutputs.String())
+			fmt.Fprintln(w, "LOCAL_APKCERTS_FILE :=", appInfo.ApkCertsFile.String())
 			fmt.Fprintln(w, "include $(BUILD_SYSTEM)/soong_android_app_set.mk")
 		case nativeSharedLib, nativeExecutable, nativeTest:
 			fmt.Fprintln(w, "LOCAL_MODULE_STEM :=", fi.stem())
-			if ccMod, ok := fi.module.(*cc.Module); ok {
-				if ccMod.UnstrippedOutputFile() != nil {
-					fmt.Fprintln(w, "LOCAL_SOONG_UNSTRIPPED_BINARY :=", ccMod.UnstrippedOutputFile().String())
-				}
-				ccMod.AndroidMkWriteAdditionalDependenciesForSourceAbiDiff(w)
-				if ccMod.CoverageOutputFile().Valid() {
-					fmt.Fprintln(w, "LOCAL_PREBUILT_COVERAGE_ARCHIVE :=", ccMod.CoverageOutputFile().String())
-				}
-			} else if rustMod, ok := fi.module.(*rust.Module); ok {
-				if rustMod.UnstrippedOutputFile() != nil {
-					fmt.Fprintln(w, "LOCAL_SOONG_UNSTRIPPED_BINARY :=", rustMod.UnstrippedOutputFile().String())
+			if fi.providers != nil && fi.providers.linkableInfo != nil {
+				linkableInfo := fi.providers.linkableInfo
+				if fi.providers.ccInfo != nil {
+					if linkableInfo.UnstrippedOutputFile != nil {
+						fmt.Fprintln(w, "LOCAL_SOONG_UNSTRIPPED_BINARY :=", linkableInfo.UnstrippedOutputFile.String())
+					}
+					if linkableInfo.CoverageOutputFile.Valid() {
+						fmt.Fprintln(w, "LOCAL_PREBUILT_COVERAGE_ARCHIVE :=", linkableInfo.CoverageOutputFile.String())
+					}
+				} else if fi.providers.rustInfo != nil && linkableInfo.UnstrippedOutputFile != nil {
+					fmt.Fprintln(w, "LOCAL_SOONG_UNSTRIPPED_BINARY :=", linkableInfo.UnstrippedOutputFile.String())
 				}
 			}
 			fmt.Fprintln(w, "include $(BUILD_SYSTEM)/soong_cc_rust_prebuilt.mk")
 		default:
+			if fi.class == shBinary {
+				fmt.Fprintln(w, "LOCAL_CHECK_ELF_FILES := false")
+			}
 			fmt.Fprintln(w, "LOCAL_MODULE_STEM :=", fi.stem())
 			fmt.Fprintln(w, "include $(BUILD_PREBUILT)")
 		}
@@ -232,7 +226,7 @@ func (a *apexBundle) writeRequiredModules(w io.Writer, moduleNames []string) {
 	android.AndroidMkEmitAssignList(w, "LOCAL_HOST_REQUIRED_MODULES", hostRequired)
 }
 
-func (a *apexBundle) androidMkForType() android.AndroidMkData {
+func (a *apexBundle) AndroidMk() android.AndroidMkData {
 	return android.AndroidMkData{
 		// While we do not provide a value for `Extra`, AconfigUpdateAndroidMkData may add some, which we must honor.
 		Custom: func(w io.Writer, name, prefix, moduleDir string, data android.AndroidMkData) {
@@ -267,7 +261,7 @@ func (a *apexBundle) androidMkForType() android.AndroidMkData {
 			commonProperties := []string{
 				"LOCAL_FULL_INIT_RC", "LOCAL_FULL_VINTF_FRAGMENTS",
 				"LOCAL_PROPRIETARY_MODULE", "LOCAL_VENDOR_MODULE", "LOCAL_ODM_MODULE", "LOCAL_PRODUCT_MODULE", "LOCAL_SYSTEM_EXT_MODULE",
-				"LOCAL_MODULE_OWNER",
+				"LOCAL_MODULE_OWNER", "LOCAL_ADDITIONAL_CHECKED_MODULE",
 			}
 			for _, name := range commonProperties {
 				if value, ok := data.Entries.EntryMap[name]; ok {
@@ -284,7 +278,6 @@ func (a *apexBundle) androidMkForType() android.AndroidMkData {
 
 			fmt.Fprintln(w, "include $(BUILD_PREBUILT)")
 			fmt.Fprintln(w, "ALL_MODULES.$(my_register_name).BUNDLE :=", a.bundleModuleFile.String())
-			android.AndroidMkEmitAssignList(w, "ALL_MODULES.$(my_register_name).LINT_REPORTS", a.lintReports.Strings())
 
 			if a.installedFilesFile != nil {
 				goal := "checkbuild"
@@ -301,17 +294,7 @@ func (a *apexBundle) androidMkForType() android.AndroidMkData {
 			fmt.Fprintf(w, "ALL_MODULES.$(my_register_name).SYMBOLIC_OUTPUT_PATH := $(foreach m,%s,$(ALL_MODULES.$(m).SYMBOLIC_OUTPUT_PATH))\n", strings.Join(moduleNames, " "))
 			fmt.Fprintf(w, "ALL_MODULES.$(my_register_name).ELF_SYMBOL_MAPPING_PATH := $(foreach m,%s,$(ALL_MODULES.$(m).ELF_SYMBOL_MAPPING_PATH))\n", strings.Join(moduleNames, " "))
 
-			distCoverageFiles(w, "ndk_apis_usedby_apex", a.nativeApisUsedByModuleFile.String())
-			distCoverageFiles(w, "ndk_apis_backedby_apex", a.nativeApisBackedByModuleFile.String())
-			distCoverageFiles(w, "java_apis_used_by_apex", a.javaApisUsedByModuleFile.String())
+			fmt.Fprintf(w, "ALL_MODULES.$(my_register_name).JACOCO_REPORT_SOONG_ZIP_ARGUMENTS := $(foreach m,%s,$(ALL_MODULES.$(m).JACOCO_REPORT_SOONG_ZIP_ARGUMENTS))\n", strings.Join(moduleNames, " "))
+			fmt.Fprintf(w, "ALL_MODULES.$(my_register_name).JACOCO_REPORT_FILES := $(foreach m,%s,$(ALL_MODULES.$(m).JACOCO_REPORT_FILES))\n", strings.Join(moduleNames, " "))
 		}}
-}
-
-func distCoverageFiles(w io.Writer, dir string, distfile string) {
-	if distfile != "" {
-		goal := "apps_only"
-		fmt.Fprintf(w, "ifneq (,$(filter $(my_register_name),$(TARGET_BUILD_APPS)))\n"+
-			" $(call dist-for-goals,%s,%s:%s/$(notdir %s))\n"+
-			"endif\n", goal, distfile, dir, distfile)
-	}
 }

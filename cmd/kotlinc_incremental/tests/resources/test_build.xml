@@ -1,0 +1,10 @@
+<modules>
+  <module name="test_module" type="java-production" outputDir="output">
+    <classpath path="a.jar" />
+    <classpath path="b.jar" />
+    <javaSourceRoots path="c.java" />
+    <javaSourceRoots path="d.java" />
+    <sources path="e.kt" />
+    <sources path="f.kt" />
+  </module>
+</modules>

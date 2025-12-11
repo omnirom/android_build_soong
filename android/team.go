@@ -16,6 +16,8 @@ package android
 
 import "github.com/google/blueprint"
 
+//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+
 func init() {
 	RegisterTeamBuildComponents(InitRegistrationContext)
 }
@@ -45,6 +47,7 @@ type teamModule struct {
 	properties teamProperties
 }
 
+// @auto-generate: gob
 type TestModuleInformation struct {
 	TestOnly       bool
 	TopLevelTarget bool

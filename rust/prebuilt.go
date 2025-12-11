@@ -16,6 +16,7 @@ package rust
 
 import (
 	"android/soong/android"
+	"github.com/google/blueprint/proptools"
 )
 
 func init() {
@@ -27,7 +28,7 @@ func init() {
 
 type PrebuiltProperties struct {
 	// path to the prebuilt file
-	Srcs []string `android:"path,arch_variant"`
+	Srcs proptools.Configurable[[]string] `android:"path,arch_variant"`
 	// directories containing associated rlib dependencies
 	Link_dirs []string `android:"path,arch_variant"`
 
@@ -54,7 +55,7 @@ func PrebuiltProcMacroFactory() android.Module {
 }
 
 type rustPrebuilt interface {
-	prebuiltSrcs() []string
+	prebuiltSrcs(ctx android.BaseModuleContext) []string
 	prebuilt() *android.Prebuilt
 }
 
@@ -79,7 +80,7 @@ var _ exportedFlagsProducer = (*prebuiltProcMacroDecorator)(nil)
 var _ rustPrebuilt = (*prebuiltProcMacroDecorator)(nil)
 
 func prebuiltPath(ctx ModuleContext, prebuilt rustPrebuilt) android.Path {
-	srcs := android.PathsForModuleSrc(ctx, prebuilt.prebuiltSrcs())
+	srcs := android.PathsForModuleSrc(ctx, prebuilt.prebuiltSrcs(ctx))
 	if len(srcs) == 0 {
 		ctx.PropertyErrorf("srcs", "srcs must not be empty")
 	}
@@ -105,8 +106,8 @@ func PrebuiltRlibFactory() android.Module {
 }
 
 func addSrcSupplier(module android.PrebuiltInterface, prebuilt rustPrebuilt) {
-	srcsSupplier := func(_ android.BaseModuleContext, _ android.Module) []string {
-		return prebuilt.prebuiltSrcs()
+	srcsSupplier := func(ctx android.BaseModuleContext, _ android.Module) []string {
+		return prebuilt.prebuiltSrcs(ctx)
 	}
 	android.InitPrebuiltModuleWithSrcSupplier(module, srcsSupplier, "srcs")
 }
@@ -115,6 +116,7 @@ func NewPrebuiltLibrary(hod android.HostOrDeviceSupported) (*Module, *prebuiltLi
 	module, library := NewRustLibrary(hod)
 	library.BuildOnlyRust()
 	library.setNoStdlibs()
+	library.setSysroot()
 	prebuilt := &prebuiltLibraryDecorator{
 		libraryDecorator: library,
 	}
@@ -129,6 +131,7 @@ func NewPrebuiltDylib(hod android.HostOrDeviceSupported) (*Module, *prebuiltLibr
 	module, library := NewRustLibrary(hod)
 	library.BuildOnlyDylib()
 	library.setNoStdlibs()
+	library.setSysroot()
 	prebuilt := &prebuiltLibraryDecorator{
 		libraryDecorator: library,
 	}
@@ -143,6 +146,7 @@ func NewPrebuiltRlib(hod android.HostOrDeviceSupported) (*Module, *prebuiltLibra
 	module, library := NewRustLibrary(hod)
 	library.BuildOnlyRlib()
 	library.setNoStdlibs()
+	library.setSysroot()
 	prebuilt := &prebuiltLibraryDecorator{
 		libraryDecorator: library,
 	}
@@ -181,25 +185,24 @@ func (prebuilt *prebuiltLibraryDecorator) nativeCoverage() bool {
 	return false
 }
 
-func (prebuilt *prebuiltLibraryDecorator) prebuiltSrcs() []string {
-	srcs := prebuilt.Properties.Srcs
-	if prebuilt.rlib() {
-		srcs = append(srcs, prebuilt.libraryDecorator.Properties.Rlib.Srcs...)
-	}
-	if prebuilt.dylib() {
-		srcs = append(srcs, prebuilt.libraryDecorator.Properties.Dylib.Srcs...)
-	}
-
-	return srcs
+func (prebuilt *prebuiltLibraryDecorator) prebuiltSrcs(ctx android.BaseModuleContext) []string {
+	return prebuilt.Properties.Srcs.GetOrDefault(ctx, nil)
 }
 
 func (prebuilt *prebuiltLibraryDecorator) prebuilt() *android.Prebuilt {
 	return &prebuilt.Prebuilt
 }
 
-func (prebuilt *prebuiltProcMacroDecorator) prebuiltSrcs() []string {
-	srcs := prebuilt.Properties.Srcs
-	return srcs
+func (prebuilt *prebuiltLibraryDecorator) crateRootPath(ctx ModuleContext) android.Path {
+	if prebuilt.baseCompiler.Properties.Crate_root == nil {
+		return srcPathFromModuleSrcs(ctx, prebuilt.prebuiltSrcs(ctx))
+	} else {
+		return android.PathForModuleSrc(ctx, *prebuilt.baseCompiler.Properties.Crate_root)
+	}
+}
+
+func (prebuilt *prebuiltProcMacroDecorator) prebuiltSrcs(ctx android.BaseModuleContext) []string {
+	return prebuilt.Properties.Srcs.GetOrDefault(ctx, nil)
 }
 
 func (prebuilt *prebuiltProcMacroDecorator) prebuilt() *android.Prebuilt {
@@ -232,4 +235,12 @@ func (prebuilt *prebuiltProcMacroDecorator) compilerDeps(ctx DepsContext, deps D
 
 func (prebuilt *prebuiltProcMacroDecorator) nativeCoverage() bool {
 	return false
+}
+
+func (prebuilt *prebuiltProcMacroDecorator) crateRootPath(ctx ModuleContext) android.Path {
+	if prebuilt.baseCompiler.Properties.Crate_root == nil {
+		return srcPathFromModuleSrcs(ctx, prebuilt.prebuiltSrcs(ctx))
+	} else {
+		return android.PathForModuleSrc(ctx, *prebuilt.baseCompiler.Properties.Crate_root)
+	}
 }

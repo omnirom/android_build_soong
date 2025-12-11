@@ -31,3 +31,21 @@ bootstrap_go_package {
         "release_configs_contributions.pb.go",
     ],
 }
+
+rust_protobuf_host {
+    name: "liball_release_configs_proto",
+    protos: [
+        "build_flags_common.proto",
+        "build_flags_declarations.proto",
+        "build_flags_out.proto",
+        "build_flags_src.proto",
+        "release_configs_contributions.proto",
+    ],
+    crate_name: "all_release_configs_proto",
+    source_stem: "all_release_configs_proto",
+
+    // Keep visibility limited to tests only!
+    visibility: [
+        "//build/make/tools/finalization/finalization-test",
+    ],
+}

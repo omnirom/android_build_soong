@@ -115,7 +115,7 @@ func (proto *protobufDecorator) GenerateSource(ctx ModuleContext, deps PathDeps)
 		grpcProtoFlags.Flags = append(grpcProtoFlags.Flags, "-I"+include.String())
 	}
 
-	stem := proto.BaseSourceProvider.getStem(ctx)
+	stem := proto.getStem(ctx)
 
 	// The mod_stem.rs file is used to avoid collisions if this is not included as a crate.
 	stemFile := android.PathForModuleOut(ctx, "mod_"+stem+".rs")
@@ -194,7 +194,7 @@ func (proto *protobufDecorator) GenerateSource(ctx ModuleContext, deps PathDeps)
 	android.WriteFileRule(ctx, stemFile, proto.genModFileContents())
 
 	// stemFile must be first here as the first path in BaseSourceProvider.OutputFiles is the library entry-point.
-	proto.BaseSourceProvider.OutputFiles = append(android.Paths{stemFile}, outputs.Paths()...)
+	proto.OutputFiles = append(android.Paths{stemFile}, outputs.Paths()...)
 
 	android.SetProvider(ctx, cc.FlagExporterInfoProvider, cc.FlagExporterInfo{
 		IncludeDirs: android.PathsForModuleSrc(ctx, proto.Properties.Exported_include_dirs),
@@ -227,13 +227,16 @@ func (proto *protobufDecorator) genModFileContents() string {
 			lines,
 			"pub mod empty {",
 			"    pub use protobuf::well_known_types::empty::Empty;",
+			"}",
+			"pub mod wrappers {",
+			"    pub use protobuf::well_known_types::wrappers::*;",
 			"}")
 	}
 
 	return strings.Join(lines, "\n")
 }
 
-func (proto *protobufDecorator) SourceProviderProps() []interface{} {
+func (proto *protobufDecorator) SourceProviderProps() []any {
 	return append(proto.BaseSourceProvider.SourceProviderProps(), &proto.Properties)
 }
 

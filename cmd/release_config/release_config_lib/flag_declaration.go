@@ -15,6 +15,10 @@
 package release_config_lib
 
 import (
+	"fmt"
+	"path/filepath"
+	"strings"
+
 	rc_proto "android/soong/cmd/release_config/release_config_proto"
 )
 
@@ -25,14 +29,38 @@ var (
 	DuplicateDeclarationAllowlist = map[string]bool{}
 )
 
-func FlagDeclarationFactory(protoPath string) (fd *rc_proto.FlagDeclaration) {
+func FlagDeclarationFactory(protoPath string) (fd *rc_proto.FlagDeclaration, err error) {
 	fd = &rc_proto.FlagDeclaration{}
-	if protoPath != "" {
-		LoadMessage(protoPath, fd)
+	if protoPath == "" {
+		return fd, nil
 	}
+	LoadMessage(protoPath, fd)
+
+	switch {
+	case fd.Name == nil:
+		return nil, fmt.Errorf("Flag declaration %s does not specify name", protoPath)
+	case *fd.Name == "RELEASE_ACONFIG_VALUE_SETS":
+		return nil, fmt.Errorf("%s: %s is a reserved build flag", protoPath, *fd.Name)
+	case fmt.Sprintf("%s.textproto", *fd.Name) != filepath.Base(protoPath):
+		return nil, fmt.Errorf("%s incorrectly declares flag %s", protoPath, *fd.Name)
+	case !strings.HasPrefix(*fd.Name, "RELEASE_"):
+		return nil, fmt.Errorf("%s: flag names must begin with 'RELEASE_'", protoPath)
+	case fd.Namespace == nil:
+		return nil, fmt.Errorf("Flag declaration %s has no namespace.", protoPath)
+	case fd.Workflow == nil:
+		return nil, fmt.Errorf("Flag declaration %s has no workflow.", protoPath)
+	case fd.Containers != nil:
+		for _, container := range fd.Containers {
+			if !validContainer(container) {
+				return nil, fmt.Errorf("Flag declaration %s has invalid container %s", protoPath, container)
+			}
+		}
+	}
+
 	// If the input didn't specify a value, create one (== UnspecifiedValue).
 	if fd.Value == nil {
 		fd.Value = &rc_proto.Value{Val: &rc_proto.Value_UnspecifiedValue{false}}
 	}
-	return fd
+
+	return fd, nil
 }

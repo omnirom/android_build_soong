@@ -90,10 +90,10 @@ func (c *ccdepsGeneratorSingleton) GenerateBuildActions(ctx android.SingletonCon
 	moduleDeps.C_clang = fmt.Sprintf("%s%s", buildCMakePath(pathToCC), cClang)
 	moduleDeps.Cpp_clang = fmt.Sprintf("%s%s", buildCMakePath(pathToCC), cppClang)
 
-	ctx.VisitAllModules(func(module android.Module) {
-		if ccModule, ok := module.(*Module); ok {
-			if compiledModule, ok := ccModule.compiler.(CompiledInterface); ok {
-				generateCLionProjectData(ctx, compiledModule, ccModule, bestVariantFound, moduleInfos)
+	ctx.VisitAllModuleProxies(func(module android.ModuleProxy) {
+		if ccModule, ok := android.OtherModuleProvider(ctx, module, CcInfoProvider); ok {
+			if ccModule.CompilerInfo != nil {
+				generateCLionProjectData(ctx, module, ccModule, bestVariantFound, moduleInfos)
 			}
 		}
 	})
@@ -112,7 +112,7 @@ func (c *ccdepsGeneratorSingleton) GenerateBuildActions(ctx android.SingletonCon
 		Rule:   android.Touch,
 		Output: ccfpath,
 	})
-	ctx.DistForGoal("general-tests", c.outputPath)
+	ctx.DistForGoals([]string{"general-tests", "module-info"}, c.outputPath)
 }
 
 func parseCompilerCCParameters(ctx android.SingletonContext, params []string) ccParameters {
@@ -169,11 +169,12 @@ func parseCompilerCCParameters(ctx android.SingletonContext, params []string) cc
 	return compilerParams
 }
 
-func generateCLionProjectData(ctx android.SingletonContext, compiledModule CompiledInterface,
-	ccModule *Module, bestVariantFound map[string]bool, moduleInfos map[string]ccIdeInfo) {
-	moduleName := ccModule.ModuleBase.Name()
-	srcs := compiledModule.Srcs()
-
+func generateCLionProjectData(ctx android.SingletonContext, module android.ModuleProxy,
+	ccModule *CcInfo, bestVariantFound map[string]bool, moduleInfos map[string]ccIdeInfo) {
+	commonInfo := android.OtherModuleProviderOrDefault(ctx, module, android.CommonModuleInfoProvider)
+	moduleName := commonInfo.BaseModuleName
+	srcs := ccModule.CompilerInfo.Srcs
+	target := commonInfo.Target
 	// Skip if best variant has already been found.
 	if bestVariantFound[moduleName] {
 		return
@@ -185,7 +186,7 @@ func generateCLionProjectData(ctx android.SingletonContext, compiledModule Compi
 	}
 
 	// Check if device arch matches, in which case this is the best variant and takes precedence.
-	if ccModule.Device() && ccModule.ModuleBase.Arch().ArchType.Name == ctx.DeviceConfig().DeviceArch() {
+	if target.Os.Class == android.Device && target.Arch.ArchType.Name == ctx.DeviceConfig().DeviceArch() {
 		bestVariantFound[moduleName] = true
 	} else if _, ok := moduleInfos[moduleName]; ok {
 		// Skip because this isn't the best variant and a previous one has already been added.
@@ -195,20 +196,20 @@ func generateCLionProjectData(ctx android.SingletonContext, compiledModule Compi
 
 	dpInfo := ccIdeInfo{}
 
-	dpInfo.Path = append(dpInfo.Path, path.Dir(ctx.BlueprintFile(ccModule)))
+	dpInfo.Path = append(dpInfo.Path, path.Dir(ctx.BlueprintFile(module)))
 	dpInfo.Srcs = append(dpInfo.Srcs, srcs.Strings()...)
 	dpInfo.Path = android.FirstUniqueStrings(dpInfo.Path)
 	dpInfo.Srcs = android.FirstUniqueStrings(dpInfo.Srcs)
 
-	dpInfo.Global_Common_Flags = parseCompilerCCParameters(ctx, ccModule.flags.Global.CommonFlags)
-	dpInfo.Local_Common_Flags = parseCompilerCCParameters(ctx, ccModule.flags.Local.CommonFlags)
-	dpInfo.Global_C_flags = parseCompilerCCParameters(ctx, ccModule.flags.Global.CFlags)
-	dpInfo.Local_C_flags = parseCompilerCCParameters(ctx, ccModule.flags.Local.CFlags)
-	dpInfo.Global_C_only_flags = parseCompilerCCParameters(ctx, ccModule.flags.Global.ConlyFlags)
-	dpInfo.Local_C_only_flags = parseCompilerCCParameters(ctx, ccModule.flags.Local.ConlyFlags)
-	dpInfo.Global_Cpp_flags = parseCompilerCCParameters(ctx, ccModule.flags.Global.CppFlags)
-	dpInfo.Local_Cpp_flags = parseCompilerCCParameters(ctx, ccModule.flags.Local.CppFlags)
-	dpInfo.System_include_flags = parseCompilerCCParameters(ctx, ccModule.flags.SystemIncludeFlags)
+	dpInfo.Global_Common_Flags = parseCompilerCCParameters(ctx, ccModule.GlobalFlags.CommonFlags)
+	dpInfo.Local_Common_Flags = parseCompilerCCParameters(ctx, ccModule.LocalFlags.CommonFlags)
+	dpInfo.Global_C_flags = parseCompilerCCParameters(ctx, ccModule.GlobalFlags.CFlags)
+	dpInfo.Local_C_flags = parseCompilerCCParameters(ctx, ccModule.LocalFlags.CFlags)
+	dpInfo.Global_C_only_flags = parseCompilerCCParameters(ctx, ccModule.GlobalFlags.ConlyFlags)
+	dpInfo.Local_C_only_flags = parseCompilerCCParameters(ctx, ccModule.LocalFlags.ConlyFlags)
+	dpInfo.Global_Cpp_flags = parseCompilerCCParameters(ctx, ccModule.GlobalFlags.CppFlags)
+	dpInfo.Local_Cpp_flags = parseCompilerCCParameters(ctx, ccModule.LocalFlags.CppFlags)
+	dpInfo.System_include_flags = parseCompilerCCParameters(ctx, ccModule.SystemIncludeFlags)
 
 	dpInfo.Module_name = moduleName
 

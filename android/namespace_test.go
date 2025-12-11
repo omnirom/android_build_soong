@@ -385,6 +385,13 @@ func TestImportingNonexistentNamespace(t *testing.T) {
 	GroupFixturePreparers(
 		prepareForTestWithNamespace,
 		dirBpToPreparer(map[string]string{
+			// Add a folder called a_nonexistent_namespace with a bp file, as sometimes
+			// that tricks the import even though there's no namespace in this bp file.
+			"a_nonexistent_namespace": `
+				test_module {
+					name: "unused",
+				}
+			`,
 			"dir1": `
 				soong_namespace {
 					imports: ["a_nonexistent_namespace"]
@@ -398,6 +405,32 @@ func TestImportingNonexistentNamespace(t *testing.T) {
 	).
 		// should complain about the missing namespace and not complain about the unresolvable dependency
 		ExtendWithErrorHandler(FixtureExpectsOneErrorPattern(`\Qdir1/Android.bp:2:5: module "soong_namespace": namespace a_nonexistent_namespace does not exist\E`)).
+		RunTest(t)
+}
+
+func TestCantImportSubdirOfNamespace(t *testing.T) {
+	GroupFixturePreparers(
+		prepareForTestWithNamespace,
+		dirBpToPreparer(map[string]string{
+			"dir1": `
+				soong_namespace{}
+
+				test_module {
+					name: "b",
+				}
+			`,
+			"dir2": `
+				soong_namespace {
+					imports: ["dir1/foo"]
+				}
+				test_module {
+					name: "a",
+					deps: ["b"]
+				}
+			`,
+		}),
+	).
+		ExtendWithErrorHandler(FixtureExpectsOneErrorPattern(`\Qdir2/Android.bp:2:5: module "soong_namespace": namespace dir1/foo does not exist\E`)).
 		RunTest(t)
 }
 
@@ -664,7 +697,7 @@ func dirBpToPreparer(bps map[string]string) FixturePreparer {
 
 func dependsOn(result *TestResult, module TestingModule, possibleDependency TestingModule) bool {
 	depends := false
-	visit := func(dependency blueprint.Module) {
+	visit := func(dependency Module) {
 		if dependency == possibleDependency.module {
 			depends = true
 		}
@@ -675,7 +708,7 @@ func dependsOn(result *TestResult, module TestingModule, possibleDependency Test
 
 func numDeps(result *TestResult, module TestingModule) int {
 	count := 0
-	visit := func(dependency blueprint.Module) {
+	visit := func(dependency Module) {
 		count++
 	}
 	result.VisitDirectDeps(module.module, visit)
@@ -687,11 +720,11 @@ func getModule(result *TestResult, moduleName string) TestingModule {
 }
 
 func findModuleById(result *TestResult, id string) (module TestingModule) {
-	visit := func(candidate blueprint.Module) {
+	visit := func(candidate Module) {
 		testModule, ok := candidate.(*testModule)
 		if ok {
 			if testModule.properties.Id == id {
-				module = newTestingModule(result.fixture.t, result.config, testModule)
+				module = newTestingModule(result.fixture.t, result.config, testModule, result.ModuleToProxy(testModule))
 			}
 		}
 	}
@@ -734,6 +767,7 @@ func newTestModule() Module {
 
 type blueprintTestModule struct {
 	blueprint.SimpleName
+	blueprint.ModuleBase
 	properties struct {
 		Deps []string
 	}

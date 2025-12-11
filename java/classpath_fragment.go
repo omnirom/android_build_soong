@@ -104,17 +104,14 @@ type classpathJar struct {
 func gatherPossibleApexModuleNamesAndStems(ctx android.ModuleContext, contents []string, tag blueprint.DependencyTag) []string {
 	set := map[string]struct{}{}
 	for _, name := range contents {
-		dep := ctx.GetDirectDepWithTag(name, tag)
-		if dep == nil && ctx.Config().AllowMissingDependencies() {
+		dep := ctx.GetDirectDepProxyWithTag(name, tag)
+		if dep.IsNil() && ctx.Config().AllowMissingDependencies() {
 			// Ignore apex boot jars from dexpreopt if it does not exist, and missing deps are allowed.
 			continue
 		}
-		set[ModuleStemForDeapexing(dep)] = struct{}{}
-		if m, ok := dep.(ModuleWithStem); ok {
-			set[m.Stem()] = struct{}{}
-		} else {
-			ctx.PropertyErrorf("contents", "%v is not a ModuleWithStem", name)
-		}
+		info := android.OtherModuleProviderOrDefault(ctx, dep, JavaInfoProvider)
+		set[ModuleStemForDeapexing(ctx, dep)] = struct{}{}
+		set[info.Stem] = struct{}{}
 	}
 	return android.SortedKeys(set)
 }
@@ -129,12 +126,15 @@ func configuredJarListToClasspathJars(ctx android.ModuleContext, configuredJars 
 				classpath: classpathType,
 				path:      paths[i],
 			}
-			ctx.VisitDirectDepsIf(func(m android.Module) bool {
-				return m.Name() == configuredJars.Jar(i)
-			}, func(m android.Module) {
-				if s, ok := m.(*SdkLibrary); ok {
-					minSdkVersion := s.MinSdkVersion(ctx)
-					maxSdkVersion := s.MaxSdkVersion(ctx)
+			ctx.VisitDirectDepsProxy(func(m android.ModuleProxy) {
+				if m.Name() != configuredJars.Jar(i) {
+					return
+				}
+				if _, ok := android.OtherModuleProvider(ctx, m, SdkLibraryInfoProvider); ok {
+					info := android.OtherModuleProviderOrDefault(ctx, m, JavaInfoProvider)
+					commonInfo := android.OtherModulePointerProviderOrDefault(ctx, m, android.CommonModuleInfoProvider)
+					minSdkVersion := *commonInfo.MinSdkVersion.ApiLevel
+					maxSdkVersion := info.MaxSdkVersion
 					// TODO(208456999): instead of mapping "current" to latest, min_sdk_version should never be set to "current"
 					if minSdkVersion.Specified() {
 						if minSdkVersion.IsCurrent() {
@@ -162,7 +162,7 @@ func (c *ClasspathFragmentBase) outputFilename() string {
 	return strings.ToLower(c.classpathType.String()) + ".pb"
 }
 
-func (c *ClasspathFragmentBase) generateClasspathProtoBuildActions(ctx android.ModuleContext, configuredJars android.ConfiguredJarList, jars []classpathJar) {
+func (c *ClasspathFragmentBase) generateClasspathProtoBuildActions(ctx android.ModuleContext, configuredJars android.ConfiguredJarList, jars []classpathJar) android.OutputPath {
 	generateProto := proptools.BoolDefault(c.properties.Generate_classpaths_proto, true)
 	if generateProto {
 		outputFilename := c.outputFilename()
@@ -190,6 +190,7 @@ func (c *ClasspathFragmentBase) generateClasspathProtoBuildActions(ctx android.M
 		ClasspathFragmentProtoOutput:     c.outputFilepath,
 	}
 	android.SetProvider(ctx, ClasspathFragmentProtoContentInfoProvider, classpathProtoInfo)
+	return c.outputFilepath
 }
 
 func (c *ClasspathFragmentBase) installClasspathProto(ctx android.ModuleContext) android.InstallPath {
@@ -211,19 +212,16 @@ func writeClasspathsTextproto(ctx android.ModuleContext, output android.Writable
 	android.WriteFileRule(ctx, output, content.String())
 }
 
-// Returns AndroidMkEntries objects to install generated classpath.proto.
+// Returns AndroidMkInfo objects to install generated classpath.proto.
 // Do not use this to install into APEXes as the injection of the generated files happen separately for APEXes.
-func (c *ClasspathFragmentBase) androidMkEntries() []android.AndroidMkEntries {
-	return []android.AndroidMkEntries{{
+func (c *ClasspathFragmentBase) androidMkInfo() android.AndroidMkInfo {
+	info := android.AndroidMkInfo{
 		Class:      "ETC",
 		OutputFile: android.OptionalPathForPath(c.outputFilepath),
-		ExtraEntries: []android.AndroidMkExtraEntriesFunc{
-			func(ctx android.AndroidMkExtraEntriesContext, entries *android.AndroidMkEntries) {
-				entries.SetString("LOCAL_MODULE_PATH", c.installDirPath.String())
-				entries.SetString("LOCAL_INSTALLED_MODULE_STEM", c.outputFilepath.Base())
-			},
-		},
-	}}
+	}
+	info.SetString("LOCAL_MODULE_PATH", c.installDirPath.String())
+	info.SetString("LOCAL_INSTALLED_MODULE_STEM", c.outputFilepath.Base())
+	return info
 }
 
 var ClasspathFragmentProtoContentInfoProvider = blueprint.NewProvider[ClasspathFragmentProtoContentInfo]()
@@ -248,6 +246,6 @@ type ClasspathFragmentProtoContentInfo struct {
 	// use android.InstallPath#Rel().
 	//
 	// This is only relevant for APEX modules as they perform their own installation; while regular
-	// system files are installed via ClasspathFragmentBase#androidMkEntries().
+	// system files are installed via ClasspathFragmentBase#androidMkInfo().
 	ClasspathFragmentProtoInstallDir android.InstallPath
 }

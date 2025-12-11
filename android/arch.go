@@ -26,6 +26,8 @@ import (
 	"github.com/google/blueprint/proptools"
 )
 
+//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+
 /*
 Example blueprints file containing all variant property groups, with comment listing what type
 of variants get properties in that group:
@@ -89,6 +91,7 @@ module {
 */
 
 // An Arch indicates a single CPU architecture.
+// @auto-generate: gob
 type Arch struct {
 	// The type of the architecture (arm, arm64, x86, or x86_64).
 	ArchType ArchType
@@ -122,6 +125,7 @@ func (a Arch) String() string {
 // ArchType is used to define the 4 supported architecture types (arm, arm64, x86, x86_64), as
 // well as the "common" architecture used for modules that support multiple architectures, for
 // example Java modules.
+// @auto-generate: gob
 type ArchType struct {
 	// Name is the name of the architecture type, "arm", "arm64", "x86", or "x86_64".
 	Name string
@@ -232,6 +236,7 @@ func (class OsClass) String() string {
 }
 
 // OsType describes an OS variant of a module.
+// @auto-generate: gob
 type OsType struct {
 	// Name is the name of the OS.  It is also used as the name of the property in Android.bp
 	// files.
@@ -342,6 +347,7 @@ func OsTypeList() []OsType {
 }
 
 // Target specifies the OS and architecture that a module is being compiled for.
+// @auto-generate: gob
 type Target struct {
 	// Os the OS that the module is being compiled for (e.g. "linux_glibc", "android").
 	Os OsType
@@ -485,6 +491,25 @@ func (o *osTransitionMutator) IncomingTransition(ctx IncomingTransitionContext, 
 		return ""
 	}
 
+	// If the reverse dependency is the unbundled_builder, building the apps listed in
+	// TARGET_BUILD_APPS, prefer the android os, otherwise use the host os.
+	if _, ok := ctx.DepTag().(UsesUnbundledVariantDepTag); ok {
+		if allOsInfo, ok := ModuleProvider(ctx, allOsProvider); ok {
+			for _, variation := range allOsInfo.Variations {
+				if allOsInfo.Os[variation] == Android {
+					return variation
+				}
+			}
+			for _, variation := range allOsInfo.Variations {
+				if allOsInfo.Os[variation] == ctx.Config().BuildOS {
+					return variation
+				}
+			}
+			// will cause a missing variant error
+			return "os_variant_for_unbundled_not_found"
+		}
+	}
+
 	return incomingVariation
 }
 
@@ -531,13 +556,11 @@ var commonOsToOsSpecificVariantTag = archDepTag{name: "common os to os specific"
 // module referenced in the supplied context. An empty list is returned if there
 // are no enabled variants or the supplied context is not for an CommonOS
 // variant.
-func GetOsSpecificVariantsOfCommonOSVariant(mctx BaseModuleContext) []Module {
-	var variants []Module
-	mctx.VisitDirectDeps(func(m Module) {
+func GetOsSpecificVariantsOfCommonOSVariant(mctx BaseModuleContext) []ModuleProxy {
+	var variants []ModuleProxy
+	mctx.VisitDirectDepsProxy(func(m ModuleProxy) {
 		if mctx.OtherModuleDependencyTag(m) == commonOsToOsSpecificVariantTag {
-			if m.Enabled(mctx) {
-				variants = append(variants, m)
-			}
+			variants = append(variants, m)
 		}
 	})
 	return variants
@@ -702,6 +725,15 @@ func (a *archTransitionMutator) IncomingTransition(ctx IncomingTransitionContext
 	if multilib == "common" {
 		return "common"
 	}
+
+	// If the reverse dependency is the unbundled_builder, building the apps listed in
+	// TARGET_BUILD_APPS, use the primary arch of this module.
+	if _, ok := ctx.DepTag().(UsesUnbundledVariantDepTag); ok {
+		if allArchInfo, ok := ModuleProvider(ctx, allArchProvider); ok {
+			return allArchInfo.Primary
+		}
+	}
+
 	return incomingVariation
 }
 
@@ -1370,40 +1402,6 @@ func getArchProperties(ctx BaseModuleContext, archProperties interface{}, arch A
 		archStruct, ok := getArchTypeStruct(ctx, archProperties, arch.ArchType)
 		if ok {
 			result = append(result, archStruct)
-
-			// Handle arch-variant-specific properties in the form:
-			// arch: {
-			//     arm: {
-			//         variant: {
-			//             key: value,
-			//         },
-			//     },
-			// },
-			v := variantReplacer.Replace(arch.ArchVariant)
-			if v != "" {
-				prefix := "arch." + archType.Name + "." + v
-				if variantProperties, ok := getChildPropertyStruct(ctx, archStruct, v, prefix); ok {
-					result = append(result, variantProperties)
-				}
-			}
-
-			// Handle cpu-variant-specific properties in the form:
-			// arch: {
-			//     arm: {
-			//         variant: {
-			//             key: value,
-			//         },
-			//     },
-			// },
-			if arch.CpuVariant != arch.ArchVariant {
-				c := variantReplacer.Replace(arch.CpuVariant)
-				if c != "" {
-					prefix := "arch." + archType.Name + "." + c
-					if cpuVariantProperties, ok := getChildPropertyStruct(ctx, archStruct, c, prefix); ok {
-						result = append(result, cpuVariantProperties)
-					}
-				}
-			}
 
 			// Handle arch-feature-specific properties in the form:
 			// arch: {

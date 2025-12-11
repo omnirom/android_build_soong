@@ -49,6 +49,7 @@ ALL_ARCHITECTURES = (
 # TODO: it would be nice to dedupe with 'has_*_tag' property methods
 SUPPORTED_TAGS = ALL_ARCHITECTURES + (
     Tag('apex'),
+    Tag('draft'),
     Tag('llndk'),
     Tag('platform-only'),
     Tag('systemapi'),
@@ -108,7 +109,7 @@ class Tags:
     @property
     def has_platform_only_tags(self) -> bool:
         """Returns True if any platform-only tags are set."""
-        return 'platform-only' in self.tags
+        return 'platform-only' in self.tags or 'draft' in self.tags
 
 
 @dataclass
@@ -244,6 +245,8 @@ class Filter:
 
         This defines the rules shared between version tagging and symbol tagging.
         """
+        if tags.has_platform_only_tags:
+            return True
         # The apex and llndk tags will only exclude APIs from other modes. If in
         # APEX or LLNDK mode and neither tag is provided, we fall back to the
         # default behavior because all NDK symbols are implicitly available to
@@ -266,8 +269,6 @@ class Filter:
         symbols for certain architectures.
         """
         if version.is_private:
-            return True
-        if version.tags.has_platform_only_tags:
             return True
         return self._should_omit_tags(version.tags)
 
@@ -308,8 +309,6 @@ def symbol_in_api(tags: Iterable[Tag], arch: Arch, api: int) -> bool:
         elif tag.startswith('introduced-' + arch + '='):
             introduced_tag = tag
             arch_specific = True
-        elif tag == 'future':
-            return api == FUTURE_API_LEVEL
 
     if introduced_tag is None:
         # We found no "introduced" tags, so the symbol has always been

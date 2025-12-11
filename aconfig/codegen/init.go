@@ -33,9 +33,6 @@ var (
 				`    --mode ${mode}` +
 				`    --cache ${in}` +
 				`    --out ${out}.tmp` +
-				`    --allow-instrumentation ${debug}` +
-				`    --new-exported ${new_exported}` +
-				`		 --check-api-level ${check_api_level}` +
 				` && $soong_zip -write_if_changed -jar -o ${out} -C ${out}.tmp -D ${out}.tmp` +
 				` && rm -rf ${out}.tmp`,
 			// LINT.ThenChange(/aconfig/init.go)
@@ -44,7 +41,7 @@ var (
 				"$soong_zip",
 			},
 			Restat: true,
-		}, "mode", "debug", "new_exported", "check_api_level")
+		}, "mode")
 
 	// For cc_aconfig_library: Generate C++ library
 	cppRule = pctx.AndroidStaticRule("cc_aconfig_library",

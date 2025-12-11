@@ -80,6 +80,13 @@ def parse_args():
         dest='dexpreopt_configs',
         action='append',
         help='a paths to a dexpreopt.config of some library')
+    parser.add_argument(
+        '--bootclasspath-libs',
+        dest='bootclasspath_libs',
+        action='append',
+        help='jars in the bootclasspath, which should be ignored by the uses '
+        'libraries check',
+        default=[])
     parser.add_argument('--aapt', dest='aapt', help='path to aapt executable')
     parser.add_argument(
         '--output', '-o', dest='output', help='output AndroidManifest.xml file')
@@ -94,7 +101,8 @@ C_OFF = "\033[0m"
 C_BOLD = "\033[1m"
 
 
-def enforce_uses_libraries(manifest, required, optional, missing_optional, relax, is_apk, path):
+def enforce_uses_libraries(manifest, required, optional, missing_optional, relax, is_apk, path,
+    bootclasspath_libs):
     """Verify that the <uses-library> tags in the manifest match those provided
 
   by the build system.
@@ -112,6 +120,10 @@ def enforce_uses_libraries(manifest, required, optional, missing_optional, relax
     else:
         manifest_required, manifest_optional, tags = extract_uses_libs_xml(
             manifest)
+
+    # Filter out bootclasspath libs from the manifest to ignore them in the check.
+    manifest_required = [lib for lib in manifest_required if lib not in bootclasspath_libs]
+    manifest_optional = [lib for lib in manifest_optional if lib not in bootclasspath_libs]
 
     # Trim namespace component. Normally Soong does that automatically when it
     # handles module names specified in Android.bp properties. However not all
@@ -361,7 +373,8 @@ def main():
             # script was passed a special parameter to suppress exceptions.
             errmsg = enforce_uses_libraries(manifest, required, optional,
                 args.missing_optional_uses_libraries,
-                args.enforce_uses_libraries_relax, is_apk, args.input)
+                args.enforce_uses_libraries_relax, is_apk, args.input,
+                args.bootclasspath_libs)
 
             # Create a status file that is empty on success, or contains an
             # error message on failure. When exceptions are suppressed,

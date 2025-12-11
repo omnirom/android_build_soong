@@ -83,10 +83,13 @@ func TestCompilationOutputFiles(t *testing.T) {
 			variant:    "android_arm64_armv8-a_dylib",
 			expectedFiles: []string{
 				"out/soong/.intermediates/libfizz_buzz/android_arm64_armv8-a_dylib/libfizz_buzz.dylib.so",
+				"out/soong/.intermediates/libfizz_buzz/android_arm64_armv8-a_dylib/libfizz_buzz.dylib.so.checkJson",
 				"out/soong/.intermediates/libfizz_buzz/android_arm64_armv8-a_dylib/libfizz_buzz.dylib.so.clippy",
 				"out/soong/.intermediates/libfizz_buzz/android_arm64_armv8-a_dylib/unstripped/libfizz_buzz.dylib.so",
 				"out/target/product/test_device/system/lib64/libfizz_buzz.dylib.so",
 				"out/soong/.intermediates/libfizz_buzz/android_arm64_armv8-a_dylib/meta_lic",
+				"out/target/product/test_device/obj/PACKAGING/elf_symbol_mapping_intermediates/system/lib64/libfizz_buzz.dylib.so.textproto",
+				"out/target/product/test_device/symbols/system/lib64/libfizz_buzz.dylib.so",
 			},
 		},
 		{
@@ -95,6 +98,7 @@ func TestCompilationOutputFiles(t *testing.T) {
 			variant:    "android_arm64_armv8-a_rlib_dylib-std",
 			expectedFiles: []string{
 				"out/soong/.intermediates/libfizz_buzz/android_arm64_armv8-a_rlib_dylib-std/libfizz_buzz.rlib",
+				"out/soong/.intermediates/libfizz_buzz/android_arm64_armv8-a_rlib_dylib-std/libfizz_buzz.rlib.checkJson",
 				"out/soong/.intermediates/libfizz_buzz/android_arm64_armv8-a_rlib_dylib-std/libfizz_buzz.rlib.clippy",
 				"out/soong/.intermediates/libfizz_buzz/android_arm64_armv8-a_rlib_dylib-std/meta_lic",
 			},
@@ -105,6 +109,7 @@ func TestCompilationOutputFiles(t *testing.T) {
 			variant:    "android_arm64_armv8-a_rlib_rlib-std",
 			expectedFiles: []string{
 				"out/soong/.intermediates/libfizz_buzz/android_arm64_armv8-a_rlib_rlib-std/libfizz_buzz.rlib",
+				"out/soong/.intermediates/libfizz_buzz/android_arm64_armv8-a_rlib_rlib-std/libfizz_buzz.rlib.checkJson",
 				"out/soong/.intermediates/libfizz_buzz/android_arm64_armv8-a_rlib_rlib-std/libfizz_buzz.rlib.clippy",
 				"out/soong/.intermediates/libfizz_buzz/android_arm64_armv8-a_rlib_rlib-std/meta_lic",
 				"out/soong/.intermediates/libfizz_buzz/android_arm64_armv8-a_rlib_rlib-std/rustdoc.timestamp",
@@ -116,10 +121,13 @@ func TestCompilationOutputFiles(t *testing.T) {
 			variant:    "android_arm64_armv8-a",
 			expectedFiles: []string{
 				"out/soong/.intermediates/fizz_buzz/android_arm64_armv8-a/fizz_buzz",
+				"out/soong/.intermediates/fizz_buzz/android_arm64_armv8-a/fizz_buzz.checkJson",
 				"out/soong/.intermediates/fizz_buzz/android_arm64_armv8-a/fizz_buzz.clippy",
 				"out/soong/.intermediates/fizz_buzz/android_arm64_armv8-a/unstripped/fizz_buzz",
 				"out/target/product/test_device/system/bin/fizz_buzz",
 				"out/soong/.intermediates/fizz_buzz/android_arm64_armv8-a/meta_lic",
+				"out/target/product/test_device/obj/PACKAGING/elf_symbol_mapping_intermediates/system/bin/fizz_buzz.textproto",
+				"out/target/product/test_device/symbols/system/bin/fizz_buzz",
 			},
 		},
 		{
@@ -128,6 +136,7 @@ func TestCompilationOutputFiles(t *testing.T) {
 			variant:    "android_arm64_armv8-a_rlib_rlib-std",
 			expectedFiles: []string{
 				"out/soong/.intermediates/librust_ffi_static/android_arm64_armv8-a_rlib_rlib-std/librust_ffi_static.rlib",
+				"out/soong/.intermediates/librust_ffi_static/android_arm64_armv8-a_rlib_rlib-std/librust_ffi_static.rlib.checkJson",
 				"out/soong/.intermediates/librust_ffi_static/android_arm64_armv8-a_rlib_rlib-std/librust_ffi_static.rlib.clippy",
 				"out/soong/.intermediates/librust_ffi_static/android_arm64_armv8-a_rlib_rlib-std/meta_lic",
 				"out/soong/.intermediates/librust_ffi_static/android_arm64_armv8-a_rlib_rlib-std/rustdoc.timestamp",
@@ -139,6 +148,7 @@ func TestCompilationOutputFiles(t *testing.T) {
 			variant:    "android_arm64_armv8-a_rlib_rlib-std",
 			expectedFiles: []string{
 				"out/soong/.intermediates/librust_ffi/android_arm64_armv8-a_rlib_rlib-std/librust_ffi.rlib",
+				"out/soong/.intermediates/librust_ffi/android_arm64_armv8-a_rlib_rlib-std/librust_ffi.rlib.checkJson",
 				"out/soong/.intermediates/librust_ffi/android_arm64_armv8-a_rlib_rlib-std/librust_ffi.rlib.clippy",
 				"out/soong/.intermediates/librust_ffi/android_arm64_armv8-a_rlib_rlib-std/meta_lic",
 			},
@@ -149,12 +159,15 @@ func TestCompilationOutputFiles(t *testing.T) {
 			variant:    "android_arm64_armv8-a_shared",
 			expectedFiles: []string{
 				"out/soong/.intermediates/librust_ffi/android_arm64_armv8-a_shared/librust_ffi.so",
+				"out/soong/.intermediates/librust_ffi/android_arm64_armv8-a_shared/librust_ffi.so.checkJson",
 				"out/soong/.intermediates/librust_ffi/android_arm64_armv8-a_shared/librust_ffi.so.clippy",
 				"out/soong/.intermediates/librust_ffi/android_arm64_armv8-a_shared/unstripped/librust_ffi.so",
 				"out/soong/.intermediates/librust_ffi/android_arm64_armv8-a_shared/unstripped/librust_ffi.so.toc",
 				"out/soong/.intermediates/librust_ffi/android_arm64_armv8-a_shared/meta_lic",
 				"out/soong/.intermediates/librust_ffi/android_arm64_armv8-a_shared/rustdoc.timestamp",
 				"out/target/product/test_device/system/lib64/librust_ffi.so",
+				"out/target/product/test_device/obj/PACKAGING/elf_symbol_mapping_intermediates/system/lib64/librust_ffi.so.textproto",
+				"out/target/product/test_device/symbols/system/lib64/librust_ffi.so",
 			},
 		},
 	}

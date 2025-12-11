@@ -197,7 +197,7 @@ func (b hiddenAPIStubsDependencyTag) ReplaceSourceWithPrebuilt() bool {
 	return false
 }
 
-func (b hiddenAPIStubsDependencyTag) SdkMemberType(child android.Module) android.SdkMemberType {
+func (b hiddenAPIStubsDependencyTag) SdkMemberType(ctx android.ModuleContext, child android.ModuleProxy) android.SdkMemberType {
 	// Do not add additional dependencies to the sdk.
 	if b.fromAdditionalDependency {
 		return nil
@@ -205,7 +205,7 @@ func (b hiddenAPIStubsDependencyTag) SdkMemberType(child android.Module) android
 
 	// If the module is a java_sdk_library then treat it as if it was specific in the java_sdk_libs
 	// property, otherwise treat if it was specified in the java_header_libs property.
-	if javaSdkLibrarySdkMemberType.IsInstance(child) {
+	if javaSdkLibrarySdkMemberType.IsInstance(ctx, child) {
 		return javaSdkLibrarySdkMemberType
 	}
 
@@ -296,7 +296,7 @@ func hiddenAPIAddStubLibDependencies(ctx android.BottomUpMutatorContext, apiScop
 
 // hiddenAPIRetrieveDexJarBuildPath retrieves the DexJarBuildPath from the specified module, if
 // available, or reports an error.
-func hiddenAPIRetrieveDexJarBuildPath(ctx android.ModuleContext, module android.Module, kind android.SdkKind) android.Path {
+func hiddenAPIRetrieveDexJarBuildPath(ctx android.ModuleContext, module android.ModuleProxy, kind android.SdkKind) android.Path {
 	var dexJar OptionalDexJarPath
 	if sdkLibrary, ok := android.OtherModuleProvider(ctx, module, SdkLibraryInfoProvider); ok {
 		if ctx.Config().ReleaseHiddenApiExportableStubs() {
@@ -304,8 +304,8 @@ func hiddenAPIRetrieveDexJarBuildPath(ctx android.ModuleContext, module android.
 		} else {
 			dexJar = sdkLibrary.EverythingStubDexJarPaths[kind]
 		}
-	} else if j, ok := module.(UsesLibraryDependency); ok {
-		dexJar = j.DexJarBuildPath(ctx)
+	} else if j, ok := android.OtherModuleProvider(ctx, module, JavaInfoProvider); ok && j.UsesLibraryDependencyInfo != nil {
+		dexJar = j.DexJarBuildPath
 	} else {
 		ctx.ModuleErrorf("dependency %s of module type %s does not support providing a dex jar", module, ctx.OtherModuleType(module))
 		return nil
@@ -586,7 +586,7 @@ func newHiddenAPIInfo() *HiddenAPIInfo {
 	return &info
 }
 
-func (i *HiddenAPIInfo) mergeFromFragmentDeps(ctx android.ModuleContext, fragments []android.Module) {
+func (i *HiddenAPIInfo) mergeFromFragmentDeps(ctx android.ModuleContext, fragments []android.ModuleProxy) {
 	// Merge all the information from the fragments. The fragments form a DAG so it is possible that
 	// this will introduce duplicates so they will be resolved after processing all the fragments.
 	for _, fragment := range fragments {
@@ -656,7 +656,7 @@ func (s ModuleStubDexJars) stubDexJarForWidestAPIScope() android.Path {
 type StubDexJarsByModule map[string]ModuleStubDexJars
 
 // addStubDexJar adds a stub dex jar path provided by the specified module for the specified scope.
-func (s StubDexJarsByModule) addStubDexJar(ctx android.ModuleContext, module android.Module, scope *HiddenAPIScope, stubDexJar android.Path) {
+func (s StubDexJarsByModule) addStubDexJar(ctx android.ModuleContext, module android.ModuleProxy, scope *HiddenAPIScope, stubDexJar android.Path) {
 	name := android.RemoveOptionalPrebuiltPrefix(module.Name())
 
 	// Each named module provides one dex jar for each scope. However, in some cases different API
@@ -685,13 +685,14 @@ func (s StubDexJarsByModule) addStubDexJar(ctx android.ModuleContext, module and
 		// conscrypt.module.public.api java_sdk_library which will be the case once the former has been
 		// migrated to a module_lib API.
 		name = "conscrypt.module.public.api"
-	} else if d, ok := module.(SdkLibraryComponentDependency); ok {
-		sdkLibraryName := d.SdkLibraryName()
-		if sdkLibraryName != nil {
-			// The module is a component of a java_sdk_library so use the name of the java_sdk_library.
-			// e.g. if this module is `foo.system.stubs` and is part of the `foo` java_sdk_library then
-			// use `foo` as the name.
-			name = *sdkLibraryName
+	} else {
+		if slcDepInfo, ok := android.OtherModuleProvider(ctx, module, SdkLibraryComponentDependencyInfoProvider); ok {
+			if sdkLibraryName := slcDepInfo.SdkLibraryName; sdkLibraryName != nil {
+				// The module is a component of a java_sdk_library so use the name of the java_sdk_library.
+				// e.g. if this module is `foo.system.stubs` and is part of the `foo` java_sdk_library then
+				// use `foo` as the name.
+				name = *sdkLibraryName
+			}
 		}
 	}
 	stubDexJarsByScope := s[name]
@@ -785,7 +786,7 @@ func (i *HiddenAPIPropertyInfo) extractPackageRulesFromProperties(p *HiddenAPIPa
 	i.SplitPackages = p.Hidden_api.Split_packages
 }
 
-func (i *HiddenAPIPropertyInfo) gatherPropertyInfo(ctx android.ModuleContext, contents []android.Module) {
+func (i *HiddenAPIPropertyInfo) gatherPropertyInfo(ctx android.ModuleContext, contents []android.ModuleProxy) {
 	for _, module := range contents {
 		if info, ok := android.OtherModuleProvider(ctx, module, hiddenAPIPropertyInfoProvider); ok {
 			i.FlagFilesByCategory.append(info.FlagFilesByCategory)
@@ -844,8 +845,8 @@ func newHiddenAPIFlagInput() HiddenAPIFlagInput {
 // dependencies added in hiddenAPIAddStubLibDependencies.
 //
 // That includes paths to the stub dex jars as well as paths to the *removed.txt files.
-func (i *HiddenAPIFlagInput) gatherStubLibInfo(ctx android.ModuleContext, contents []android.Module) {
-	addFromModule := func(ctx android.ModuleContext, module android.Module, apiScope *HiddenAPIScope) {
+func (i *HiddenAPIFlagInput) gatherStubLibInfo(ctx android.ModuleContext, contents []android.ModuleProxy) {
+	addFromModule := func(ctx android.ModuleContext, module android.ModuleProxy, apiScope *HiddenAPIScope) {
 		sdkKind := apiScope.sdkKind
 		dexJar := hiddenAPIRetrieveDexJarBuildPath(ctx, module, sdkKind)
 		if dexJar != nil {
@@ -868,7 +869,7 @@ func (i *HiddenAPIFlagInput) gatherStubLibInfo(ctx android.ModuleContext, conten
 		}
 	}
 
-	ctx.VisitDirectDeps(func(module android.Module) {
+	ctx.VisitDirectDepsProxy(func(module android.ModuleProxy) {
 		tag := ctx.OtherModuleDependencyTag(module)
 		if hiddenAPIStubsTag, ok := tag.(hiddenAPIStubsDependencyTag); ok {
 			apiScope := hiddenAPIStubsTag.apiScope
@@ -927,7 +928,7 @@ type HiddenAPIFlagOutput struct {
 type bootDexJarByModule map[string]android.Path
 
 // addPath adds the path for a module to the map.
-func (b bootDexJarByModule) addPath(module android.Module, path android.Path) {
+func (b bootDexJarByModule) addPath(module android.ModuleProxy, path android.Path) {
 	b[android.RemoveOptionalPrebuiltPrefix(module.Name())] = path
 }
 
@@ -1168,7 +1169,7 @@ func buildRuleValidateOverlappingCsvFiles(ctx android.BuilderContext, name strin
 // * metadata.csv
 // * index.csv
 // * all-flags.csv
-func hiddenAPIFlagRulesForBootclasspathFragment(ctx android.ModuleContext, bootDexInfoByModule bootDexInfoByModule, contents []android.Module, input HiddenAPIFlagInput, suffix string) HiddenAPIFlagOutput {
+func hiddenAPIFlagRulesForBootclasspathFragment(ctx android.ModuleContext, bootDexInfoByModule bootDexInfoByModule, contents []android.ModuleProxy, input HiddenAPIFlagInput, suffix string) HiddenAPIFlagOutput {
 	hiddenApiSubDir := "modular-hiddenapi" + suffix
 
 	// Generate the stub-flags.csv.
@@ -1176,7 +1177,7 @@ func hiddenAPIFlagRulesForBootclasspathFragment(ctx android.ModuleContext, bootD
 	buildRuleToGenerateHiddenAPIStubFlagsFile(ctx, "modularHiddenAPIStubFlagsFile"+suffix, "modular hiddenapi stub flags", stubFlagsCSV, bootDexInfoByModule.bootDexJars(), input, nil)
 
 	// Extract the classes jars from the contents.
-	classesJars := extractClassesJarsFromModules(contents)
+	classesJars := extractClassesJarsFromModules(ctx, contents)
 
 	// Generate the set of flags from the annotations in the source code.
 	annotationFlagsCSV := android.PathForModuleOut(ctx, hiddenApiSubDir, "annotation-flags.csv")
@@ -1266,7 +1267,7 @@ func buildRuleToGenerateRemovedDexSignatures(ctx android.ModuleContext, suffix s
 // 1. New: Direct deps to _selected_ apexes. The apexes contain a ApexExportsInfo
 // 2. Legacy: An edge to java_sdk_library(_import) module. For prebuilt apexes, this serves as a hook and is populated by deapexers of prebuilt apxes
 // TODO: b/308174306 - Once all mainline modules have been flagged, drop (2)
-func extractBootDexJarsFromModules(ctx android.ModuleContext, contents []android.Module) bootDexJarByModule {
+func extractBootDexJarsFromModules(ctx android.ModuleContext, contents []android.ModuleProxy) bootDexJarByModule {
 	bootDexJars := bootDexJarByModule{}
 
 	apexNameToApexExportsInfoMap := getApexNameToApexExportsInfoMap(ctx)
@@ -1283,26 +1284,10 @@ func extractBootDexJarsFromModules(ctx android.ModuleContext, contents []android
 		if _, exists := bootDexJars[android.RemoveOptionalPrebuiltPrefix(module.Name())]; exists {
 			continue
 		}
-		hiddenAPIModule := hiddenAPIModuleFromModule(ctx, module)
-		if hiddenAPIModule == nil {
-			continue
-		}
-		bootDexJar := retrieveBootDexJarFromHiddenAPIModule(ctx, hiddenAPIModule)
+		bootDexJar := retrieveBootDexJarFromHiddenAPIModule(ctx, module)
 		bootDexJars.addPath(module, bootDexJar)
 	}
 	return bootDexJars
-}
-
-func hiddenAPIModuleFromModule(ctx android.BaseModuleContext, module android.Module) hiddenAPIModule {
-	if hiddenAPIModule, ok := module.(hiddenAPIModule); ok {
-		return hiddenAPIModule
-	} else if _, ok := module.(*DexImport); ok {
-		// Ignore this for the purposes of hidden API processing
-	} else {
-		ctx.ModuleErrorf("module %s does not implement hiddenAPIModule", module)
-	}
-
-	return nil
 }
 
 // bootDexInfo encapsulates both the path and uncompressDex status retrieved from a hiddenAPIModule.
@@ -1332,15 +1317,16 @@ func (b bootDexInfoByModule) bootDexJars() android.Paths {
 
 // extractBootDexInfoFromModules extracts the boot dex jar and uncompress dex state from
 // each of the supplied modules which must implement hiddenAPIModule.
-func extractBootDexInfoFromModules(ctx android.ModuleContext, contents []android.Module) bootDexInfoByModule {
+func extractBootDexInfoFromModules(ctx android.ModuleContext, contents []android.ModuleProxy) bootDexInfoByModule {
 	bootDexJarsByModule := bootDexInfoByModule{}
 	for _, module := range contents {
-		hiddenAPIModule := module.(hiddenAPIModule)
-		bootDexJar := retrieveBootDexJarFromHiddenAPIModule(ctx, hiddenAPIModule)
+		bootDexJar := retrieveBootDexJarFromHiddenAPIModule(ctx, module)
+		info := android.OtherModuleProviderOrDefault(ctx, module, JavaInfoProvider)
+		commonInfo := android.OtherModulePointerProviderOrDefault(ctx, module, android.CommonModuleInfoProvider)
 		bootDexJarsByModule[module.Name()] = bootDexInfo{
 			path:          bootDexJar,
-			uncompressDex: *hiddenAPIModule.uncompressDex(),
-			minSdkVersion: hiddenAPIModule.MinSdkVersion(ctx),
+			uncompressDex: Bool(info.UncompressDexState),
+			minSdkVersion: *commonInfo.MinSdkVersion.ApiLevel,
 		}
 	}
 
@@ -1352,37 +1338,31 @@ func extractBootDexInfoFromModules(ctx android.ModuleContext, contents []android
 // If the module does not provide a boot dex jar, i.e. the returned boot dex jar is unset or
 // invalid, then create a fake path and either report an error immediately or defer reporting of the
 // error until the path is actually used.
-func retrieveBootDexJarFromHiddenAPIModule(ctx android.ModuleContext, module hiddenAPIModule) android.Path {
-	bootDexJar := module.bootDexJar(ctx)
-	if !bootDexJar.Valid() {
+func retrieveBootDexJarFromHiddenAPIModule(ctx android.ModuleContext, module android.ModuleProxy) android.Path {
+	info := android.OtherModuleProviderOrDefault(ctx, module, JavaInfoProvider)
+	if !info.BootDexJarPath.Valid() {
 		fake := android.PathForModuleOut(ctx, fmt.Sprintf("fake/boot-dex/%s.jar", module.Name()))
-		handleMissingDexBootFile(ctx, module, fake, bootDexJar.InvalidReason())
+		handleMissingDexBootFile(ctx, module, fake, info.BootDexJarPath.InvalidReason())
 		return fake
 	}
-	return bootDexJar.Path()
+
+	return info.BootDexJarPath.Path()
 }
 
 // extractClassesJarsFromModules extracts the class jars from the supplied modules.
-func extractClassesJarsFromModules(contents []android.Module) android.Paths {
+func extractClassesJarsFromModules(ctx android.ModuleContext, contents []android.ModuleProxy) android.Paths {
 	classesJars := android.Paths{}
 	for _, module := range contents {
-		classesJars = append(classesJars, retrieveClassesJarsFromModule(module)...)
+		if info, ok := android.OtherModuleProvider(ctx, module, JavaInfoProvider); ok {
+			classesJars = append(classesJars, info.HiddenapiClassesJarPaths...)
+		}
 	}
 	return classesJars
 }
 
-// retrieveClassesJarsFromModule retrieves the classes jars from the supplied module.
-func retrieveClassesJarsFromModule(module android.Module) android.Paths {
-	if hiddenAPIModule, ok := module.(hiddenAPIModule); ok {
-		return hiddenAPIModule.classesJars()
-	}
-
-	return nil
-}
-
 // deferReportingMissingBootDexJar returns true if a missing boot dex jar should not be reported by
 // Soong but should instead only be reported in ninja if the file is actually built.
-func deferReportingMissingBootDexJar(ctx android.ModuleContext, module android.Module) bool {
+func deferReportingMissingBootDexJar(ctx android.ModuleContext, module android.ModuleOrProxy) bool {
 	// Any missing dependency should be allowed.
 	if ctx.Config().AllowMissingDependencies() {
 		return true
@@ -1423,7 +1403,7 @@ func deferReportingMissingBootDexJar(ctx android.ModuleContext, module android.M
 	// a prebuilt modules that has other variants which are part of an APEX.
 	//
 	// TODO(b/187910671): Remove this once platform variants are no longer created unnecessarily.
-	if android.IsModulePrebuilt(module) {
+	if android.IsModulePrebuilt(ctx, module) {
 		// An inactive source module can still contribute to the APEX but an inactive prebuilt module
 		// should not contribute to anything. So, rather than have a missing dex jar cause a Soong
 		// failure defer the error reporting to Ninja. Unless the prebuilt build target is explicitly
@@ -1445,17 +1425,11 @@ func deferReportingMissingBootDexJar(ctx android.ModuleContext, module android.M
 
 // handleMissingDexBootFile will either log a warning or create an error rule to create the fake
 // file depending on the value returned from deferReportingMissingBootDexJar.
-func handleMissingDexBootFile(ctx android.ModuleContext, module android.Module, fake android.WritablePath, reason string) {
+func handleMissingDexBootFile(ctx android.ModuleContext, module android.ModuleOrProxy, fake android.WritablePath, reason string) {
 	if deferReportingMissingBootDexJar(ctx, module) {
 		// Create an error rule that pretends to create the output file but will actually fail if it
 		// is run.
-		ctx.Build(pctx, android.BuildParams{
-			Rule:   android.ErrorRule,
-			Output: fake,
-			Args: map[string]string{
-				"error": fmt.Sprintf("missing boot dex jar dependency for %s: %s", module, reason),
-			},
-		})
+		android.ErrorRule(ctx, fake, fmt.Sprintf("missing boot dex jar dependency for %s: %s", module, reason))
 	} else {
 		ctx.ModuleErrorf("module %s does not provide a dex jar: %s", module, reason)
 	}
@@ -1467,14 +1441,12 @@ func handleMissingDexBootFile(ctx android.ModuleContext, module android.Module, 
 // The returned path will usually be to a dex jar file that has been encoded with hidden API flags.
 // However, under certain conditions, e.g. errors, or special build configurations it will return
 // a path to a fake file.
-func retrieveEncodedBootDexJarFromModule(ctx android.ModuleContext, module android.Module) android.Path {
-	bootDexJar := module.(interface {
-		DexJarBuildPath(ctx android.ModuleErrorfContext) OptionalDexJarPath
-	}).DexJarBuildPath(ctx)
-	if !bootDexJar.Valid() {
+func retrieveEncodedBootDexJarFromModule(ctx android.ModuleContext, module android.ModuleProxy) android.Path {
+	info := android.OtherModuleProviderOrDefault(ctx, module, JavaInfoProvider)
+	if !info.DexJarBuildPath.Valid() {
 		fake := android.PathForModuleOut(ctx, fmt.Sprintf("fake/encoded-dex/%s.jar", module.Name()))
-		handleMissingDexBootFile(ctx, module, fake, bootDexJar.InvalidReason())
+		handleMissingDexBootFile(ctx, module, fake, info.DexJarBuildPath.InvalidReason())
 		return fake
 	}
-	return bootDexJar.Path()
+	return info.DexJarBuildPath.Path()
 }

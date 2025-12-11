@@ -68,7 +68,7 @@ func shouldReturnFinalOrFutureInt(ctx android.ModuleContext, targetSdkVersionLev
 		return false
 	}
 	// If this a module targeting an unreleased SDK (MTS or unbundled builds), return 10000
-	return targetSdkVersionLevel.IsPreview() && (ctx.Config().UnbundledBuildApps() || includedInMts(ctx.Module()))
+	return targetSdkVersionLevel.IsPreview() && (ctx.Config().HasUnbundledBuildApps() || includedInMts(ctx.Module()))
 }
 
 // Helper function that returns true if android_test, android_test_helper_app, java_test are in an MTS suite.

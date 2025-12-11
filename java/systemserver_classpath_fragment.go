@@ -62,8 +62,10 @@ func (m *platformSystemServerClasspathModule) UniqueApexVariations() bool {
 	return true
 }
 
-func (p *platformSystemServerClasspathModule) AndroidMkEntries() (entries []android.AndroidMkEntries) {
-	return p.classpathFragmentBase().androidMkEntries()
+func (p *platformSystemServerClasspathModule) PrepareAndroidMKProviderInfo(config android.Config) *android.AndroidMkProviderInfo {
+	info := &android.AndroidMkProviderInfo{}
+	info.PrimaryInfo = p.classpathFragmentBase().androidMkInfo()
+	return info
 }
 
 func (p *platformSystemServerClasspathModule) GenerateAndroidBuildActions(ctx android.ModuleContext) {
@@ -96,6 +98,13 @@ type SystemServerClasspathModule struct {
 }
 
 var _ android.ApexModule = (*SystemServerClasspathModule)(nil)
+
+type SystemServerClasspathInfo struct {
+	Contents           []string
+	StandaloneContents []string
+}
+
+var SystemServerClasspathInfoProvider = blueprint.NewProvider[SystemServerClasspathInfo]()
 
 func (m *SystemServerClasspathModule) MinSdkVersionSupported(ctx android.BaseModuleContext) android.ApiLevel {
 	return android.MinApiLevel
@@ -137,8 +146,14 @@ func (s *SystemServerClasspathModule) GenerateAndroidBuildActions(ctx android.Mo
 	standaloneClasspathJars := configuredJarListToClasspathJars(ctx, standaloneConfiguredJars, STANDALONE_SYSTEMSERVER_JARS)
 	configuredJars = configuredJars.AppendList(&standaloneConfiguredJars)
 	classpathJars = append(classpathJars, standaloneClasspathJars...)
-	s.classpathFragmentBase().generateClasspathProtoBuildActions(ctx, configuredJars, classpathJars)
+	classpathProtoOutputPath := s.classpathFragmentBase().generateClasspathProtoBuildActions(ctx, configuredJars, classpathJars)
 	s.setPartitionInfoOfLibraries(ctx)
+
+	android.SetProvider(ctx, SystemServerClasspathInfoProvider, SystemServerClasspathInfo{
+		Contents:           s.properties.Contents.GetOrDefault(ctx, nil),
+		StandaloneContents: s.properties.Standalone_contents.GetOrDefault(ctx, nil),
+	})
+	ctx.ComplianceMetadataInfo().AddBuiltFiles(classpathProtoOutputPath.String())
 }
 
 // Map of java library name to their install partition.
@@ -152,8 +167,9 @@ var LibraryNameToPartitionInfoProvider = blueprint.NewProvider[LibraryNameToPart
 
 func (s *SystemServerClasspathModule) setPartitionInfoOfLibraries(ctx android.ModuleContext) {
 	libraryNameToPartition := map[string]string{}
-	ctx.VisitDirectDepsWithTag(systemServerClasspathFragmentContentDepTag, func(m android.Module) {
-		libraryNameToPartition[m.Name()] = m.PartitionTag(ctx.DeviceConfig())
+	ctx.VisitDirectDepsProxyWithTag(systemServerClasspathFragmentContentDepTag, func(m android.ModuleProxy) {
+		info := android.OtherModulePointerProviderOrDefault(ctx, m, android.CommonModuleInfoProvider)
+		libraryNameToPartition[m.Name()] = info.PartitionTag
 	})
 	android.SetProvider(ctx, LibraryNameToPartitionInfoProvider, LibraryNameToPartitionInfo{
 		LibraryNameToPartition: libraryNameToPartition,
@@ -214,10 +230,10 @@ func (systemServerClasspathFragmentContentDependencyTag) ReplaceSourceWithPrebui
 
 // SdkMemberType causes dependencies added with this tag to be automatically added to the sdk as if
 // they were specified using java_systemserver_libs or java_sdk_libs.
-func (b systemServerClasspathFragmentContentDependencyTag) SdkMemberType(child android.Module) android.SdkMemberType {
+func (b systemServerClasspathFragmentContentDependencyTag) SdkMemberType(ctx android.ModuleContext, child android.ModuleProxy) android.SdkMemberType {
 	// If the module is a java_sdk_library then treat it as if it was specified in the java_sdk_libs
 	// property, otherwise treat if it was specified in the java_systemserver_libs property.
-	if javaSdkLibrarySdkMemberType.IsInstance(child) {
+	if javaSdkLibrarySdkMemberType.IsInstance(ctx, child) {
 		return javaSdkLibrarySdkMemberType
 	}
 
@@ -278,8 +294,8 @@ func (s *systemServerClasspathFragmentMemberType) AddDependencies(ctx android.Sd
 	ctx.AddVariationDependencies(nil, dependencyTag, names...)
 }
 
-func (s *systemServerClasspathFragmentMemberType) IsInstance(module android.Module) bool {
-	_, ok := module.(*SystemServerClasspathModule)
+func (s *systemServerClasspathFragmentMemberType) IsInstance(ctx android.ModuleContext, module android.ModuleProxy) bool {
+	_, ok := android.OtherModuleProvider(ctx, module, SystemServerClasspathInfoProvider)
 	return ok
 }
 
@@ -305,11 +321,11 @@ type systemServerClasspathFragmentSdkMemberProperties struct {
 	Standalone_contents []string
 }
 
-func (s *systemServerClasspathFragmentSdkMemberProperties) PopulateFromVariant(ctx android.SdkMemberContext, variant android.Module) {
-	module := variant.(*SystemServerClasspathModule)
+func (s *systemServerClasspathFragmentSdkMemberProperties) PopulateFromVariant(ctx android.SdkMemberContext, variant android.ModuleProxy) {
+	module := android.OtherModuleProviderOrDefault(ctx.SdkModuleContext(), variant, SystemServerClasspathInfoProvider)
 
-	s.Contents = module.properties.Contents.GetOrDefault(ctx.SdkModuleContext(), nil)
-	s.Standalone_contents = module.properties.Standalone_contents.GetOrDefault(ctx.SdkModuleContext(), nil)
+	s.Contents = module.Contents
+	s.Standalone_contents = module.StandaloneContents
 }
 
 func (s *systemServerClasspathFragmentSdkMemberProperties) AddToPropertySet(ctx android.SdkMemberContext, propertySet android.BpPropertySet) {

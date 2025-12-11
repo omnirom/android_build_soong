@@ -38,5 +38,6 @@ bootstrap_go_package {
     visibility: [
         "//build/soong:__subpackages__",
         "//prebuilts/clang/host/linux-x86/soong",
+        "//art/build",
     ],
 }

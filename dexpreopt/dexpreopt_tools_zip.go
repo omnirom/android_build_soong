@@ -3,7 +3,7 @@ package dexpreopt
 import "android/soong/android"
 
 func init() {
-	android.InitRegistrationContext.RegisterSingletonType("dexpreopt_tools_zip_singleton", dexpreoptToolsZipSingletonFactory)
+	android.InitRegistrationContext.RegisterParallelSingletonType("dexpreopt_tools_zip_singleton", dexpreoptToolsZipSingletonFactory)
 }
 
 func dexpreoptToolsZipSingletonFactory() android.Singleton {

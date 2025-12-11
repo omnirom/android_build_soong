@@ -16,9 +16,11 @@ package build
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"android/soong/remoteexec"
@@ -64,7 +66,7 @@ func getRBEVars(ctx Context, config Config) map[string]string {
 		"RBE_download_tmp_dir": config.rbeDownloadTmpDir(),
 		"RBE_platform":         "container-image=" + remoteexec.DefaultImage,
 	}
-	if config.StartRBE() {
+	if config.StartReproxy() {
 		name, err := config.rbeSockAddr(absPath(ctx, config.rbeTmpDir()))
 		if err != nil {
 			ctx.Fatalf("Error retrieving socket address: %v", err)
@@ -114,12 +116,12 @@ func checkRBERequirements(ctx Context, config Config) {
 }
 
 func startRBE(ctx Context, config Config) {
-	ctx.BeginTrace(metrics.RunSetupTool, "rbe_bootstrap")
-	defer ctx.EndTrace()
+	e := ctx.BeginTrace(metrics.RunSetupTool, "rbe_bootstrap")
+	defer e.End()
 
 	ctx.Status.Status("Starting rbe...")
 
-	cmd := Command(ctx, config, "startRBE bootstrap", rbeCommand(ctx, config, bootstrapCmd))
+	cmd := Command(ctx, config, e, "startRBE bootstrap", rbeCommand(ctx, config, bootstrapCmd))
 
 	if output, err := cmd.CombinedOutput(); err != nil {
 		ctx.Fatalf("Unable to start RBE reproxy\nFAILED: RBE bootstrap failed with: %v\n%s\n", err, output)
@@ -127,7 +129,7 @@ func startRBE(ctx Context, config Config) {
 }
 
 func stopRBE(ctx Context, config Config) {
-	cmd := Command(ctx, config, "stopRBE bootstrap", rbeCommand(ctx, config, bootstrapCmd), "-shutdown")
+	cmd := Command(ctx, config, nil, "stopRBE bootstrap", rbeCommand(ctx, config, bootstrapCmd), "-shutdown")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		ctx.Fatalf("rbe bootstrap with shutdown failed with: %v\n%s\n", err, output)
@@ -166,8 +168,8 @@ func CheckProdCreds(ctx Context, config Config) {
 // started. The proxy service is shutdown in order to dump the RBE metrics to the
 // protobuf file.
 func DumpRBEMetrics(ctx Context, config Config, filename string) {
-	ctx.BeginTrace(metrics.RunShutdownTool, "dump_rbe_metrics")
-	defer ctx.EndTrace()
+	e := ctx.BeginTrace(metrics.RunShutdownTool, "dump_rbe_metrics")
+	defer e.End()
 
 	// Remove the previous metrics file in case there is a failure or RBE has been
 	// disable for this run.
@@ -177,7 +179,7 @@ func DumpRBEMetrics(ctx Context, config Config, filename string) {
 	// If RBE does not require to start, the RBE proxy maybe started
 	// manually for debugging purpose and can generate the metrics
 	// afterwards.
-	if !config.StartRBE() {
+	if !config.StartReproxy() {
 		return
 	}
 
@@ -209,4 +211,27 @@ func PrintOutDirWarning(ctx Context, config Config) {
 		fmt.Fprintln(ctx.Writer, "See http://go/android_rbe_out_dir for a workaround.")
 		fmt.Fprintln(ctx.Writer, "")
 	}
+}
+
+// ulimit returns ulimit result for |opt|.
+// if the resource is unlimited, it returns math.MaxInt32 so that a caller do
+// not need special handling of the returned value.
+//
+// Note that since go syscall package do not have RLIMIT_NPROC constant,
+// we use bash ulimit instead.
+func ulimitOrFatal(ctx Context, config Config, opt string) int {
+	commandText := fmt.Sprintf("ulimit %s", opt)
+	cmd := Command(ctx, config, nil, commandText, "bash", "-c", commandText)
+	output := strings.TrimRight(string(cmd.CombinedOutputOrFatal()), "\n")
+	ctx.Verbose(output + "\n")
+	ctx.Verbose("done\n")
+
+	if output == "unlimited" {
+		return math.MaxInt32
+	}
+	num, err := strconv.Atoi(output)
+	if err != nil {
+		ctx.Fatalf("ulimit returned unexpected value: %s: %v\n", opt, err)
+	}
+	return num
 }

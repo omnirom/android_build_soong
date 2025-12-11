@@ -104,7 +104,7 @@ func (t *toolchainDarwin) ProcMacroSuffix() string {
 
 func (t *toolchainDarwinArm64) ToolchainLinkFlags() string {
 	// Prepend the lld flags from cc_config so we stay in sync with cc
-	return "${cc_config.DarwinLldflags} ${config.DarwinToolchainLinkFlags} ${config.DarwinToolchainArm64LinkFlags}"
+	return "${cc_config.DarwinLdflags} ${config.DarwinToolchainLinkFlags} ${config.DarwinToolchainArm64LinkFlags}"
 }
 
 func (t *toolchainDarwinArm64) ToolchainRustFlags() string {
@@ -113,7 +113,7 @@ func (t *toolchainDarwinArm64) ToolchainRustFlags() string {
 
 func (t *toolchainDarwinX8664) ToolchainLinkFlags() string {
 	// Prepend the lld flags from cc_config so we stay in sync with cc
-	return "${cc_config.DarwinLldflags} ${config.DarwinToolchainLinkFlags} ${config.DarwinToolchainX8664LinkFlags}"
+	return "${cc_config.DarwinLdflags} ${config.DarwinToolchainLinkFlags} ${config.DarwinToolchainX8664LinkFlags}"
 }
 
 func (t *toolchainDarwinX8664) ToolchainRustFlags() string {

@@ -87,6 +87,10 @@ func (m *InstallSymlink) GenerateAndroidBuildActions(ctx android.ModuleContext) 
 	name := filepath.Base(m.properties.Installed_location)
 	installDir := android.PathForModuleInstall(ctx, filepath.Dir(m.properties.Installed_location))
 	m.installedPath = ctx.InstallAbsoluteSymlink(installDir, name, symlink_target)
+
+	moduleInfoJSON := ctx.ModuleInfoJSON()
+	moduleInfoJSON.Class = []string{"FAKE"}
+	moduleInfoJSON.SystemSharedLibs = []string{"none"}
 }
 
 func (m *InstallSymlink) AndroidMkEntries() []android.AndroidMkEntries {

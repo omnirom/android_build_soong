@@ -318,3 +318,8 @@ python_binary_host {
         "rustc_linker.py",
     ],
 }
+
+sh_binary_host {
+    name: "rustc_wrapper",
+    src: "rustc_wrapper.sh",
+}

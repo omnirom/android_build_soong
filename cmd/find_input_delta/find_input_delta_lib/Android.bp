@@ -20,13 +20,15 @@ bootstrap_go_package {
     name: "soong-cmd-find_input_delta-lib",
     pkgPath: "android/soong/cmd/find_input_delta/find_input_delta_lib",
     deps: [
+        "android-archive-zip",
+        "blueprint-pathtools",
+        "golang-protobuf-proto",
         "golang-protobuf-encoding-prototext",
+        "golang-protobuf-encoding-protowire",
         "golang-protobuf-reflect-protoreflect",
         "golang-protobuf-runtime-protoimpl",
         "soong-cmd-find_input_delta-proto",
         "soong-cmd-find_input_delta-proto_internal",
-        "android-archive-zip",
-        "blueprint-pathtools",
     ],
     srcs: [
         "fs.go",

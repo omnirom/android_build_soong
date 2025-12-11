@@ -1,16 +1,11 @@
 # Soong
 
-Soong is one of the build systems used in Android. There are altogether three:
-* The legacy Make-based build system that is controlled by files called
-  `Android.mk`.
-* Soong, which is controlled by files called `Android.bp`.
-* The upcoming Bazel-based build system that is controlled by files called
-  `BUILD.bazel`.
+Soong is one of the build systems used in Android, which is controlled by files called `Android.bp`.
+There is also the legacy Make-based build system that is controlled by files called `Android.mk`.
 
 `Android.bp` file are JSON-like declarative descriptions of "modules" to build;
 a "module" is the basic unit of building that Soong understands, similarly to
-how "target" is the basic unit of building for Bazel (and Make, although the
-two kinds of "targets" are very different)
+how "target" is the basic unit of building for Make.
 
 See [Simple Build
 Configuration](https://source.android.com/compatibility/tests/development/blueprints)
@@ -30,8 +25,7 @@ or write us at android-building@googlegroups.com .
 
 By design, Android.bp files are very simple.  There are no conditionals or
 control flow statements - any complexity is handled in build logic written in
-Go.  The syntax and semantics of Android.bp files are intentionally similar
-to [Bazel BUILD files](https://bazel.build/concepts/build-files) when possible.
+Go.
 
 ### Modules
 
@@ -157,7 +151,7 @@ top-level directory in the build and its name is its path relative to the top-le
 package includes all files in its directory, plus all subdirectories beneath it, except those which
 themselves contain an `Android.bp` file.
 
-The modules in a package's `Android.bp` and included files are part of the module.
+The modules in a package's `Android.bp` and included files are part of the package.
 
 For example, in the following directory tree (where `.../android/` is the top-level Android
 directory) there are two packages, `my/app`, and the subpackage `my/app/tests`. Note that
@@ -168,8 +162,6 @@ directory) there are two packages, `my/app`, and the subpackage `my/app/tests`. 
     .../android/my/app/data/input.txt
     .../android/my/app/tests/Android.bp
     .../android/my/app/tests/test.cc
-
-This is based on the Bazel package concept.
 
 The `package` module type allows information to be specified about a package. Only a single
 `package` module can be specified per package and in the case where there are multiple `.bp` files
@@ -219,16 +211,17 @@ soong_namespace {
 ...
 ```
 
-in `device/google/bonito/Android.bp` informs Soong that within the
-`device/google/bonito` package the module names are unique, that is, all the
-modules defined in the Android.bp files in the `device/google/bonito/` tree have
-unique names. However, there may be modules with the same names outside
-`device/google/bonito` tree. Indeed, there is a module `"pixelstats-vendor"`
-both in `device/google/bonito/pixelstats` and in
-`device/google/coral/pixelstats`.
+in [`device/google/lynx/powerstats/Android.bp`](https://cs.android.com/android/platform/superproject/main/+/main:device/google/lynx/powerstats/Android.bp)
+informs Soong that within the `device/google/lynx/powerstats` package the module
+names are unique, that is, all the modules defined in the Android.bp files in
+the `device/google/lynx/powerstats/` tree have unique names. However, there may
+be modules with the same names outside `device/google/lynx/powerstats` tree.
+Indeed, there is a module `"android.hardware.power.stats-service.pixel"` both in
+`device/google/lynx/powerstats` and in
+[`device/google/tangorpro/powerstats`](https://cs.android.com/android/platform/superproject/main/+/main:device/google/tangorpro/powerstats/Android.bp).
 
 The name of a namespace is the path of its directory. The name of the namespace
-in the example above is thus `device/google/bonito`.
+in the example above is thus `device/google/lynx/powerstats`.
 
 An implicit **global namespace** corresponds to the source tree as a whole. It
 has empty name.
@@ -240,10 +233,10 @@ module is defined in `device/my/display/lib/Android.bp`, its namespace is
 
 The name uniqueness thus means that module's name is unique within its scope. In
 other words, "//_scope_:_name_" is globally unique module reference, e.g,
-`"//device/google/bonito:pixelstats-vendor"`. _Note_ that the name of the
-namespace for a module may be different from module's package name: `libfoo`
-belongs to `device/my/display` namespace but is contained in
-`device/my/display/lib` package.
+`"//device/google/lynx/powerstats:android.hardware.power.stats-service.pixel"`.
+_Note_ that the name of the namespace for a module may be different from
+module's package name: `libfoo` belongs to `device/my/display` namespace but is
+contained in `device/my/display/lib` package.
 
 #### Name Resolution
 
@@ -259,25 +252,36 @@ module "_name_" in one or more namespaces. By default only the global namespace
 is searched for "_name_" (in other words, only the modules not belonging to an
 explicitly defined scope are considered). The `imports` attribute of the
 `soong_namespaces` allows to specify where to look for modules . For instance,
-with `device/google/bonito/Android.bp` containing
+with [`device/google/lynx/powerstats/Android.bp`](https://cs.android.com/android/platform/superproject/main/+/main:device/google/lynx/powerstats/Android.bp)
+containing:
 
 ```
 soong_namespace {
     imports: [
-        "hardware/google/interfaces",
-        "hardware/google/pixel",
-        "hardware/qcom/bootctrl",
+        "hardware/google/pixel",  // <-----
+        "device/google/gs201/powerstats",
+        "device/google/gs-common/powerstats",
+    ]
+}
+
+cc_binary {
+    name: "android.hardware.power.stats-service.pixel",
+    defaults: ["powerstats_pixel_binary_defaults"],  // <-----
+
+    srcs: [
+        "*.cpp",
+    ],
+
+    shared_libs: [
+        "android.hardware.power.stats-impl.gs201",
+        "android.hardware.power.stats-impl.gs-common",
     ],
 }
 ```
 
-a reference to `"libpixelstats"` will resolve to the module defined in
-`hardware/google/pixel/pixelstats/Android.bp` because this module is in
+a reference to `"powerstats_pixel_binary_defaults"` will resolve to the module defined in
+`hardware/google/pixel/powerstats/Android.bp` because this module is in
 `hardware/google/pixel` namespace.
-
-**TODO**: Conventionally, languages with similar concepts provide separate
-constructs for namespace definition and name resolution (`namespace` and `using`
-in C++, for instance). Should Soong do that, too?
 
 #### Referencing modules in makefiles
 
@@ -289,21 +293,21 @@ defined in already converted Android.bp as a dependency.
 
 A module defined in an Android.bp file and belonging to the global namespace can
 be referenced from a makefile without additional effort. If a module belongs to
-an explicit namespace, it can be referenced from a makefile only after after the
+an explicit namespace, it can be referenced from a makefile only after the
 name of the namespace has been added to the value of PRODUCT_SOONG_NAMESPACES
 variable.
 
 Note that makefiles have no notion of namespaces and exposing namespaces with
 the same modules via PRODUCT_SOONG_NAMESPACES may cause Make failure. For
-instance, exposing both `device/google/bonito` and `device/google/coral`
+instance, exposing both `device/google/lynx/powerstats` and `device/google/tangorpro/powerstats`
 namespaces will cause Make failure because it will see two targets for the
-`pixelstats-vendor` module.
+`android.hardware.power.stats-service.pixel` module.
 
 ### Visibility
 
 The `visibility` property on a module controls whether the module can be
 used by other packages. Modules are always visible to other modules declared
-in the same package. This is based on the Bazel visibility mechanism.
+in the same package.
 
 If specified the `visibility` property must contain at least one rule.
 
@@ -362,7 +366,7 @@ apply to any non-defaults module that uses it. To set the visibility of a
 defaults module, use the `defaults_visibility` property on the defaults module;
 not to be confused with the `default_visibility` property on the package module.
 
-Once the build has been completely switched over to soong it is possible that a
+Once the build has been completely switched over to Soong it is possible that a
 global refactoring will be done to change this to `//visibility:private` at
 which point all packages that do not currently specify a `default_visibility`
 property will be updated to have
@@ -435,6 +439,13 @@ cc_library {
 When building the module for arm the `generic.cpp` and `arm.cpp` sources will
 be built.  When building for x86 the `generic.cpp` and 'x86.cpp' sources will
 be built.
+
+#### Select Statements
+
+Select statement is a new mechanism for supporting conditionals, which is easier
+to write and maintain and reduces boilerplate code. It is recommended to use
+select statements instead of soong_config_module_type. See
+[Select Statements](docs/selects.md) for the details.
 
 #### Soong Config Variables
 

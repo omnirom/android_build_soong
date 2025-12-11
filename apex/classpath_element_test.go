@@ -29,7 +29,7 @@ import (
 type testClasspathElementContext struct {
 	android.OtherModuleProviderContext
 	testContext *android.TestContext
-	module      android.Module
+	module      android.ModuleProxy
 	errs        []error
 }
 
@@ -198,18 +198,18 @@ func TestCreateClasspathElements(t *testing.T) {
 
 	result := preparer.RunTest(t)
 
-	artFragment := result.Module("art-bootclasspath-fragment", "android_common_com.android.art")
-	artBaz := result.Module("baz", "android_common_apex10000")
-	artQuuz := result.Module("quuz", "android_common_apex10000")
+	artFragment := result.ModuleProxy("art-bootclasspath-fragment", "android_common_com.android.art")
+	artBaz := result.ModuleProxy("baz", "android_common_apex10000")
+	artQuuz := result.ModuleProxy("quuz", "android_common_apex10000")
 
-	myFragment := result.Module("mybootclasspath-fragment", "android_common_myapex")
-	myBar := result.Module("bar", "android_common_apex10000")
+	myFragment := result.ModuleProxy("mybootclasspath-fragment", "android_common_myapex")
+	myBar := result.ModuleProxy("bar", "android_common_apex10000")
 
-	otherApexLibrary := result.Module("otherapexlibrary", "android_common_apex10000")
+	otherApexLibrary := result.ModuleProxy("otherapexlibrary", "android_common_apex10000")
 
-	platformFoo := result.Module("quuz", "android_common")
+	platformFoo := result.ModuleProxy("quuz", "android_common")
 
-	bootclasspath := result.Module("myplatform-bootclasspath", "android_common")
+	bootclasspath := result.ModuleProxy("myplatform-bootclasspath", "android_common")
 
 	// Use a custom assertion method instead of AssertDeepEquals as the latter formats the output
 	// using %#v which results in meaningless output as ClasspathElements are pointers.
@@ -219,10 +219,10 @@ func TestCreateClasspathElements(t *testing.T) {
 		}
 	}
 
-	expectFragmentElement := func(module android.Module, contents ...android.Module) java.ClasspathElement {
+	expectFragmentElement := func(module android.ModuleProxy, contents ...android.ModuleProxy) java.ClasspathElement {
 		return &java.ClasspathFragmentElement{module, contents}
 	}
-	expectLibraryElement := func(module android.Module) java.ClasspathElement {
+	expectLibraryElement := func(module android.ModuleProxy) java.ClasspathElement {
 		return &java.ClasspathLibraryElement{module}
 	}
 
@@ -239,10 +239,10 @@ func TestCreateClasspathElements(t *testing.T) {
 		t.Parallel()
 		ctx := newCtx()
 		elements := java.CreateClasspathElements(ctx,
-			[]android.Module{artBaz, artQuuz, myBar, platformFoo},
-			[]android.Module{artFragment, myFragment},
-			map[android.Module]string{artBaz: "com.android.art", artQuuz: "com.android.art", myBar: "myapex"},
-			map[string]android.Module{"com.android.art": artFragment, "myapex": myFragment})
+			[]android.ModuleProxy{artBaz, artQuuz, myBar, platformFoo},
+			[]android.ModuleProxy{artFragment, myFragment},
+			map[android.ModuleProxy]string{artBaz: "com.android.art", artQuuz: "com.android.art", myBar: "myapex"},
+			map[string]android.ModuleProxy{"com.android.art": artFragment, "myapex": myFragment})
 		expectedElements := java.ClasspathElements{
 			expectFragmentElement(artFragment, artBaz, artQuuz),
 			expectFragmentElement(myFragment, myBar),
@@ -257,10 +257,10 @@ func TestCreateClasspathElements(t *testing.T) {
 		t.Parallel()
 		ctx := newCtx()
 		elements := java.CreateClasspathElements(ctx,
-			[]android.Module{artBaz, myBar, artQuuz, platformFoo},
-			[]android.Module{artFragment, myFragment},
-			map[android.Module]string{artBaz: "com.android.art", artQuuz: "com.android.art", myBar: "myapex"},
-			map[string]android.Module{"com.android.art": artFragment, "myapex": myFragment})
+			[]android.ModuleProxy{artBaz, myBar, artQuuz, platformFoo},
+			[]android.ModuleProxy{artFragment, myFragment},
+			map[android.ModuleProxy]string{artBaz: "com.android.art", artQuuz: "com.android.art", myBar: "myapex"},
+			map[string]android.ModuleProxy{"com.android.art": artFragment, "myapex": myFragment})
 		expectedElements := java.ClasspathElements{
 			expectFragmentElement(artFragment, artBaz, artQuuz),
 			expectFragmentElement(myFragment, myBar),
@@ -276,10 +276,10 @@ func TestCreateClasspathElements(t *testing.T) {
 		t.Parallel()
 		ctx := newCtx()
 		elements := java.CreateClasspathElements(ctx,
-			[]android.Module{artBaz, platformFoo, artQuuz, myBar},
-			[]android.Module{artFragment, myFragment},
-			map[android.Module]string{artBaz: "com.android.art", artQuuz: "com.android.art", myBar: "myapex"},
-			map[string]android.Module{"com.android.art": artFragment, "myapex": myFragment})
+			[]android.ModuleProxy{artBaz, platformFoo, artQuuz, myBar},
+			[]android.ModuleProxy{artFragment, myFragment},
+			map[android.ModuleProxy]string{artBaz: "com.android.art", artQuuz: "com.android.art", myBar: "myapex"},
+			map[string]android.ModuleProxy{"com.android.art": artFragment, "myapex": myFragment})
 		expectedElements := java.ClasspathElements{
 			expectFragmentElement(artFragment, artBaz, artQuuz),
 			expectLibraryElement(platformFoo),
@@ -296,10 +296,10 @@ func TestCreateClasspathElements(t *testing.T) {
 		t.Parallel()
 		ctx := newCtx()
 		elements := java.CreateClasspathElements(ctx,
-			[]android.Module{artBaz, otherApexLibrary},
-			[]android.Module{artFragment},
-			map[android.Module]string{artBaz: "com.android.art", otherApexLibrary: "otherapex"},
-			map[string]android.Module{"com.android.art": artFragment})
+			[]android.ModuleProxy{artBaz, otherApexLibrary},
+			[]android.ModuleProxy{artFragment},
+			map[android.ModuleProxy]string{artBaz: "com.android.art", otherApexLibrary: "otherapex"},
+			map[string]android.ModuleProxy{"com.android.art": artFragment})
 		expectedElements := java.ClasspathElements{
 			expectFragmentElement(artFragment, artBaz),
 		}

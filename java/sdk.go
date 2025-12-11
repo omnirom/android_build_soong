@@ -99,7 +99,7 @@ func systemModuleKind(sdkKind android.SdkKind, apiLevel android.ApiLevel) androi
 	return systemModuleKind
 }
 
-func decodeSdkDep(ctx android.EarlyModuleContext, sdkContext android.SdkContext) sdkDep {
+func decodeSdkDep(ctx android.EarlyModuleContext, sdkContext SdkVersionContext) sdkDep {
 	sdkVersion := sdkContext.SdkVersion(ctx)
 	if !sdkVersion.Valid() {
 		ctx.PropertyErrorf("sdk_version", "invalid version %q", sdkVersion.Raw)

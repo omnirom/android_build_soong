@@ -22,16 +22,19 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/blueprint"
-	"github.com/google/blueprint/proptools"
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/google/blueprint"
+	"github.com/google/blueprint/proptools"
 
 	"android/soong/cmd/sbox/sbox_proto"
 	"android/soong/remoteexec"
 	"android/soong/response"
 	"android/soong/shared"
 )
+
+//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
 
 const sboxSandboxBaseDir = "__SBOX_SANDBOX_DIR__"
 const sboxOutSubDir = "out"
@@ -66,6 +69,7 @@ type RuleBuilder struct {
 	nsjailKeepGendir bool
 	nsjailBasePath   WritablePath
 	nsjailImplicits  Paths
+	dirDepsFile      WritablePath
 }
 
 // NewRuleBuilder returns a newly created RuleBuilder.
@@ -98,6 +102,7 @@ func (rb *RuleBuilder) SetPhonyOutput() {
 }
 
 // RuleBuilderInstall is a tuple of install from and to locations.
+// @auto-generate: gob
 type RuleBuilderInstall struct {
 	From Path
 	To   string
@@ -195,6 +200,14 @@ func (r *RuleBuilder) Nsjail(outputDir WritablePath, baseDir WritablePath) *Rule
 	r.nsjail = true
 	r.outDir = outputDir
 	r.nsjailBasePath = baseDir
+	return r
+}
+
+func (r *RuleBuilder) DirDepsFile(dirDepsFile WritablePath) *RuleBuilder {
+	if r.dirDepsFile != nil {
+		panic("Cannot call DirDepsFile() twice")
+	}
+	r.dirDepsFile = dirDepsFile
 	return r
 }
 
@@ -476,6 +489,21 @@ func (r *RuleBuilder) rspFiles() []rspFileAndPaths {
 	return rspFiles
 }
 
+// implicitDirectories returns the list of paths that were passed to the RuleBuilderCommand.ImplicitDirectory method.
+// The list is sorted and duplicates removed.
+func (r *RuleBuilder) implicitDirectories() DirectoryPaths {
+	var dirsList DirectoryPaths
+	for _, c := range r.commands {
+		dirsList = append(dirsList, c.implicitDirectories...)
+	}
+
+	sort.Slice(dirsList, func(i, j int) bool {
+		return dirsList[i].String() < dirsList[j].String()
+	})
+
+	return dirsList
+}
+
 // Commands returns a slice containing the built command line for each call to RuleBuilder.Command.
 func (r *RuleBuilder) Commands() []string {
 	var commands []string
@@ -501,6 +529,17 @@ func (r *RuleBuilder) depFileMergerCmd(depFiles WritablePaths) *RuleBuilderComma
 		Inputs(depFiles.Paths())
 }
 
+func (r *RuleBuilder) dirsToDepFileCmd(dirs DirectoryPaths, target WritablePath) *RuleBuilderCommand {
+	if r.dirDepsFile == nil {
+		panic("You must call DirDepsFile() to use directory inputs")
+	}
+	return r.Command().
+		builtToolWithoutDeps("dir_to_depfile").
+		FlagWithDepFile("-o ", r.dirDepsFile).
+		FlagWithArg("-t ", target.String()).
+		Text(strings.Join(dirs.Strings(), " "))
+}
+
 // Build adds the built command line to the build graph, with dependencies on Inputs and Tools, and output files for
 // Outputs.
 func (r *RuleBuilder) Build(name string, desc string) {
@@ -514,32 +553,36 @@ func (r *RuleBuilder) build(name string, desc string) {
 
 	if len(r.missingDeps) > 0 {
 		r.ctx.Build(r.pctx, BuildParams{
-			Rule:        ErrorRule,
+			Rule:        errorRule,
 			Outputs:     r.Outputs(),
 			Description: desc,
 			Args: map[string]string{
-				"error": "missing dependencies: " + strings.Join(r.missingDeps, ", "),
+				"error": proptools.NinjaAndShellEscape("missing dependencies: " + strings.Join(r.missingDeps, ", ")),
 			},
 		})
 		return
 	}
 
+	if dirs := r.implicitDirectories(); len(dirs) > 0 {
+		r.dirsToDepFileCmd(dirs, r.Outputs()[0])
+	}
+
 	var depFile WritablePath
 	var depFormat blueprint.Deps
 	if depFiles := r.DepFiles(); len(depFiles) > 0 {
+		if r.sbox || r.nsjail {
+			// Check for Rel() errors, as all depfiles should be in the output dir.  Errors
+			// will be reported to the ctx.
+			for _, path := range depFiles {
+				Rel(r.ctx, r.outDir.String(), path.String())
+			}
+		}
+
 		depFile = depFiles[0]
 		depFormat = blueprint.DepsGCC
 		if len(depFiles) > 1 {
 			// Add a command locally that merges all depfiles together into the first depfile.
 			r.depFileMergerCmd(depFiles)
-
-			if r.sbox {
-				// Check for Rel() errors, as all depfiles should be in the output dir.  Errors
-				// will be reported to the ctx.
-				for _, path := range depFiles[1:] {
-					Rel(r.ctx, r.outDir.String(), path.String())
-				}
-			}
 		}
 	}
 
@@ -601,6 +644,9 @@ func (r *RuleBuilder) build(name string, desc string) {
 		for _, input := range inputs {
 			addBindMount(input.String(), r.nsjailPathForInputRel(input))
 		}
+		for _, input := range r.OrderOnlys() {
+			addBindMount(input.String(), r.nsjailPathForInputRel(input))
+		}
 		for _, tool := range tools {
 			addBindMount(tool.String(), nsjailPathForToolRel(r.ctx, tool))
 		}
@@ -608,8 +654,6 @@ func (r *RuleBuilder) build(name string, desc string) {
 		for _, c := range r.commands {
 			for _, directory := range c.implicitDirectories {
 				addBindMount(directory.String(), directory.String())
-				// TODO(b/375551969): Add implicitDirectories to BuildParams, rather than relying on implicits
-				inputs = append(inputs, SourcePath{basePath: directory.base()})
 			}
 			for _, tool := range c.packagedTools {
 				addBindMount(tool.srcPath.String(), nsjailPathForPackagedToolRel(tool))
@@ -644,10 +688,6 @@ func (r *RuleBuilder) build(name string, desc string) {
 		command := sbox_proto.Command{}
 		manifest.Commands = append(manifest.Commands, &command)
 		command.Command = proto.String(commandString)
-
-		if depFile != nil {
-			manifest.OutputDepfile = proto.String(depFile.String())
-		}
 
 		// If sandboxing tools is enabled, add copy rules to the manifest to copy each tool
 		// into the sbox directory.
@@ -689,6 +729,14 @@ func (r *RuleBuilder) build(name string, desc string) {
 					From: proto.String(input.String()),
 					To:   proto.String(r.sboxPathForInputRel(input)),
 				})
+			}
+			for _, c := range r.commands {
+				for _, directory := range c.implicitDirectories {
+					command.CopyDirBefore = append(command.CopyDirBefore, &sbox_proto.CopyDir{
+						From: proto.String(directory.String()),
+						To:   proto.String(directory.String()),
+					})
+				}
 			}
 
 			// If using rsp files copy them and their contents into the sbox directory with
@@ -760,6 +808,13 @@ func (r *RuleBuilder) build(name string, desc string) {
 				To:   proto.String(output.String()),
 			})
 		}
+		if depFile != nil {
+			rel := Rel(r.ctx, r.outDir.String(), depFile.String())
+			command.CopyAfter = append(command.CopyAfter, &sbox_proto.Copy{
+				From: proto.String(filepath.Join(r.sboxOutSubDir, rel)),
+				To:   proto.String(depFile.String()),
+			})
+		}
 
 		// Outputs that were marked Temporary will not be checked that they are in the output
 		// directory by the loop above, check them here.
@@ -811,7 +866,7 @@ func (r *RuleBuilder) build(name string, desc string) {
 		tools = append(tools, sboxCmd.tools...)
 		inputs = append(inputs, sboxCmd.inputs...)
 
-		if r.rbeParams != nil {
+		if r.rbeParams != nil && r.ctx.Config().UseREWrapper() {
 			// RBE needs a list of input files to copy to the remote builder.  For inputs already
 			// listed in an rsp file, pass the rsp file directly to rewrapper.  For the rest,
 			// create a new rsp file to pass to rewrapper.
@@ -869,10 +924,9 @@ func (r *RuleBuilder) build(name string, desc string) {
 	}
 
 	var pool blueprint.Pool
-	if r.ctx.Config().UseGoma() && r.remoteable.Goma {
-		// When USE_GOMA=true is set and the rule is supported by goma, allow jobs to run outside the local pool.
-	} else if r.ctx.Config().UseRBE() && r.remoteable.RBE {
-		// When USE_RBE=true is set and the rule is supported by RBE, use the remotePool.
+	if r.ctx.Config().UseREWrapper() && r.remoteable.RBE {
+		// When USE_REWRAPPER=true is set and the rule is supported by RBE, use the
+		// remotePool.
 		pool = remotePool
 	} else if r.highmem {
 		pool = highmemPool
@@ -886,7 +940,7 @@ func (r *RuleBuilder) build(name string, desc string) {
 		hasher := sha256.New()
 		hasher.Write([]byte(output.String()))
 		script := PathForOutput(r.ctx, "rule_builder_scripts", fmt.Sprintf("%x.sh", hasher.Sum(nil)))
-		commandString = "set -eu\n\n" + commandString + "\n"
+		commandString = "#!/usr/bin/env sh\nset -eu\n\n" + commandString + "\n"
 		WriteExecutableFileRuleVerbatim(r.ctx, script, commandString)
 		inputs = append(inputs, script)
 		commandString = script.String()
@@ -962,10 +1016,6 @@ func (c *RuleBuilderCommand) addInput(path Path) string {
 func (c *RuleBuilderCommand) addImplicit(path Path) {
 	checkPathNotNil(path)
 	c.implicits = append(c.implicits, path)
-}
-
-func (c *RuleBuilderCommand) addImplicitDirectory(path DirectoryPath) {
-	c.implicitDirectories = append(c.implicitDirectories, path)
 }
 
 func (c *RuleBuilderCommand) addOrderOnly(path Path) {
@@ -1337,10 +1387,10 @@ func (c *RuleBuilderCommand) Implicits(paths Paths) *RuleBuilderCommand {
 // ImplicitDirectory adds the specified input directory to the dependencies without modifying the
 // command line. Added directories will be bind-mounted for the nsjail.
 func (c *RuleBuilderCommand) ImplicitDirectory(path DirectoryPath) *RuleBuilderCommand {
-	if !c.rule.nsjail {
-		panic("ImplicitDirectory() must be called after Nsjail()")
+	if !c.rule.nsjail && !c.rule.sbox {
+		panic("ImplicitDirectory() must be called after Nsjail() or Sbox()")
 	}
-	c.addImplicitDirectory(path)
+	c.implicitDirectories = append(c.implicitDirectories, path)
 	return c
 }
 

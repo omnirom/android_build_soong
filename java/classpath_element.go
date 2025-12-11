@@ -28,7 +28,7 @@ import (
 // ClasspathElement represents a component that contributes to a classpath. That can be
 // either a java module or a classpath fragment module.
 type ClasspathElement interface {
-	Module() android.Module
+	Module() android.ModuleProxy
 	String() string
 }
 
@@ -36,11 +36,11 @@ type ClasspathElements []ClasspathElement
 
 // ClasspathFragmentElement is a ClasspathElement that encapsulates a classpath fragment module.
 type ClasspathFragmentElement struct {
-	Fragment android.Module
-	Contents []android.Module
+	Fragment android.ModuleProxy
+	Contents []android.ModuleProxy
 }
 
-func (b *ClasspathFragmentElement) Module() android.Module {
+func (b *ClasspathFragmentElement) Module() android.ModuleProxy {
 	return b.Fragment
 }
 
@@ -56,10 +56,10 @@ var _ ClasspathElement = (*ClasspathFragmentElement)(nil)
 
 // ClasspathLibraryElement is a ClasspathElement that encapsulates a java library.
 type ClasspathLibraryElement struct {
-	Library android.Module
+	Library android.ModuleProxy
 }
 
-func (b *ClasspathLibraryElement) Module() android.Module {
+func (b *ClasspathLibraryElement) Module() android.ModuleProxy {
 	return b.Library
 }
 
@@ -118,10 +118,10 @@ type ClasspathElementContext interface {
 //	ClasspathFragmentElement(art-bootclasspath-fragment, [core-oj, core-libart]),
 //	ClasspathLibraryElement(framework),
 //	ClasspathLibraryElement(ext),
-func CreateClasspathElements(ctx ClasspathElementContext, libraries []android.Module, fragments []android.Module,
-	libraryToApex map[android.Module]string, apexNameToFragment map[string]android.Module) ClasspathElements {
+func CreateClasspathElements(ctx ClasspathElementContext, libraries []android.ModuleProxy, fragments []android.ModuleProxy,
+	libraryToApex map[android.ModuleProxy]string, apexNameToFragment map[string]android.ModuleProxy) ClasspathElements {
 
-	fragmentToElement := map[android.Module]*ClasspathFragmentElement{}
+	fragmentToElement := map[android.ModuleProxy]*ClasspathFragmentElement{}
 	elements := []ClasspathElement{}
 	var currentElement ClasspathElement
 
@@ -130,11 +130,11 @@ skipLibrary:
 	for _, library := range libraries {
 		var element ClasspathElement
 		if libraryApex, ok := libraryToApex[library]; ok {
-			var fragment android.Module
+			var fragment android.ModuleProxy
 
 			// Make sure that the library is in only one fragment of the classpath.
 			if f, ok := apexNameToFragment[libraryApex]; ok {
-				if fragment == nil {
+				if fragment.IsNil() {
 					// This is the first fragment so just save it away.
 					fragment = f
 				} else if f != fragment {
@@ -148,7 +148,7 @@ skipLibrary:
 				// There is no fragment associated with the library's apex.
 			}
 
-			if fragment == nil {
+			if fragment.IsNil() {
 				ctx.ModuleErrorf("library %s is from apexes %s which have no corresponding fragment in %s",
 					library, []string{libraryApex}, fragments)
 				// Skip over this library entirely as otherwise the resulting classpath elements would
@@ -184,7 +184,7 @@ skipLibrary:
 				// including the library.
 				fragmentElement := &ClasspathFragmentElement{
 					Fragment: fragment,
-					Contents: []android.Module{library},
+					Contents: []android.ModuleProxy{library},
 				}
 
 				// Store it away so we can detect when attempting to create another element for the same

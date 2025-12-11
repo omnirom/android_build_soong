@@ -17,9 +17,12 @@ package android
 import (
 	"bytes"
 	"fmt"
+	"iter"
+	"maps"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -91,7 +94,6 @@ var PrepareForTestWithGenNotice = FixtureRegisterWithContext(RegisterGenNoticeBu
 func registerLicenseMutators(ctx RegistrationContext) {
 	ctx.PreArchMutators(RegisterLicensesPackageMapper)
 	ctx.PreArchMutators(RegisterLicensesPropertyGatherer)
-	ctx.PostDepsMutators(RegisterLicensesDependencyChecker)
 }
 
 var PrepareForTestWithLicenseDefaultModules = GroupFixturePreparers(
@@ -238,7 +240,7 @@ func (ctx *TestContext) HardCodedPreArchMutators(f RegisterMutatorFunc) {
 	ctx.PreArchMutators(f)
 }
 
-func (ctx *TestContext) otherModuleProvider(m blueprint.Module, p blueprint.AnyProviderKey) (any, bool) {
+func (ctx *TestContext) otherModuleProvider(m ModuleOrProxy, p blueprint.AnyProviderKey) (any, bool) {
 	return ctx.Context.ModuleProvider(m, p)
 }
 
@@ -259,13 +261,70 @@ func (ctx *TestContext) FinalDepsMutators(f RegisterMutatorFunc) {
 }
 
 func (ctx *TestContext) OtherModuleProviderAdaptor() OtherModuleProviderContext {
-	return NewOtherModuleProviderAdaptor(func(module blueprint.Module, provider blueprint.AnyProviderKey) (any, bool) {
+	return NewOtherModuleProviderAdaptor(func(module ModuleOrProxy, provider blueprint.AnyProviderKey) (any, bool) {
 		return ctx.otherModuleProvider(module, provider)
 	})
 }
 
-func (ctx *TestContext) OtherModulePropertyErrorf(module Module, property string, fmt_ string, args ...interface{}) {
+func (ctx *TestContext) ModuleDir(module ModuleOrProxy) string {
+	return ctx.Context.ModuleDir(module)
+}
+
+func (ctx *TestContext) ModuleSubDir(module ModuleOrProxy) string {
+	return ctx.Context.ModuleSubDir(module)
+}
+
+func (ctx *TestContext) ModuleType(module ModuleOrProxy) string {
+	return ctx.Context.ModuleType(module)
+}
+
+func (ctx *TestContext) ModuleErrorf(module ModuleOrProxy, fmt string, args ...any) error {
+	return ctx.Context.ModuleErrorf(module, fmt, args...)
+}
+
+func (ctx *TestContext) OtherModulePropertyErrorf(module ModuleOrProxy, property string, fmt_ string, args ...interface{}) {
 	panic(fmt.Sprintf(fmt_, args...))
+}
+
+// VisitAllModules iterates over all modules tracked through the test config.
+func (ctx *TestContext) VisitAllModules(visit func(Module)) {
+	for module := range ctx.config.modulesForTests.Iter() {
+		visit(module)
+	}
+}
+
+// VisitAllModulesProxies wraps blueprint.Context.VisitAllModulesProxies, converting blueprint.ModuleProxy to
+// android.ModuleProxy.
+func (ctx *TestContext) VisitAllModulesProxies(visit func(ModuleProxy)) {
+	ctx.Context.VisitAllModulesProxies(func(module blueprint.ModuleProxy) {
+		visit(ModuleProxy{module})
+	})
+}
+
+// VisitDirectDeps wraps blueprint.Context.VisitDirectDepsProxies, converting blueprint.ModuleProxy to android.Module
+// using the list of modules in the test config.
+func (ctx *TestContext) VisitDirectDeps(module Module, visit func(Module)) {
+	allModules := slices.Collect(ctx.config.modulesForTests.Iter())
+	ctx.VisitDirectDepsProxies(module, func(dep ModuleProxy) {
+		i := slices.IndexFunc(allModules, func(m Module) bool { return EqualModules(m, dep) })
+		if i < 0 {
+			panic(fmt.Errorf("failed to find Module for ModuleProxy %s", dep))
+		} else {
+			visit(allModules[i])
+		}
+	})
+}
+
+// VisitDirectDepsProxies wraps blueprint.Context.VisitDirectDepsProxies, converting blueprint.ModuleProxy to
+// android.ModuleProxy.
+func (ctx *TestContext) VisitDirectDepsProxies(module ModuleOrProxy, visit func(ModuleProxy)) {
+	ctx.Context.VisitDirectDepsProxies(module, func(dep blueprint.ModuleProxy) {
+		visit(ModuleProxy{dep})
+	})
+}
+
+func (ctx *TestContext) ModuleToProxy(module ModuleOrProxy) ModuleProxy {
+	return ModuleProxy{ctx.Context.ModuleToProxy(module)}
 }
 
 // registeredComponentOrder defines the order in which a sortableComponent type is registered at
@@ -533,7 +592,7 @@ func (ctx *TestContext) RegisterParallelSingletonType(name string, factory Singl
 func (ctx *TestContext) ModuleVariantForTests(t *testing.T, name string, matchVariations map[string]string) TestingModule {
 	t.Helper()
 	modules := []Module{}
-	ctx.VisitAllModules(func(m blueprint.Module) {
+	ctx.VisitAllModules(func(m Module) {
 		if ctx.ModuleName(m) == name {
 			am := m.(Module)
 			amMut := am.base().commonProperties.DebugMutators
@@ -555,7 +614,7 @@ func (ctx *TestContext) ModuleVariantForTests(t *testing.T, name string, matchVa
 		// Show all the modules or module variants that do exist.
 		var allModuleNames []string
 		var allVariants []string
-		ctx.VisitAllModules(func(m blueprint.Module) {
+		ctx.VisitAllModules(func(m Module) {
 			allModuleNames = append(allModuleNames, ctx.ModuleName(m))
 			if ctx.ModuleName(m) == name {
 				allVariants = append(allVariants, m.(Module).String())
@@ -582,15 +641,15 @@ func (ctx *TestContext) ModuleVariantForTests(t *testing.T, name string, matchVa
 			name, matchVariations, strings.Join(moduleStrings, "\n  "))
 	}
 
-	return newTestingModule(t, ctx.config, modules[0])
+	return newTestingModule(t, ctx.config, modules[0], ctx.ModuleToProxy(modules[0]))
 }
 
 func (ctx *TestContext) ModuleForTests(t *testing.T, name, variant string) TestingModule {
 	t.Helper()
 	var module Module
-	ctx.VisitAllModules(func(m blueprint.Module) {
+	ctx.VisitAllModules(func(m Module) {
 		if ctx.ModuleName(m) == name && ctx.ModuleSubDir(m) == variant {
-			module = m.(Module)
+			module = m
 		}
 	})
 
@@ -598,7 +657,7 @@ func (ctx *TestContext) ModuleForTests(t *testing.T, name, variant string) Testi
 		// find all the modules that do exist
 		var allModuleNames []string
 		var allVariants []string
-		ctx.VisitAllModules(func(m blueprint.Module) {
+		ctx.VisitAllModules(func(m Module) {
 			allModuleNames = append(allModuleNames, ctx.ModuleName(m))
 			if ctx.ModuleName(m) == name {
 				allVariants = append(allVariants, ctx.ModuleSubDir(m))
@@ -615,12 +674,12 @@ func (ctx *TestContext) ModuleForTests(t *testing.T, name, variant string) Testi
 		}
 	}
 
-	return newTestingModule(t, ctx.config, module)
+	return newTestingModule(t, ctx.config, module, ctx.ModuleToProxy(module))
 }
 
 func (ctx *TestContext) ModuleVariantsForTests(name string) []string {
 	var variants []string
-	ctx.VisitAllModules(func(m blueprint.Module) {
+	ctx.VisitAllModules(func(m Module) {
 		if ctx.ModuleName(m) == name {
 			variants = append(variants, ctx.ModuleSubDir(m))
 		}
@@ -1053,18 +1112,25 @@ func (b baseTestingComponent) AllOutputs() []string {
 type TestingModule struct {
 	baseTestingComponent
 	module Module
+	proxy  ModuleProxy
 }
 
-func newTestingModule(t *testing.T, config Config, module Module) TestingModule {
+func newTestingModule(t *testing.T, config Config, module Module, proxy ModuleProxy) TestingModule {
 	return TestingModule{
 		newBaseTestingComponent(t, config, module),
 		module,
+		proxy,
 	}
 }
 
 // Module returns the Module wrapped by the TestingModule.
 func (m TestingModule) Module() Module {
 	return m.module
+}
+
+// ModuleProxy returns the ModuleProxy wrapped by the TestingModule.
+func (m TestingModule) ModuleProxy() ModuleProxy {
+	return m.proxy
 }
 
 // VariablesForTestsRelativeToTop returns a copy of the Module.VariablesForTests() with every value
@@ -1167,6 +1233,12 @@ func SetKatiEnabledForTests(config Config) {
 	config.katiEnabled = true
 }
 
+func SetBuildDateFileEnvVarForTests() FixturePreparer {
+	return FixtureModifyConfig(func(config Config) {
+		config.env["BUILD_DATETIME_FILE"] = filepath.Join(config.outDir, "build_date.txt")
+	})
+}
+
 func AndroidMkEntriesForTest(t *testing.T, ctx *TestContext, mod Module) []AndroidMkEntries {
 	t.Helper()
 	var p AndroidMkEntriesProvider
@@ -1195,13 +1267,16 @@ func AndroidMkInfoForTest(t *testing.T, ctx *TestContext, mod Module) *AndroidMk
 		t.Error("module does not implement AndroidMkProviderInfoProducer: " + mod.Name())
 	}
 
-	info := OtherModuleProviderOrDefault(ctx, mod, AndroidMkInfoProvider)
+	info, ok := OtherModuleProvider(ctx, mod, AndroidMkInfoProvider)
+	if !ok {
+		t.Fatalf("module %q is missing AndroidMkInfoProvider", mod.Name())
+	}
 	aconfigUpdateAndroidMkInfos(ctx, mod, info)
 	commonInfo := OtherModulePointerProviderOrDefault(ctx, mod, CommonModuleInfoProvider)
 	info.PrimaryInfo.fillInEntries(ctx, mod, commonInfo)
 	if len(info.ExtraInfo) > 0 {
-		for _, ei := range info.ExtraInfo {
-			ei.fillInEntries(ctx, mod, commonInfo)
+		for i := range info.ExtraInfo {
+			info.ExtraInfo[i].fillInEntries(ctx, mod, commonInfo)
 		}
 	}
 
@@ -1378,7 +1453,7 @@ type panickingConfigAndErrorContext struct {
 	ctx *TestContext
 }
 
-func (ctx *panickingConfigAndErrorContext) OtherModulePropertyErrorf(module Module, property, fmt string, args ...interface{}) {
+func (ctx *panickingConfigAndErrorContext) OtherModulePropertyErrorf(module ModuleOrProxy, property, fmt string, args ...interface{}) {
 	panic(ctx.ctx.PropertyErrorf(module, property, fmt, args...).Error())
 }
 
@@ -1390,12 +1465,121 @@ func (ctx *panickingConfigAndErrorContext) HasMutatorFinished(mutatorName string
 	return ctx.ctx.HasMutatorFinished(mutatorName)
 }
 
-func (ctx *panickingConfigAndErrorContext) otherModuleProvider(m blueprint.Module, p blueprint.AnyProviderKey) (any, bool) {
+func (ctx *panickingConfigAndErrorContext) otherModuleProvider(m ModuleOrProxy, p blueprint.AnyProviderKey) (any, bool) {
 	return ctx.ctx.otherModuleProvider(m, p)
 }
 
 func PanickingConfigAndErrorContext(ctx *TestContext) ConfigurableEvaluatorContext {
 	return &panickingConfigAndErrorContext{
 		ctx: ctx,
+	}
+}
+
+// modulesForTests stores the list of modules that exist for use during tests.
+type modulesForTests struct {
+	moduleGroups map[string]*moduleGroupForTests
+	lock         sync.Mutex
+}
+
+// moduleGroupForTests stores the list of variants that exist for a single module name.
+type moduleGroupForTests struct {
+	modules []Module
+	// nextInsertIndex is the position in modules where the last module is inserted.
+	// It is used when inserting new variants to place them after the variant they
+	// were created from.
+	nextInsertIndex int
+}
+
+// Insert inserts a module into modulesForTests.  If the Module matches and existing
+// Module in the list (either by being the same pointer or by being a clone with
+// identical name, namespace and variations) then it replaces the entry currently
+// in the list.  Otherwise, it is inserted after the most recently updated entry in
+// the list.
+func (m *modulesForTests) Insert(name string, module Module) {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	if existing, ok := m.moduleGroups[name]; ok {
+		// A name that is already present
+		if i := slices.IndexFunc(existing.modules, func(old Module) bool {
+			return old == module ||
+				(old.base().commonProperties.DebugName == module.base().commonProperties.DebugName &&
+					old.base().commonProperties.DebugNamespace == module.base().commonProperties.DebugNamespace &&
+					slices.Equal(old.base().commonProperties.DebugVariations, module.base().commonProperties.DebugVariations) &&
+					slices.Equal(old.base().commonProperties.DebugMutators, module.base().commonProperties.DebugMutators))
+		}); i >= 0 {
+			// The module matches an existing module, either by being the same Module or by being a clone.
+			// Replace the current entry, and set the insertion point to after the current entry.
+			// This path is reached when TransitionMutator is creating new variants, and relies on the
+			// Blueprint optimization that the existing variant is reused as the first new variant so that
+			// the list doesn't collect old obsolete variants.
+			existing.modules[i] = module
+			existing.nextInsertIndex = i + 1
+		} else {
+			// The module doesn't match an existing module, insert it at the insertion point and update the
+			// insertion point to point after it.
+			existing.modules = slices.Concat(existing.modules[:existing.nextInsertIndex],
+				[]Module{module},
+				existing.modules[existing.nextInsertIndex:])
+			existing.nextInsertIndex += 1
+		}
+	} else {
+		// The name is not present, add a new entry for it.
+		m.moduleGroups[name] = &moduleGroupForTests{
+			modules:         []Module{module},
+			nextInsertIndex: 0,
+		}
+	}
+}
+
+// Rename updates the name of a module group.
+func (m *modulesForTests) Rename(from, to string) {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	m.moduleGroups[to] = m.moduleGroups[from]
+	delete(m.moduleGroups, from)
+}
+
+// Iter returns a Seq of all the modules in a deterministic order (alphabetically by module name,
+// and then in variant order).
+func (m *modulesForTests) Iter() iter.Seq[Module] {
+	return func(yield func(Module) bool) {
+		groups := slices.Collect(maps.Keys(m.moduleGroups))
+		slices.Sort(groups)
+		for _, group := range groups {
+			for _, module := range m.moduleGroups[group].modules {
+				if !yield(module) {
+					return
+				}
+			}
+		}
+	}
+}
+
+type visitDirectDepsInterface interface {
+	VisitDirectDepsProxies(ModuleOrProxy, func(dep ModuleProxy))
+}
+
+// HasDirectDep returns true if wantDep is a direct dependency of m.
+func HasDirectDep(ctx visitDirectDepsInterface, m Module, wantDep ModuleOrProxy) bool {
+	var found bool
+	ctx.VisitDirectDepsProxies(m, func(dep ModuleProxy) {
+		if EqualModules(dep, wantDep) {
+			found = true
+		}
+	})
+	return found
+}
+
+// AssertHasDirectDep asserts that wantDep is a direct dependency of m.
+func AssertHasDirectDep(t *testing.T, ctx visitDirectDepsInterface, m Module, wantDep ModuleOrProxy) {
+	t.Helper()
+	found := false
+	ctx.VisitDirectDepsProxies(m, func(dep ModuleProxy) {
+		if EqualModules(dep, wantDep) {
+			found = true
+		}
+	})
+	if !found {
+		t.Errorf("Could not find a dependency from %v to %v\n", m, wantDep)
 	}
 }

@@ -1021,29 +1021,31 @@ func TestBuildConfig(t *testing.T) {
 			name:    "none set",
 			environ: Environment{},
 			expectedBuildConfig: &smpb.BuildConfig{
-				ForceUseGoma:          proto.Bool(false),
-				UseGoma:               proto.Bool(false),
 				UseRbe:                proto.Bool(false),
 				NinjaWeightListSource: smpb.BuildConfig_NOT_USED.Enum(),
 			},
 		},
 		{
-			name:    "force use goma",
-			environ: Environment{"FORCE_USE_GOMA=1"},
+			name:    "partial compile not used",
+			environ: Environment{"SOONG_USE_PARTIAL_COMPILE=", "SOONG_PARTIAL_COMPILE=true"},
 			expectedBuildConfig: &smpb.BuildConfig{
-				ForceUseGoma:          proto.Bool(true),
-				UseGoma:               proto.Bool(false),
-				UseRbe:                proto.Bool(false),
+				UseRbe: proto.Bool(false),
+				SoongEnvVars: &smpb.SoongEnvVars{
+					PartialCompile:    proto.String("true"),
+					UsePartialCompile: proto.String("false"),
+				},
 				NinjaWeightListSource: smpb.BuildConfig_NOT_USED.Enum(),
 			},
 		},
 		{
-			name:    "use goma",
-			environ: Environment{"USE_GOMA=1"},
+			name:    "partial compile",
+			environ: Environment{"SOONG_USE_PARTIAL_COMPILE=true", "SOONG_PARTIAL_COMPILE=true"},
 			expectedBuildConfig: &smpb.BuildConfig{
-				ForceUseGoma:          proto.Bool(false),
-				UseGoma:               proto.Bool(true),
-				UseRbe:                proto.Bool(false),
+				UseRbe: proto.Bool(false),
+				SoongEnvVars: &smpb.SoongEnvVars{
+					PartialCompile:    proto.String("true"),
+					UsePartialCompile: proto.String("true"),
+				},
 				NinjaWeightListSource: smpb.BuildConfig_NOT_USED.Enum(),
 			},
 		},
@@ -1052,8 +1054,6 @@ func TestBuildConfig(t *testing.T) {
 			name:    "use rbe",
 			environ: Environment{"USE_RBE=1"},
 			expectedBuildConfig: &smpb.BuildConfig{
-				ForceUseGoma:          proto.Bool(false),
-				UseGoma:               proto.Bool(false),
 				UseRbe:                proto.Bool(runtime.GOOS == "linux"),
 				NinjaWeightListSource: smpb.BuildConfig_NOT_USED.Enum(),
 			},
@@ -1068,8 +1068,6 @@ func TestBuildConfig(t *testing.T) {
 			}
 			config := Config{c}
 			actual := buildConfig(config)
-			assertEquals(t, "ForceUseGoma", *tc.expectedBuildConfig.ForceUseGoma, *actual.ForceUseGoma)
-			assertEquals(t, "UseGoma", *tc.expectedBuildConfig.UseGoma, *actual.UseGoma)
 			assertEquals(t, "UseRbe", *tc.expectedBuildConfig.UseRbe, *actual.UseRbe)
 			assertEquals(t, "NinjaWeightListSource", *tc.expectedBuildConfig.NinjaWeightListSource, *actual.NinjaWeightListSource)
 		})

@@ -20,6 +20,7 @@ import (
 
 	"github.com/google/blueprint"
 	"github.com/google/blueprint/proptools"
+	"github.com/google/blueprint/syncmap"
 )
 
 // This file implements support for automatically adding dependencies on any module referenced
@@ -55,13 +56,18 @@ func addPathDepsForProps(ctx BottomUpMutatorContext, props []interface{}) {
 	var pathDeviceCommonProperties []string
 	var pathCommonOsProperties []string
 	var pathHostCommonProperties []string
+	var pathHostFirstProperties []string
+	var pathHostSecondProperties []string
 	for _, ps := range props {
-		pathProperties = append(pathProperties, taggedPropertiesForPropertyStruct(ctx, ps, "path")...)
-		pathDeviceFirstProperties = append(pathDeviceFirstProperties, taggedPropertiesForPropertyStruct(ctx, ps, "path_device_first")...)
-		pathDeviceFirstPrefer32Properties = append(pathDeviceFirstPrefer32Properties, taggedPropertiesForPropertyStruct(ctx, ps, "path_device_first_prefer32")...)
-		pathDeviceCommonProperties = append(pathDeviceCommonProperties, taggedPropertiesForPropertyStruct(ctx, ps, "path_device_common")...)
-		pathCommonOsProperties = append(pathCommonOsProperties, taggedPropertiesForPropertyStruct(ctx, ps, "path_common_os")...)
-		pathHostCommonProperties = append(pathHostCommonProperties, taggedPropertiesForPropertyStruct(ctx, ps, "path_host_common")...)
+		pathPropertyIndexes := pathPropertyIndexesForPropertyStruct(ps)
+		pathProperties = append(pathProperties, indexedPropertiesForPropertyStruct(ctx, ps, pathPropertyIndexes.path)...)
+		pathDeviceFirstProperties = append(pathDeviceFirstProperties, indexedPropertiesForPropertyStruct(ctx, ps, pathPropertyIndexes.pathDeviceFirst)...)
+		pathDeviceFirstPrefer32Properties = append(pathDeviceFirstPrefer32Properties, indexedPropertiesForPropertyStruct(ctx, ps, pathPropertyIndexes.pathDeviceFirstPrefer32)...)
+		pathDeviceCommonProperties = append(pathDeviceCommonProperties, indexedPropertiesForPropertyStruct(ctx, ps, pathPropertyIndexes.pathDeviceCommon)...)
+		pathCommonOsProperties = append(pathCommonOsProperties, indexedPropertiesForPropertyStruct(ctx, ps, pathPropertyIndexes.pathCommonOs)...)
+		pathHostCommonProperties = append(pathHostCommonProperties, indexedPropertiesForPropertyStruct(ctx, ps, pathPropertyIndexes.pathHostCommon)...)
+		pathHostFirstProperties = append(pathHostFirstProperties, indexedPropertiesForPropertyStruct(ctx, ps, pathPropertyIndexes.pathHostFirst)...)
+		pathHostSecondProperties = append(pathHostSecondProperties, indexedPropertiesForPropertyStruct(ctx, ps, pathPropertyIndexes.pathHostSecond)...)
 	}
 
 	// Remove duplicates to avoid multiple dependencies.
@@ -71,6 +77,8 @@ func addPathDepsForProps(ctx BottomUpMutatorContext, props []interface{}) {
 	pathDeviceCommonProperties = FirstUniqueStrings(pathDeviceCommonProperties)
 	pathCommonOsProperties = FirstUniqueStrings(pathCommonOsProperties)
 	pathHostCommonProperties = FirstUniqueStrings(pathHostCommonProperties)
+	pathHostFirstProperties = FirstUniqueStrings(pathHostFirstProperties)
+	pathHostSecondProperties = FirstUniqueStrings(pathHostSecondProperties)
 
 	// Add dependencies to anything that is a module reference.
 	for _, s := range pathProperties {
@@ -117,6 +125,27 @@ func addPathDepsForProps(ctx BottomUpMutatorContext, props []interface{}) {
 			ctx.AddVariationDependencies(ctx.Config().BuildOSCommonTarget.Variations(), sourceOrOutputDepTag(m, t), m)
 		}
 	}
+	// properties tagged "path_host_first" get the host os variant
+	for _, s := range pathHostFirstProperties {
+		if m, t := SrcIsModuleWithTag(s); m != "" {
+			ctx.AddVariationDependencies(ctx.Config().BuildOSTarget.Variations(), sourceOrOutputDepTag(m, t), m)
+		}
+	}
+	// properties tagged "path_host_second" get the host 2nd os variant
+	if len(pathHostSecondProperties) > 0 {
+		var targets []Target
+		targets, _ = decodeMultilibTargets("32", ctx.Config().Targets[ctx.Config().BuildOS], false)
+		if len(targets) == 0 {
+			ctx.ModuleErrorf("Could not find a 32 bit host target")
+		} else {
+			for _, s := range pathHostSecondProperties {
+				if m, t := SrcIsModuleWithTag(s); m != "" {
+					ctx.AddVariationDependencies(targets[0].Variations(), sourceOrOutputDepTag(m, t), m)
+				}
+			}
+		}
+	}
+
 	// properties tagged "path_common_os" get the CommonOs variant
 	for _, s := range pathCommonOsProperties {
 		if m, t := SrcIsModuleWithTag(s); m != "" {
@@ -128,10 +157,9 @@ func addPathDepsForProps(ctx BottomUpMutatorContext, props []interface{}) {
 	}
 }
 
-// taggedPropertiesForPropertyStruct uses the indexes of properties that are tagged with
-// android:"tagValue" to extract all their values from a property struct, returning them as a single
-// slice of strings.
-func taggedPropertiesForPropertyStruct(ctx BottomUpMutatorContext, ps interface{}, tagValue string) []string {
+// indexedPropertiesForPropertyStruct uses the indexes of properties extract all their values from a
+// property struct, returning them as a single slice of strings.
+func indexedPropertiesForPropertyStruct(ctx BottomUpMutatorContext, ps interface{}, pathPropertyIndexes [][]int) []string {
 	v := reflect.ValueOf(ps)
 	if v.Kind() != reflect.Ptr || v.Elem().Kind() != reflect.Struct {
 		panic(fmt.Errorf("type %s is not a pointer to a struct", v.Type()))
@@ -145,10 +173,7 @@ func taggedPropertiesForPropertyStruct(ctx BottomUpMutatorContext, ps interface{
 	// v is now the reflect.Value for the concrete property struct.
 	v = v.Elem()
 
-	// Get or create the list of indexes of properties that are tagged with `android:"path"`.
-	pathPropertyIndexes := taggedPropertyIndexesForPropertyStruct(ps, tagValue)
-
-	var ret []string
+	ret := make([]string, 0, len(pathPropertyIndexes))
 
 	for _, i := range pathPropertyIndexes {
 		var values []reflect.Value
@@ -237,22 +262,40 @@ func isSliceOfStruct(v reflect.Value) bool {
 	return v.Kind() == reflect.Slice && v.Type().Elem().Kind() == reflect.Struct
 }
 
-var pathPropertyIndexesCache OncePer
+type pathPropertyIndexes struct {
+	path                    [][]int
+	pathDeviceFirst         [][]int
+	pathDeviceFirstPrefer32 [][]int
+	pathDeviceCommon        [][]int
+	pathCommonOs            [][]int
+	pathHostCommon          [][]int
+	pathHostFirst           [][]int
+	pathHostSecond          [][]int
+}
 
-// taggedPropertyIndexesForPropertyStruct returns a list of all of the indexes of properties in
-// property struct type that are tagged with `android:"tagValue"`.  Each index is a []int suitable
-// for passing to reflect.Value.FieldByIndex.  The value is cached in a global cache by type and
-// tagValue.
-func taggedPropertyIndexesForPropertyStruct(ps interface{}, tagValue string) [][]int {
-	type pathPropertyIndexesOnceKey struct {
-		propStructType reflect.Type
-		tagValue       string
+var pathPropertyIndexesCache syncmap.SyncMap[reflect.Type, *pathPropertyIndexes]
+
+// pathPropertyIndexesForPropertyStruct returns a list of all of the indexes of properties in
+// property struct type that are tagged as path properties with `android:"path"` or similar.
+// Each index is a []int suitable for passing to reflect.Value.FieldByIndex.  The value is cached
+// in a global cache by type.
+func pathPropertyIndexesForPropertyStruct(ps interface{}) *pathPropertyIndexes {
+	key := reflect.TypeOf(ps)
+
+	if indexes, loaded := pathPropertyIndexesCache.Load(key); loaded {
+		return indexes
 	}
-	key := NewCustomOnceKey(pathPropertyIndexesOnceKey{
-		propStructType: reflect.TypeOf(ps),
-		tagValue:       tagValue,
-	})
-	return pathPropertyIndexesCache.Once(key, func() interface{} {
-		return proptools.PropertyIndexesWithTag(ps, "android", tagValue)
-	}).([][]int)
+
+	indexes := &pathPropertyIndexes{
+		path:                    proptools.PropertyIndexesWithTag(ps, "android", "path"),
+		pathDeviceFirst:         proptools.PropertyIndexesWithTag(ps, "android", "path_device_first"),
+		pathDeviceFirstPrefer32: proptools.PropertyIndexesWithTag(ps, "android", "path_device_first_prefer32"),
+		pathDeviceCommon:        proptools.PropertyIndexesWithTag(ps, "android", "path_device_common"),
+		pathCommonOs:            proptools.PropertyIndexesWithTag(ps, "android", "path_common_os"),
+		pathHostCommon:          proptools.PropertyIndexesWithTag(ps, "android", "path_host_common"),
+		pathHostFirst:           proptools.PropertyIndexesWithTag(ps, "android", "path_host_first"),
+		pathHostSecond:          proptools.PropertyIndexesWithTag(ps, "android", "path_host_second"),
+	}
+	indexes, _ = pathPropertyIndexesCache.LoadOrStore(key, indexes)
+	return indexes
 }

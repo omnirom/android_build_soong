@@ -15,6 +15,8 @@
 package java
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -2478,7 +2480,7 @@ func TestCertificates(t *testing.T) {
 			android.AssertPathRelativeToTopEquals(t, "certificates pem", test.expectedCertificate+".x509.pem", certificate.Pem)
 
 			signapk := foo.Output("foo.apk")
-			if signapk.Rule != android.ErrorRule {
+			if !android.IsErrorRule(signapk.Rule) {
 				signCertificateFlags := signapk.Args["certificates"]
 				expectedFlags := certificate.Pem.String() + " " + certificate.Key.String()
 				android.AssertStringEquals(t, "certificates flags", expectedFlags, signCertificateFlags)
@@ -3475,9 +3477,6 @@ func TestUsesLibraries(t *testing.T) {
 		prepareForJavaTest,
 		PrepareForTestWithJavaSdkLibraryFiles,
 		FixtureWithLastReleaseApis("runtime-library", "foo", "quuz", "qux", "bar", "fred"),
-		android.FixtureModifyProductVariables(func(variables android.FixtureProductVariables) {
-			variables.BuildWarningBadOptionalUsesLibsAllowlist = []string{"app", "prebuilt"}
-		}),
 	).RunTestWithBp(t, bp)
 
 	app := result.ModuleForTests(t, "app", "android_common")
@@ -3530,6 +3529,178 @@ func TestUsesLibraries(t *testing.T) {
 	android.AssertStringDoesContain(t, "dexpreopt app cmd context", cmd, "--context-json=")
 	android.AssertStringDoesContain(t, "dexpreopt app cmd product_packages", cmd,
 		"--product-packages=out/soong/.intermediates/app/android_common/dexpreopt/app/product_packages.txt")
+}
+
+func extractContextJson(cmd string) (map[string]interface{}, error) {
+	var clc map[string]interface{}
+	for _, flag := range strings.Split(cmd, " ") {
+		if value, match := strings.CutPrefix(flag, "--context-json='"); match {
+			value = strings.TrimSuffix(value, "'")
+			if err := json.Unmarshal([]byte(value), &clc); err != nil {
+				return nil, err
+			}
+			return clc, nil
+		}
+	}
+	return nil, errors.New("--context-json not found")
+}
+
+func TestClassLoaderContext_SdkLibrary(t *testing.T) {
+	bp := `
+		java_sdk_library {
+			name: "foo",
+			srcs: ["a.java"],
+			api_packages: ["foo"],
+			sdk_version: "current",
+			uses_libs: ["bar"],
+		}
+
+		java_sdk_library {
+			name: "bar",
+			srcs: ["b.java"],
+			api_packages: ["bar"],
+			sdk_version: "current",
+		}
+
+		android_app {
+			name: "app",
+			srcs: ["app.java"],
+			libs: ["foo.stubs"],
+			uses_libs: ["foo"],
+			sdk_version: "current",
+		}
+
+		android_app {
+			name: "app2",
+			srcs: ["app.java"],
+			libs: ["foo.impl"],
+			uses_libs: ["foo"],
+			sdk_version: "current",
+		}
+	`
+
+	result := android.GroupFixturePreparers(
+		prepareForJavaTest,
+		PrepareForTestWithJavaSdkLibraryFiles,
+		FixtureWithLastReleaseApis("foo", "bar"),
+	).RunTestWithBp(t, bp)
+
+	{
+		fooXml := result.ModuleForTests(t, "foo.xml", "android_common").Output("foo.xml")
+		fooXmlContents := android.ContentFromFileRuleForTests(t, result.TestContext, fooXml)
+		android.AssertStringDoesContain(t, "", fooXmlContents, `dependency="bar"`)
+	}
+
+	{
+		fooImpl := result.ModuleForTests(t, "foo.impl", "android_common")
+		cmd := fooImpl.Rule("dexpreopt").RuleParams.Command
+
+		clc, err := extractContextJson(cmd)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+
+		deps := clc["any"].([]interface{})
+		android.AssertIntEquals(t, "", 1, len(deps))
+		bar := deps[0].(map[string]interface{})
+		android.AssertStringEquals(t, "", "bar", bar["Name"].(string))
+	}
+
+	for _, name := range []string{"app", "app2"} {
+		app := result.ModuleForTests(t, name, "android_common")
+		cmd := app.Rule("dexpreopt").RuleParams.Command
+
+		clc, err := extractContextJson(cmd)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+
+		deps := clc["any"].([]interface{})
+		android.AssertIntEquals(t, "", 1, len(deps))
+		foo := deps[0].(map[string]interface{})
+		android.AssertStringEquals(t, "", "foo", foo["Name"].(string))
+		fooDeps := foo["Subcontexts"].([]interface{})
+		android.AssertIntEquals(t, "", 1, len(fooDeps))
+		bar := fooDeps[0].(map[string]interface{})
+		android.AssertStringEquals(t, "", "bar", bar["Name"].(string))
+	}
+}
+
+func TestClassLoaderContext_SdkLibrary2(t *testing.T) {
+	bp := `
+		java_sdk_library {
+			name: "foo",
+			srcs: ["a.java"],
+			api_packages: ["foo"],
+			sdk_version: "current",
+			libs: ["bar.impl"],
+		}
+
+		java_sdk_library {
+			name: "bar",
+			srcs: ["b.java"],
+			api_packages: ["bar"],
+			sdk_version: "current",
+		}
+
+		android_app {
+			name: "app",
+			srcs: ["app.java"],
+			libs: ["foo.stubs"],
+			uses_libs: ["foo"],
+			sdk_version: "current",
+		}
+	`
+
+	result := android.GroupFixturePreparers(
+		prepareForJavaTest,
+		PrepareForTestWithJavaSdkLibraryFiles,
+		FixtureWithLastReleaseApis("foo", "bar"),
+	).RunTestWithBp(t, bp)
+
+	{
+		fooXml := result.ModuleForTests(t, "foo.xml", "android_common").Output("foo.xml")
+		fooXmlContents := android.ContentFromFileRuleForTests(t, result.TestContext, fooXml)
+		android.AssertStringDoesContain(t, "", fooXmlContents, `dependency="bar"`)
+	}
+
+	{
+		fooImpl := result.ModuleForTests(t, "foo.impl", "android_common")
+		cmd := fooImpl.Rule("dexpreopt").RuleParams.Command
+
+		clc, err := extractContextJson(cmd)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+
+		deps := clc["any"].([]interface{})
+		android.AssertIntEquals(t, "", 1, len(deps))
+		bar := deps[0].(map[string]interface{})
+		android.AssertStringEquals(t, "", "bar", bar["Name"].(string))
+	}
+
+	{
+		app := result.ModuleForTests(t, "app", "android_common")
+		cmd := app.Rule("dexpreopt").RuleParams.Command
+
+		clc, err := extractContextJson(cmd)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+
+		deps := clc["any"].([]interface{})
+		android.AssertIntEquals(t, "", 1, len(deps))
+		foo := deps[0].(map[string]interface{})
+		android.AssertStringEquals(t, "", "foo", foo["Name"].(string))
+		fooDeps := foo["Subcontexts"].([]interface{})
+		android.AssertIntEquals(t, "", 1, len(fooDeps))
+		bar := fooDeps[0].(map[string]interface{})
+		android.AssertStringEquals(t, "", "bar", bar["Name"].(string))
+	}
 }
 
 func TestDexpreoptBcp(t *testing.T) {
@@ -4241,7 +4412,7 @@ func TestAppMissingCertificateAllowMissingDependencies(t *testing.T) {
 
 	foo := result.ModuleForTests(t, "foo", "android_common")
 	fooApk := foo.Output("foo.apk")
-	if fooApk.Rule != android.ErrorRule {
+	if !android.IsErrorRule(fooApk.Rule) {
 		t.Fatalf("expected ErrorRule for foo.apk, got %s", fooApk.Rule.String())
 	}
 	android.AssertStringDoesContain(t, "expected error rule message", fooApk.Args["error"], "missing dependencies: missing_certificate\n")
@@ -4471,56 +4642,56 @@ func TestPrivappAllowlistAndroidMk(t *testing.T) {
 	overrideApp := result.ModuleForTests(t, "foo", "android_common_bar")
 
 	baseAndroidApp := baseApp.Module().(*AndroidApp)
-	baseEntries := android.AndroidMkEntriesForTest(t, result.TestContext, baseAndroidApp)[0]
+	baseEntries := android.AndroidMkInfoForTest(t, result.TestContext, baseAndroidApp)
 	android.AssertStringMatches(
 		t,
 		"androidmk has incorrect LOCAL_SOONG_INSTALLED_MODULE; expected to find foo.apk",
-		baseEntries.EntryMap["LOCAL_SOONG_INSTALLED_MODULE"][0],
+		baseEntries.PrimaryInfo.EntryMap["LOCAL_SOONG_INSTALLED_MODULE"][0],
 		"\\S+foo.apk",
 	)
 	android.AssertStringMatches(
 		t,
 		"androidmk has incorrect LOCAL_SOONG_INSTALL_PAIRS; expected to it to include foo.apk",
-		baseEntries.EntryMap["LOCAL_SOONG_INSTALL_PAIRS"][0],
+		baseEntries.PrimaryInfo.EntryMap["LOCAL_SOONG_INSTALL_PAIRS"][0],
 		"\\S+foo.apk",
 	)
 	android.AssertStringMatches(
 		t,
 		"androidmk has incorrect LOCAL_SOONG_INSTALL_PAIRS; expected to it to include app",
-		baseEntries.EntryMap["LOCAL_SOONG_INSTALL_PAIRS"][0],
+		baseEntries.PrimaryInfo.EntryMap["LOCAL_SOONG_INSTALL_PAIRS"][0],
 		"\\S+foo.apk:\\S+/target/product/test_device/system/priv-app/foo/foo.apk",
 	)
 	android.AssertStringMatches(
 		t,
 		"androidmk has incorrect LOCAL_SOONG_INSTALL_PAIRS; expected to it to include privapp_allowlist",
-		baseEntries.EntryMap["LOCAL_SOONG_INSTALL_PAIRS"][0],
+		baseEntries.PrimaryInfo.EntryMap["LOCAL_SOONG_INSTALL_PAIRS"][0],
 		"privapp_allowlist_com.android.foo.xml:\\S+/target/product/test_device/system/etc/permissions/foo.xml",
 	)
 
 	overrideAndroidApp := overrideApp.Module().(*AndroidApp)
-	overrideEntries := android.AndroidMkEntriesForTest(t, result.TestContext, overrideAndroidApp)[0]
+	overrideEntries := android.AndroidMkInfoForTest(t, result.TestContext, overrideAndroidApp)
 	android.AssertStringMatches(
 		t,
 		"androidmk has incorrect LOCAL_SOONG_INSTALLED_MODULE; expected to find bar.apk",
-		overrideEntries.EntryMap["LOCAL_SOONG_INSTALLED_MODULE"][0],
+		overrideEntries.PrimaryInfo.EntryMap["LOCAL_SOONG_INSTALLED_MODULE"][0],
 		"\\S+bar.apk",
 	)
 	android.AssertStringMatches(
 		t,
 		"androidmk has incorrect LOCAL_SOONG_INSTALL_PAIRS; expected to it to include bar.apk",
-		overrideEntries.EntryMap["LOCAL_SOONG_INSTALL_PAIRS"][0],
+		overrideEntries.PrimaryInfo.EntryMap["LOCAL_SOONG_INSTALL_PAIRS"][0],
 		"\\S+bar.apk",
 	)
 	android.AssertStringMatches(
 		t,
 		"androidmk has incorrect LOCAL_SOONG_INSTALL_PAIRS; expected to it to include app",
-		overrideEntries.EntryMap["LOCAL_SOONG_INSTALL_PAIRS"][0],
+		overrideEntries.PrimaryInfo.EntryMap["LOCAL_SOONG_INSTALL_PAIRS"][0],
 		"\\S+bar.apk:\\S+/target/product/test_device/system/priv-app/bar/bar.apk",
 	)
 	android.AssertStringMatches(
 		t,
 		"androidmk has incorrect LOCAL_SOONG_INSTALL_PAIRS; expected to it to include privapp_allowlist",
-		overrideEntries.EntryMap["LOCAL_SOONG_INSTALL_PAIRS"][0],
+		overrideEntries.PrimaryInfo.EntryMap["LOCAL_SOONG_INSTALL_PAIRS"][0],
 		"\\S+soong/.intermediates/foo/android_common_bar/privapp_allowlist_com.google.android.foo.xml:\\S+/target/product/test_device/system/etc/permissions/bar.xml",
 	)
 }
@@ -4578,7 +4749,7 @@ func TestAppFlagsPackages(t *testing.T) {
 	android.AssertStringDoesContain(t,
 		"aapt2 link command expected to pass feature flags arguments",
 		linkInFlags,
-		"--feature-flags @out/soong/.intermediates/bar/intermediate.txt --feature-flags @out/soong/.intermediates/baz/intermediate.txt",
+		"--feature-flags @out/soong/.intermediates/bar/aconfig-flags.txt --feature-flags @out/soong/.intermediates/baz/aconfig-flags.txt",
 	)
 
 	aapt2CompileRule := foo.Rule("android/soong/java.aapt2Compile")
@@ -4586,7 +4757,7 @@ func TestAppFlagsPackages(t *testing.T) {
 	android.AssertStringDoesContain(t,
 		"aapt2 compile command expected to pass feature flags arguments",
 		compileFlags,
-		"--feature-flags @out/soong/.intermediates/bar/intermediate.txt --feature-flags @out/soong/.intermediates/baz/intermediate.txt",
+		"--feature-flags @out/soong/.intermediates/bar/aconfig-flags.txt --feature-flags @out/soong/.intermediates/baz/aconfig-flags.txt",
 	)
 }
 
@@ -4658,12 +4829,12 @@ func TestAppFlagsPackagesPropagation(t *testing.T) {
 	android.AssertStringDoesContain(t,
 		"aapt2 link command expected to pass feature flags arguments of flags_packages and that of its static libs",
 		linkInFlags,
-		"--feature-flags @out/soong/.intermediates/bar/intermediate.txt --feature-flags @out/soong/.intermediates/baz/intermediate.txt",
+		"--feature-flags @out/soong/.intermediates/bar/aconfig-flags.txt --feature-flags @out/soong/.intermediates/baz/aconfig-flags.txt",
 	)
 	android.AssertStringDoesNotContain(t,
 		"aapt2 link command expected to not pass feature flags arguments of flags_packages of its libs",
 		linkInFlags,
-		"--feature-flags @out/soong/.intermediates/foo/intermediate.txt",
+		"--feature-flags @out/soong/.intermediates/foo/aconfig-flags.txt",
 	)
 }
 
@@ -4902,6 +5073,7 @@ func TestResourcesWithFlagDirectories(t *testing.T) {
 			"res/flag(!test.package.flag2)/values/bools.xml":                         nil,
 			"res/flag(test.package.flag1)/values-config/strings_google_services.xml": nil,
 			"res/flags(test.package.flag1)/values/strings.xml":                       nil,
+			"res/drawable/flag(test.package.flag1)/qs_flashlight_icon_off.xml":       nil,
 		}),
 	).RunTestWithBp(t, `
 		android_library {
@@ -4939,6 +5111,12 @@ func TestResourcesWithFlagDirectories(t *testing.T) {
 		"Expected to not generate flag path with non-flag(flag_name) pattern",
 		compileOutputPaths,
 		"out/soong/.intermediates/foo/android_common/aapt2/res/values_strings.(test.package.flag1).arsc.flat",
+	)
+	android.AssertStringListContains(
+		t,
+		"Expected to generate flag path when it is a subdirectory of resource type subdirectory",
+		compileOutputPaths,
+		"out/soong/.intermediates/foo/android_common/aapt2/res/drawable_qs_flashlight_icon_off.(test.package.flag1).xml.flat",
 	)
 }
 

@@ -15,11 +15,15 @@
 package release_config_lib
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	rc_proto "android/soong/cmd/release_config/release_config_proto"
+	// For Assert*.
+	"android/soong/android"
 
 	"google.golang.org/protobuf/proto"
 )
@@ -50,6 +54,15 @@ func TestFlagValueFactory(t *testing.T) {
 			},
 			err: nil,
 		},
+		{
+			name:      "missingName",
+			protoPath: "build/release/flag_values/test/RELEASE_FOO.textproto",
+			data:      []byte(`value {string_value: "BAR"}`),
+			expected: rc_proto.FlagValue{
+				Value: &rc_proto.Value{Val: &rc_proto.Value_StringValue{"BAR"}},
+			},
+			err: fmt.Errorf("does not set name"),
+		},
 	}
 	for _, tc := range testCases {
 		var err error
@@ -61,8 +74,15 @@ func TestFlagValueFactory(t *testing.T) {
 		if err = os.WriteFile(path, tc.data, 0644); err != nil {
 			t.Fatal(err)
 		}
-		actual := FlagValueFactory(path)
-		tc.assertProtoEqual(t, &tc.expected, &actual.proto)
+		actual, err := FlagValueFactory(path)
+		if tc.err == nil {
+			android.AssertSame(t, "Expected %v got %v", tc.err, err)
+			tc.assertProtoEqual(t, &tc.expected, &actual.proto)
+		} else if err == nil {
+			t.Errorf("Expected error containing '%q' got nil", tc.err.Error())
+		} else if !strings.Contains(err.Error(), tc.err.Error()) {
+			t.Errorf("Error %v does not include %v", err.Error(), tc.err.Error())
+		}
 	}
 }
 
@@ -106,9 +126,11 @@ func TestMarshalValue(t *testing.T) {
 		},
 	}
 	for _, tc := range testCases {
-		actual := MarshalValue(tc.value)
-		if actual != tc.expected {
-			t.Errorf("Expected %q found %q", tc.expected, actual)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			actual := MarshalValue(tc.value)
+			if actual != tc.expected {
+				t.Errorf("Expected %q found %q", tc.expected, actual)
+			}
+		})
 	}
 }

@@ -99,7 +99,12 @@ func (this *CcAconfigLibraryCallbacks) GeneratorSources(ctx cc.ModuleContext) cc
 	// Get the values that came from the global RELEASE_ACONFIG_VALUE_SETS flag
 	declarationsModules := ctx.GetDirectDepsProxyWithTag(ccDeclarationsTag)
 	if len(declarationsModules) != 1 {
-		panic(fmt.Errorf("Exactly one aconfig_declarations property required"))
+		if ctx.Config().AllowMissingDependencies() {
+			ctx.AddMissingDependencies([]string{"exactly_one_aconfig_declarations_required"})
+			return result
+		} else {
+			panic(fmt.Errorf("Exactly one aconfig_declarations property required"))
+		}
 	}
 	declarations, _ := android.OtherModuleProvider(ctx, declarationsModules[0], android.AconfigDeclarationsProviderKey)
 
@@ -129,7 +134,12 @@ func (this *CcAconfigLibraryCallbacks) GeneratorBuildActions(ctx cc.ModuleContex
 	// Get the values that came from the global RELEASE_ACONFIG_VALUE_SETS flag
 	declarationsModules := ctx.GetDirectDepsProxyWithTag(ccDeclarationsTag)
 	if len(declarationsModules) != 1 {
-		panic(fmt.Errorf("Exactly one aconfig_declarations property required"))
+		if ctx.Config().AllowMissingDependencies() {
+			ctx.AddMissingDependencies([]string{"exactly_one_aconfig_declarations_required"})
+			return
+		} else {
+			panic("Exactly one aconfig_declarations property required")
+		}
 	}
 	declarations, _ := android.OtherModuleProvider(ctx, declarationsModules[0], android.AconfigDeclarationsProviderKey)
 

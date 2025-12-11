@@ -21,11 +21,18 @@ import (
 // isActiveModule returns true if the given module should be considered for boot
 // jars, i.e. if it's enabled and the preferred one in case of source and
 // prebuilt alternatives.
-func isActiveModule(ctx android.ConfigurableEvaluatorContext, module android.Module) bool {
-	if !module.Enabled(ctx) {
-		return false
+func isActiveModule(ctx android.ModuleContext, module android.ModuleOrProxy) bool {
+	if android.EqualModules(ctx.Module(), module) {
+		if !ctx.Module().Enabled(ctx) {
+			return false
+		}
+	} else {
+		info := android.OtherModuleProviderOrDefault(ctx, module, android.CommonModuleInfoProvider)
+		if !info.Enabled {
+			return false
+		}
 	}
-	return android.IsModulePreferred(module)
+	return android.IsModulePreferredProxy(ctx, module)
 }
 
 // buildRuleForBootJarsPackageCheck generates the build rule to perform the boot jars package

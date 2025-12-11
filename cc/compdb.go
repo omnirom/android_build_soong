@@ -69,10 +69,10 @@ func (c *compdbGeneratorSingleton) GenerateBuildActions(ctx android.SingletonCon
 
 	// We only want one entry per file. We don't care what module/isa it's from
 	m := make(map[string]compDbEntry)
-	ctx.VisitAllModules(func(module android.Module) {
-		if ccModule, ok := module.(*Module); ok {
-			if compiledModule, ok := ccModule.compiler.(CompiledInterface); ok {
-				generateCompdbProject(compiledModule, ctx, ccModule, m)
+	ctx.VisitAllModuleProxies(func(module android.ModuleProxy) {
+		if ccModule, ok := android.OtherModuleProvider(ctx, module, CcInfoProvider); ok {
+			if ccModule.CompilerInfo != nil {
+				generateCompdbProject(ctx, module, ccModule, m)
 			}
 		}
 	})
@@ -127,7 +127,7 @@ func expandAllVars(ctx android.SingletonContext, args []string) []string {
 	return out
 }
 
-func getArguments(src android.Path, ctx android.SingletonContext, ccModule *Module, ccPath string, cxxPath string) []string {
+func getArguments(ctx android.SingletonContext, src android.Path, ccModule *CcInfo, ccPath string, cxxPath string) []string {
 	var args []string
 	isCpp := false
 	isAsm := false
@@ -155,25 +155,25 @@ func getArguments(src android.Path, ctx android.SingletonContext, ccModule *Modu
 		clangPath = ccPath
 	}
 	args = append(args, clangPath)
-	args = append(args, expandAllVars(ctx, ccModule.flags.Global.CommonFlags)...)
-	args = append(args, expandAllVars(ctx, ccModule.flags.Local.CommonFlags)...)
-	args = append(args, expandAllVars(ctx, ccModule.flags.Global.CFlags)...)
-	args = append(args, expandAllVars(ctx, ccModule.flags.Local.CFlags)...)
+	args = append(args, expandAllVars(ctx, ccModule.GlobalFlags.CommonFlags)...)
+	args = append(args, expandAllVars(ctx, ccModule.LocalFlags.CommonFlags)...)
+	args = append(args, expandAllVars(ctx, ccModule.GlobalFlags.CFlags)...)
+	args = append(args, expandAllVars(ctx, ccModule.LocalFlags.CFlags)...)
 	if isCpp {
-		args = append(args, expandAllVars(ctx, ccModule.flags.Global.CppFlags)...)
-		args = append(args, expandAllVars(ctx, ccModule.flags.Local.CppFlags)...)
+		args = append(args, expandAllVars(ctx, ccModule.GlobalFlags.CppFlags)...)
+		args = append(args, expandAllVars(ctx, ccModule.LocalFlags.CppFlags)...)
 	} else if !isAsm {
-		args = append(args, expandAllVars(ctx, ccModule.flags.Global.ConlyFlags)...)
-		args = append(args, expandAllVars(ctx, ccModule.flags.Local.ConlyFlags)...)
+		args = append(args, expandAllVars(ctx, ccModule.GlobalFlags.ConlyFlags)...)
+		args = append(args, expandAllVars(ctx, ccModule.LocalFlags.ConlyFlags)...)
 	}
-	args = append(args, expandAllVars(ctx, ccModule.flags.SystemIncludeFlags)...)
-	args = append(args, expandAllVars(ctx, ccModule.flags.NoOverrideFlags)...)
+	args = append(args, expandAllVars(ctx, ccModule.SystemIncludeFlags)...)
+	args = append(args, expandAllVars(ctx, ccModule.NoOverrideFlags)...)
 	args = append(args, src.String())
 	return args
 }
 
-func generateCompdbProject(compiledModule CompiledInterface, ctx android.SingletonContext, ccModule *Module, builds map[string]compDbEntry) {
-	srcs := compiledModule.Srcs()
+func generateCompdbProject(ctx android.SingletonContext, module android.ModuleProxy, ccModule *CcInfo, builds map[string]compDbEntry) {
+	srcs := ccModule.CompilerInfo.Srcs
 	if len(srcs) == 0 {
 		return
 	}
@@ -187,7 +187,7 @@ func generateCompdbProject(compiledModule CompiledInterface, ctx android.Singlet
 	}
 	for _, src := range srcs {
 		if _, ok := builds[src.String()]; !ok {
-			args := getArguments(src, ctx, ccModule, ccPath, cxxPath)
+			args := getArguments(ctx, src, ccModule, ccPath, cxxPath)
 			if args == nil {
 				continue
 			}
@@ -203,7 +203,7 @@ func generateCompdbProject(compiledModule CompiledInterface, ctx android.Singlet
 func evalAndSplitVariable(ctx android.SingletonContext, str string) ([]string, error) {
 	evaluated, err := ctx.Eval(pctx, str)
 	if err == nil {
-		return strings.Fields(evaluated), nil
+		return strings.Fields(strings.Trim(evaluated, "'")), nil
 	}
 	return []string{""}, err
 }

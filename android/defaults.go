@@ -295,7 +295,7 @@ func defaultsMutator(ctx BottomUpMutatorContext) {
 			var defaultsList []Defaults
 			seen := make(map[Defaults]bool)
 
-			ctx.WalkDeps(func(module, parent Module) bool {
+			ctx.walkDeps(func(module, parent Module) bool {
 				if ctx.OtherModuleDependencyTag(module) == DefaultsDepTag {
 					if defaults, ok := module.(Defaults); ok {
 						if !seen[defaults] {

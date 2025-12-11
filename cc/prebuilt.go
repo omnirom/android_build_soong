@@ -55,7 +55,7 @@ type prebuiltLinkerProperties struct {
 
 	// Check the prebuilt ELF files (e.g. DT_SONAME, DT_NEEDED, resolution of undefined
 	// symbols, etc), default true.
-	Check_elf_files *bool
+	Check_elf_files *bool `android:"arch_variant"`
 
 	// if set, add an extra objcopy --prefix-symbols= step
 	Prefix_symbols *string
@@ -112,7 +112,6 @@ func (p *prebuiltLibraryLinker) link(ctx ModuleContext,
 
 	p.libraryDecorator.flagExporter.setProvider(ctx)
 
-	// TODO(ccross): verify shared library dependencies
 	srcs := p.prebuiltSrcs(ctx)
 	stubInfo := AddStubDependencyProviders(ctx)
 
@@ -152,6 +151,11 @@ func (p *prebuiltLibraryLinker) link(ctx ModuleContext,
 		if p.shared() {
 			p.unstrippedOutputFile = in
 			libName := p.libraryDecorator.getLibName(ctx) + flags.Toolchain.ShlibSuffix()
+
+			var validations android.Paths
+			if p.shouldCheckElfFile(ctx) {
+				validations = append(validations, p.checkElfFile(ctx, libName, deps, in))
+			}
 			outputFile := android.PathForModuleOut(ctx, libName)
 			var implicits android.Paths
 
@@ -194,6 +198,7 @@ func (p *prebuiltLibraryLinker) link(ctx ModuleContext,
 				Implicits:   implicits,
 				Input:       in,
 				Output:      outputFile,
+				Validations: validations,
 				Args: map[string]string{
 					"cpFlags": "-L",
 				},
@@ -476,6 +481,11 @@ func (p *prebuiltBinaryLinker) link(ctx ModuleContext,
 
 			p.toolPath = android.OptionalPathForPath(outputFile)
 		} else {
+			var validations android.Paths
+			if p.shouldCheckElfFile(ctx) {
+				validations = append(validations, p.checkElfFile(ctx, "", deps, in))
+			}
+
 			if p.stripper.NeedsStrip(ctx) {
 				stripped := android.PathForModuleOut(ctx, "stripped", fileName)
 				p.stripper.StripExecutableOrSharedLib(ctx, in, stripped, flagsToStripFlags(flags))
@@ -488,6 +498,7 @@ func (p *prebuiltBinaryLinker) link(ctx ModuleContext,
 				Description: "prebuilt",
 				Output:      outputFile,
 				Input:       in,
+				Validations: validations,
 			})
 		}
 
@@ -551,4 +562,12 @@ func srcsForSanitizer(sanitize *sanitize, sanitized Sanitized) []string {
 
 func (p *prebuiltLinker) sourceModuleName() string {
 	return proptools.String(p.properties.Source_module_name)
+}
+
+// shouldCheckElfFile returns true if the source ELF file for the current prebuilt module should be checked using
+// checkElfFile.
+func (p *prebuiltLinker) shouldCheckElfFile(ctx ModuleContext) bool {
+	return BoolDefault(p.properties.Check_elf_files, true) &&
+		!ctx.Host() && !ctx.DeviceConfig().BuildBrokenPrebuiltELFFiles() &&
+		ctx.Config().GetBuildFlagBool("RELEASE_SOONG_CHECK_ELF_FILES")
 }

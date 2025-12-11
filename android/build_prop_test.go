@@ -35,6 +35,7 @@ android_info {
 
 	res := GroupFixturePreparers(
 		FixtureRegisterWithContext(registerBuildPropComponents),
+		SetBuildDateFileEnvVarForTests(),
 	).RunTestWithBp(t, bp)
 	buildPropCmd := res.ModuleForTests(t, "vendor-build.prop", "").Rule("vendor-build.prop_.vendor-build.prop").RuleParams.Command
 	AssertStringDoesContain(t, "Could not find android-info in prop files of vendor build.prop", buildPropCmd, "--prop-files=out/soong/.intermediates/board-info/android-info.prop")

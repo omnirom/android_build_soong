@@ -199,6 +199,34 @@ func TestKotlin(t *testing.T) {
 	}
 }
 
+func TestSortKotlincFlags(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Successful sorting of kotlincFlags", func(t *testing.T) {
+		t.Parallel()
+		bp := `
+			java_library {
+				name: "Foo",
+				srcs: ["Foo.kt"],
+				kotlincflags: ["-Ja", "-Xb", "-JCz", "-JCy", "-JCx", "-Xd"]
+			}
+		`
+		result := android.GroupFixturePreparers(
+			PrepareForTestWithJavaDefaultModules,
+		).RunTestWithBp(t, bp)
+
+		module := result.ModuleForTests(t, "Foo", "android_common")
+		kotlincRule := module.Rule("kotlinc")
+		expectedFlags := "-Ja -JCz -JCy -JCx -Xb -Xd"
+
+		kotlincFlags := kotlincRule.Args["kotlincFlags"]
+		if !strings.Contains(kotlincFlags, expectedFlags) {
+			t.Errorf("kotlincFlags expected to have -J flags sorted first:\n  Flags: %s\n  Expected: %s", kotlincFlags, expectedFlags)
+		}
+	})
+
+}
+
 func TestKapt(t *testing.T) {
 	t.Parallel()
 	bp := `
@@ -462,7 +490,7 @@ func TestKotlinCompose(t *testing.T) {
 		withCompose.Rule("kotlinc").Implicits.Strings(), composeCompiler.String())
 
 	android.AssertStringDoesContain(t, "missing compose compiler plugin",
-		withCompose.VariablesForTestsRelativeToTop()["kotlincFlags"], "-Xplugin="+composeCompiler.String())
+		withCompose.VariablesForTestsRelativeToTop()["composePluginFlag"], "-Xplugin="+composeCompiler.String())
 
 	android.AssertStringListContains(t, "missing kapt compose compiler dependency",
 		withCompose.Rule("kapt").Implicits.Strings(), composeCompiler.String())
@@ -471,7 +499,7 @@ func TestKotlinCompose(t *testing.T) {
 		noCompose.Rule("kotlinc").Implicits.Strings(), composeCompiler.String())
 
 	android.AssertStringDoesNotContain(t, "unexpected compose compiler plugin",
-		noCompose.VariablesForTestsRelativeToTop()["kotlincFlags"], "-Xplugin="+composeCompiler.String())
+		noCompose.VariablesForTestsRelativeToTop()["composePluginFlag"], "-Xplugin="+composeCompiler.String())
 }
 
 func TestKotlinPlugin(t *testing.T) {
@@ -510,7 +538,7 @@ func TestKotlinPlugin(t *testing.T) {
 		withKotlinPlugin.Rule("kotlinc").Implicits.Strings(), kotlinPlugin.String())
 
 	android.AssertStringDoesContain(t, "missing kotlin plugin",
-		withKotlinPlugin.VariablesForTestsRelativeToTop()["kotlincFlags"], "-Xplugin="+kotlinPlugin.String())
+		withKotlinPlugin.VariablesForTestsRelativeToTop()["kotlincPluginFlags"], "-Xplugin="+kotlinPlugin.String())
 
 	android.AssertStringListContains(t, "missing kapt kotlin plugin dependency",
 		withKotlinPlugin.Rule("kapt").Implicits.Strings(), kotlinPlugin.String())
@@ -520,4 +548,96 @@ func TestKotlinPlugin(t *testing.T) {
 
 	android.AssertStringDoesNotContain(t, "unexpected kotlin plugin",
 		noKotlinPlugin.VariablesForTestsRelativeToTop()["kotlincFlags"], "-Xplugin="+kotlinPlugin.String())
+}
+
+func TestKotlinAssociates(t *testing.T) {
+	t.Parallel()
+
+	targets := []string{"FooUtils", "FooTest"}
+	for _, target := range targets {
+		t.Run("Successful associate linking of "+target, func(t *testing.T) {
+			t.Parallel()
+			bp := `
+				java_library {
+					name: "Foo",
+					srcs: ["Foo.kt"],
+				}
+
+				java_library {
+					name: "FooUtils",
+					srcs: ["FooUtils.kt"],
+					libs: ["Foo"],
+					associates: ["Foo"],
+				}
+
+				java_test {
+					name: "FooTest",
+					srcs: ["FooTest.kt"],
+					static_libs: ["Foo"],
+					associates: ["Foo"],
+				}
+			`
+			result := android.GroupFixturePreparers(
+				PrepareForTestWithJavaDefaultModules,
+			).RunTestWithBp(t, bp)
+
+			module := result.ModuleForTests(t, target, "android_common")
+			kotlincRule := module.Rule("kotlinc")
+			expectedFriendPath := "out/soong/.intermediates/Foo/android_common/kotlin_headers/Foo.jar"
+			expectedFlag := "-Xfriend-paths=" + expectedFriendPath
+
+			friendPathsArg := kotlincRule.Args["friendPathsArg"]
+			if !strings.Contains(friendPathsArg, expectedFlag) {
+				t.Errorf("friendPathsArg missing expected friend path:\n  Flags: %s\n  Expected: %s", friendPathsArg, expectedFlag)
+			}
+
+			classpathRspFile := module.Output("kotlinc/classpath.rsp")
+			classpathContent := android.ContentFromFileRuleForTests(t, result.TestContext, classpathRspFile)
+			classpathEntries := strings.Fields(classpathContent)
+			android.AssertStringPathRelativeToTopEquals(t, "first classpath entry", result.Config, expectedFriendPath, classpathEntries[0])
+		})
+	}
+
+	t.Run("Error: Associate not a dependency", func(t *testing.T) {
+		t.Parallel()
+		bp := `
+				java_library {
+					name: "Foo",
+					srcs: ["Foo.kt"],
+				}
+
+				java_library {
+					name: "FooUtils",
+					srcs: ["FooUtils.kt"],
+					associates: ["Foo"],
+				}
+			`
+		android.GroupFixturePreparers(
+			PrepareForTestWithJavaDefaultModules,
+		).ExtendWithErrorHandler(android.FixtureExpectsAtLeastOneErrorMatchingPattern(
+			`\QAssociates: associate module 'Foo' must also be listed as a direct dependency\E`,
+		)).RunTestWithBp(t, bp)
+	})
+
+	t.Run("Error: Associate not a Kotlin module", func(t *testing.T) {
+		t.Parallel()
+		bp := `
+				java_library {
+					name: "Foo",
+					srcs: ["Foo.java"],
+				}
+
+				java_library {
+					name: "FooUtils",
+					srcs: ["FooUtils.kt"],
+					libs: ["Foo"],
+					associates: ["Foo"],
+				}
+			`
+		android.GroupFixturePreparers(
+			PrepareForTestWithJavaDefaultModules,
+		).ExtendWithErrorHandler(android.FixtureExpectsAtLeastOneErrorMatchingPattern(
+			`\QAssociates: associate module 'Foo' is not a Kotlin module\E`,
+		)).RunTestWithBp(t, bp)
+	})
 }

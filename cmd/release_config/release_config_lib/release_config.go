@@ -15,6 +15,7 @@
 package release_config_lib
 
 import (
+	"bytes"
 	"cmp"
 	"fmt"
 	"os"
@@ -41,7 +42,8 @@ type ReleaseConfigContribution struct {
 	// Protobufs relevant to the config.
 	proto rc_proto.ReleaseConfig
 
-	FlagValues []*FlagValue
+	// Quick access to FlagValues based on flag name.
+	FlagValues map[string]*FlagValue
 }
 
 // A generated release config.
@@ -63,6 +65,9 @@ type ReleaseConfig struct {
 	// The names of release configs that we inherit
 	InheritNames []string
 
+	// map of InheritNames
+	inheritNamesMap map[string]bool
+
 	// True if this release config only allows inheritance and aconfig flag
 	// overrides. Build flag value overrides are an error.
 	AconfigFlagsOnly bool
@@ -72,9 +77,6 @@ type ReleaseConfig struct {
 
 	// Unmarshalled flag artifacts
 	FlagArtifacts FlagArtifacts
-
-	// The files used by this release config
-	FilesUsedMap map[string]bool
 
 	// Generated release config
 	ReleaseConfigArtifact *rc_proto.ReleaseConfigArtifact
@@ -115,12 +117,41 @@ var ReleaseConfigInheritanceDenyMap = map[rc_proto.ReleaseConfigType]bool{
 	rc_proto.ReleaseConfigType_BUILD_VARIANT: true,
 }
 
+func ReleaseConfigContributionFactory(protoPath string, dirIndex int) (rcc *ReleaseConfigContribution, err error) {
+	rcc = &ReleaseConfigContribution{
+		path:             protoPath,
+		DeclarationIndex: dirIndex,
+		FlagValues:       make(map[string]*FlagValue),
+	}
+	if protoPath == "" {
+		return rcc, nil
+	}
+	LoadMessage(protoPath, &rcc.proto)
+
+	switch {
+	case rcc.proto.Name == nil:
+		return nil, fmt.Errorf("%s does not specify name", protoPath)
+	case fmt.Sprintf("%s.textproto", *rcc.proto.Name) != filepath.Base(protoPath):
+		return nil, fmt.Errorf("%s incorrectly declares release config %s", protoPath, *rcc.proto.Name)
+	}
+
+	// Provide a default value for ReleaseConfigType if not specified.
+	if rcc.proto.ReleaseConfigType == nil {
+		if *rcc.proto.Name == "root" {
+			rcc.proto.ReleaseConfigType = rc_proto.ReleaseConfigType_EXPLICIT_INHERITANCE_CONFIG.Enum()
+		} else {
+			rcc.proto.ReleaseConfigType = rc_proto.ReleaseConfigType_RELEASE_CONFIG.Enum()
+		}
+	}
+	return rcc, nil
+}
+
 func ReleaseConfigFactory(name string, index int) (c *ReleaseConfig) {
 	return &ReleaseConfig{
 		Name:             name,
 		DeclarationIndex: index,
-		FilesUsedMap:     make(map[string]bool),
 		PriorStagesMap:   make(map[string]bool),
+		inheritNamesMap:  make(map[string]bool),
 	}
 }
 
@@ -128,9 +159,6 @@ func (config *ReleaseConfig) InheritConfig(iConfig *ReleaseConfig) error {
 	if config.ReleaseConfigType != iConfig.ReleaseConfigType && ReleaseConfigInheritanceDenyMap[config.ReleaseConfigType] {
 		return fmt.Errorf("Release config %s (type '%s') cannot inherit from %s (type '%s')",
 			config.Name, config.ReleaseConfigType, iConfig.Name, iConfig.ReleaseConfigType)
-	}
-	for f := range iConfig.FilesUsedMap {
-		config.FilesUsedMap[f] = true
 	}
 	for _, fa := range iConfig.FlagArtifacts {
 		name := *fa.FlagDeclaration.Name
@@ -140,6 +168,11 @@ func (config *ReleaseConfig) InheritConfig(iConfig *ReleaseConfig) error {
 		}
 		if fa.Redacted {
 			myFa.Redact()
+		}
+		switch *myFa.FlagDeclaration.Workflow {
+		case rc_proto.Workflow_MANUAL_NO_INHERIT:
+			// Flag values for this flag are not inherited.
+			continue
 		}
 		if name == "RELEASE_ACONFIG_VALUE_SETS" {
 			// If there is a value assigned, add the trace.
@@ -157,18 +190,18 @@ func (config *ReleaseConfig) InheritConfig(iConfig *ReleaseConfig) error {
 	return nil
 }
 
-func (config *ReleaseConfig) GetSortedFileList() []string {
-	return SortedMapKeys(config.FilesUsedMap)
-}
-
 func (config *ReleaseConfig) GenerateReleaseConfig(configs *ReleaseConfigs) error {
-	if config.ReleaseConfigArtifact != nil {
-		return nil
-	}
 	if config.compileInProgress {
 		return fmt.Errorf("Loop detected for release config %s", config.Name)
 	}
 	config.compileInProgress = true
+	defer func() {
+		config.compileInProgress = false
+	}()
+	if config.ReleaseConfigArtifact != nil {
+		return nil
+	}
+
 	isRoot := config.Name == "root"
 
 	// Is this a build-prefix release config, such as 'ap3a'?
@@ -203,7 +236,7 @@ func (config *ReleaseConfig) GenerateReleaseConfig(configs *ReleaseConfigs) erro
 		// TODO: there are some configs that rely on vgsbr being
 		// present on branches where it isn't. Once the broken configs
 		// are fixed, we can be more strict.  In the meantime, they
-		// will wind up inheriting `trunk_stable` instead of the
+		// will wind up inheriting `trunk_staging` instead of the
 		// non-existent (alias) that they reference today.  Once fixed,
 		// this becomes:
 		//    iConfig, err := configs.GetReleaseConfigStrict(inherit)
@@ -211,21 +244,9 @@ func (config *ReleaseConfig) GenerateReleaseConfig(configs *ReleaseConfigs) erro
 		if err != nil {
 			return err
 		}
-		err = iConfig.GenerateReleaseConfig(configs)
-		if err != nil {
-			return err
-		}
 		err = config.InheritConfig(iConfig)
 		if err != nil {
 			return err
-		}
-	}
-
-	// If we inherited nothing, then we need to mark the global files as used for this
-	// config.  If we inherited, then we already marked them as part of inheritance.
-	if len(config.InheritNames) == 0 {
-		for f := range configs.FilesUsedMap {
-			config.FilesUsedMap[f] = true
 		}
 	}
 
@@ -299,6 +320,18 @@ func (config *ReleaseConfig) GenerateReleaseConfig(configs *ReleaseConfigs) erro
 				// The "root" release config can only contain workflow: MANUAL flags.
 				return fmt.Errorf("Setting value for non-MANUAL flag %s is not allowed in %s", name, value.path)
 			}
+			switch *fa.FlagDeclaration.Workflow {
+			case rc_proto.Workflow_MANUAL_BUILD_VARIANT:
+				// Non-BUILD_VARIANT release configs cannot set MANUAL_BUILD_VARIANT flags.
+				if config.ReleaseConfigType != rc_proto.ReleaseConfigType_BUILD_VARIANT {
+					return fmt.Errorf("Setting value for BUILD_VARIANT flag %s is not allowed in %s", name, value.path)
+				}
+			default:
+				// BUILD_VARIANT release configs cannot set non-MANUAL_BUILD_VARIANT flags.
+				if config.ReleaseConfigType == rc_proto.ReleaseConfigType_BUILD_VARIANT {
+					return fmt.Errorf("Setting value for non-BUILD_VARIANT flag %s is not allowed in %s", name, value.path)
+				}
+			}
 			if err := fa.UpdateValue(*value); err != nil {
 				return err
 			}
@@ -307,8 +340,8 @@ func (config *ReleaseConfig) GenerateReleaseConfig(configs *ReleaseConfigs) erro
 
 	if config.ReleaseConfigType == rc_proto.ReleaseConfigType_RELEASE_CONFIG {
 		inheritBuildVariant := func() error {
-			build_variant := os.Getenv("TARGET_BUILD_VARIANT")
-			if build_variant == "" || config.Name == build_variant {
+			build_variant := configs.targetBuildVariant
+			if config.Name == build_variant {
 				return nil
 			}
 			variant, err := configs.GetReleaseConfigStrict(build_variant)
@@ -392,6 +425,7 @@ func (config *ReleaseConfig) GenerateReleaseConfig(configs *ReleaseConfigs) erro
 			config.PartitionBuildFlags[container].Flags = append(config.PartitionBuildFlags[container].Flags, artifact)
 		}
 	}
+	unspecifiedValue := &rc_proto.Value{Val: &rc_proto.Value_UnspecifiedValue{false}}
 	config.ReleaseConfigArtifact = &rc_proto.ReleaseConfigArtifact{
 		Name:       proto.String(config.Name),
 		OtherNames: config.OtherNames,
@@ -399,11 +433,17 @@ func (config *ReleaseConfig) GenerateReleaseConfig(configs *ReleaseConfigs) erro
 			ret := []*rc_proto.FlagArtifact{}
 			for _, flagName := range config.FlagArtifacts.SortedFlagNames() {
 				flag := config.FlagArtifacts[flagName]
-				ret = append(ret, &rc_proto.FlagArtifact{
+				fa := &rc_proto.FlagArtifact{
 					FlagDeclaration: flag.FlagDeclaration,
 					Traces:          flag.Traces,
 					Value:           flag.Value,
-				})
+				}
+				// TODO(b/431020600) finalization-test needs us to set value to `nil` instead of leaving it
+				// as the unspecifiedValue.
+				if proto.Equal(fa.Value, unspecifiedValue) {
+					fa.Value.Reset()
+				}
+				ret = append(ret, fa)
 			}
 			return ret
 		}(),
@@ -411,12 +451,11 @@ func (config *ReleaseConfig) GenerateReleaseConfig(configs *ReleaseConfigs) erro
 		Inherits:          myInherits,
 		Directories:       directories,
 		ValueDirectories:  valueDirectories,
-		PriorStages:       SortedMapKeys(config.PriorStagesMap),
+		PriorStages:       SortedKeys(config.PriorStagesMap),
 		ReleaseConfigType: config.ReleaseConfigType.Enum(),
 		DisallowLunchUse:  proto.Bool(config.DisallowLunchUse),
 	}
 
-	config.compileInProgress = false
 	return nil
 }
 
@@ -424,6 +463,7 @@ func (config *ReleaseConfig) GenerateReleaseConfig(configs *ReleaseConfigs) erro
 func (config *ReleaseConfig) WriteMakefile(outFile, targetRelease string, configs *ReleaseConfigs) error {
 	makeVars := make(map[string]string)
 
+	config.GenerateReleaseConfig(configs)
 	myFlagArtifacts := config.FlagArtifacts.Clone()
 
 	// Add any RELEASE_ACONFIG_EXTRA_RELEASE_CONFIGS variables.
@@ -435,6 +475,10 @@ func (config *ReleaseConfig) WriteMakefile(outFile, targetRelease string, config
 	}
 	for _, rcName := range extraAconfigReleaseConfigs {
 		rc, err := configs.GetReleaseConfigStrict(rcName)
+		if err != nil {
+			return err
+		}
+		err = rc.GenerateReleaseConfig(configs)
 		if err != nil {
 			return err
 		}
@@ -484,31 +528,32 @@ func (config *ReleaseConfig) WriteMakefile(outFile, targetRelease string, config
 	//   _ALL_RELEASE_FLAGS.PARTITIONS.*
 	//   all _ALL_RELEASE_FLAGS.*, sorted by name
 	//   Final flag values, sorted by name.
-	data := fmt.Sprintf("# TARGET_RELEASE=%s\n", config.Name)
+	var sb bytes.Buffer
+
+	fmt.Fprintf(&sb, "# TARGET_RELEASE=%s\n", config.Name)
 	if targetRelease != config.Name {
-		data += fmt.Sprintf("# User specified TARGET_RELEASE=%s\n", targetRelease)
+		fmt.Fprintf(&sb, "# User specified TARGET_RELEASE=%s\n", targetRelease)
 	}
 	// As it stands this list is not per-product, but conceptually it is, and will be.
-	data += fmt.Sprintf("ALL_RELEASE_CONFIGS_FOR_PRODUCT :=$= %s\n", strings.Join(configs.GetAllReleaseNames(), " "))
+	fmt.Fprintf(&sb, "ALL_RELEASE_CONFIGS_FOR_PRODUCT :=$= %s\n", strings.Join(configs.GetAllReleaseNames(), " "))
 	if config.DisallowLunchUse {
-		data += fmt.Sprintf("_disallow_lunch_use :=$= true\n")
+		fmt.Fprintf(&sb, "_disallow_lunch_use :=$= true\n")
 	}
-	data += fmt.Sprintf("_used_files := %s\n", strings.Join(config.GetSortedFileList(), " "))
-	data += fmt.Sprintf("_ALL_RELEASE_FLAGS :=$= %s\n", strings.Join(names, " "))
+	fmt.Fprintf(&sb, "_ALL_RELEASE_FLAGS :=$= %s\n", strings.Join(names, " "))
 	for _, pName := range pNames {
-		data += fmt.Sprintf("_ALL_RELEASE_FLAGS.PARTITIONS.%s :=$= %s\n", pName, strings.Join(partitions[pName], " "))
+		fmt.Fprintf(&sb, "_ALL_RELEASE_FLAGS.PARTITIONS.%s :=$= %s\n", pName, strings.Join(partitions[pName], " "))
 	}
 	for _, vName := range vNames {
-		data += fmt.Sprintf("%s :=$= %s\n", vName, makeVars[vName])
+		fmt.Fprintf(&sb, "%s :=$= %s\n", vName, makeVars[vName])
 	}
-	data += "\n\n# Values for all build flags\n"
+	fmt.Fprintf(&sb, "\n\n# Values for all build flags\n")
 	for _, name := range names {
-		data += fmt.Sprintf("%s :=$= %s\n", name, makeVars[name])
+		fmt.Fprintf(&sb, "%s :=$= %s\n", name, makeVars[name])
 	}
-	return os.WriteFile(outFile, []byte(data), 0644)
+	return os.WriteFile(outFile, sb.Bytes(), 0644)
 }
 
-func (config *ReleaseConfig) WritePartitionBuildFlags(outDir string) error {
+func (config *ReleaseConfig) WritePartitionBuildFlags(product string, outDir string) error {
 	var err error
 	for partition, flags := range config.PartitionBuildFlags {
 		slices.SortFunc(flags.Flags, func(a, b *rc_proto.FlagArtifact) int {
@@ -516,7 +561,7 @@ func (config *ReleaseConfig) WritePartitionBuildFlags(outDir string) error {
 		})
 		// The json file name must not be modified as this is read from
 		// build_flags_json module
-		if err = WriteMessage(filepath.Join(outDir, fmt.Sprintf("build_flags_%s.json", partition)), flags); err != nil {
+		if err = WriteMessage(filepath.Join(outDir, fmt.Sprintf("build_flags-%s-%s.json", product, partition)), flags); err != nil {
 			return err
 		}
 	}

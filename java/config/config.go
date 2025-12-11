@@ -19,8 +19,6 @@ import (
 	"runtime"
 	"strings"
 
-	_ "github.com/google/blueprint/bootstrap"
-
 	"android/soong/android"
 	"android/soong/remoteexec"
 )
@@ -78,8 +76,6 @@ var (
 )
 
 func init() {
-	pctx.Import("github.com/google/blueprint/bootstrap")
-
 	pctx.StaticVariable("JavacHeapSize", "4096M")
 	pctx.StaticVariable("JavacHeapFlags", "-J-Xmx${JavacHeapSize}")
 
@@ -125,6 +121,9 @@ func init() {
 
 		// b/65004097: prevent using java.lang.invoke.StringConcatFactory when using -target 1.9
 		`-XDstringConcat=inline`,
+		// b/436191454: Remove methodParams in turbine classes, maintaining parity
+		// with soong's javac implementation.
+		`-XDturbine.noMethodParameters`,
 	}, " "))
 
 	pctx.StaticVariable("JavaVmFlags", strings.Join(javaVmFlagsList, " "))
@@ -139,6 +138,9 @@ func init() {
 	pctx.VariableFunc("JlinkVersion", func(ctx android.PackageVarContext) string {
 		if override := ctx.Config().Getenv("OVERRIDE_JLINK_VERSION_NUMBER"); override != "" {
 			return override
+		}
+		if ctx.Config().BuildWithJdk25() {
+			return "25"
 		}
 		return "21"
 	})
@@ -160,6 +162,9 @@ func init() {
 
 	pctx.HostBinToolVariable("GenKotlinBuildFileCmd", "gen-kotlin-build-file")
 	pctx.HostBinToolVariable("FindInputDeltaCmd", "find_input_delta")
+	pctx.HostBinToolVariable("IncrementalJavacInputCmd", "incremental_javac_input")
+	pctx.HostBinToolVariable("IncrementalDexInputCmd", "incremental_dex_input")
+	pctx.HostBinToolVariable("DependencyMapperJavacCmd", "dependency-mapper")
 
 	pctx.SourcePathVariable("JarArgsCmd", "build/soong/scripts/jar-args.sh")
 	pctx.SourcePathVariable("PackageCheckCmd", "build/soong/scripts/package-check.sh")
@@ -168,6 +173,7 @@ func init() {
 	pctx.HostBinToolVariable("MergeZipsCmd", "merge_zips")
 	pctx.HostBinToolVariable("Zip2ZipCmd", "zip2zip")
 	pctx.HostBinToolVariable("ZipSyncCmd", "zipsync")
+	pctx.HostBinToolVariable("SplitZipCmd", "split_zips")
 	pctx.HostBinToolVariable("ApiCheckCmd", "apicheck")
 	pctx.HostBinToolVariable("D8Cmd", "d8")
 	pctx.HostBinToolVariable("R8Cmd", "r8")

@@ -65,7 +65,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "Files will be copied with their existing compression from the input zipfile to")
 		fmt.Fprintln(os.Stderr, "the output zipfile, in the order of filespec arguments.")
 		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "If no filepsec is provided all files and directories are copied.")
+		fmt.Fprintln(os.Stderr, "If no filespec is provided all files and directories are copied.")
 	}
 
 	flag.Parse()

@@ -42,7 +42,7 @@ kzip_targets=(
   xref_java
   xref_kotlin
   # TODO: b/286390153 - reenable rust
-  # xref_rust
+  xref_rust
 )
 
 build/soong/soong_ui.bash --build-mode --all-modules --dir=$PWD -k --skip-soong-tests --ninja_weight_source=not_used "${kzip_targets[@]}"
@@ -66,7 +66,7 @@ for dir in "${go_modules[@]}"; do
    outfile=$(echo "$dir" | sed -r 's|/|_|g;s|(.*)|\1.go.kzip|');
    KYTHE_ROOT_DIRECTORY="${source_root}" "$go_extractor" --goroot="$go_root" \
    --rules=<(printf '[{"pattern": "(.*)","vname": {"path": "@1@", "corpus":"%s"}}]' "${XREF_CORPUS}") \
-   --canonicalize_package_corpus --output "${abspath_out}/soong/$outfile" ./...
+   --canonicalize_package_corpus --output "${abspath_out}/soong/$outfile" --gocgo=false ./...
   )
 done
 set +e

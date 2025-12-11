@@ -1,3 +1,5 @@
 * [Home](/README.md)
 * [Best Practices](/docs/best_practices.md)
 * [Performance](/docs/perf.md)
+* [Select Statements](/docs/selects.md)
+* [Convert Android.mk to Android.bp](/docs/mk2bp.md)

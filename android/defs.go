@@ -16,6 +16,7 @@ package android
 
 import (
 	"github.com/google/blueprint"
+	"github.com/google/blueprint/proptools"
 )
 
 var (
@@ -113,9 +114,12 @@ var (
 		},
 		"fromPath")
 
-	ErrorRule = pctx.AndroidStaticRule("Error",
+	// A rule that always fails at execution time with the given error message.
+	// The error message must be passed through proptools.NinjaAndShellEscape() first.
+	// Calling ErrorRule() will do that for you and use this rule.
+	errorRule = pctx.AndroidStaticRule("Error",
 		blueprint.RuleParams{
-			Command:     `echo "$error" && false`,
+			Command:     `echo $error && false`,
 			Description: "error building $out",
 		},
 		"error")
@@ -126,7 +130,33 @@ var (
 			Description: "concatenate files to $out",
 		})
 
-	// Used only when USE_GOMA=true is set, to restrict non-goma jobs to the local parallelism value
+	CatAndSort = pctx.AndroidStaticRule("CatAndSort",
+		blueprint.RuleParams{
+			Command:     "rm -f $out && cat $in > $out && sort -o $out $out",
+			Description: "concatenate sorted file contents to $out",
+		})
+
+	CatAndSortAndUnique = pctx.AndroidStaticRule("CatAndSortAndUnique",
+		blueprint.RuleParams{
+			Command:     "rm -f $out && cat $in > $out && sort -u -o $out $out",
+			Description: "concatenate sorted file contents to $out",
+		})
+
+	MergeZips = pctx.AndroidStaticRule("MergeZips",
+		blueprint.RuleParams{
+			Command: `${MergeZipsCmd} -s $out $in`,
+			CommandDeps: []string{
+				"${MergeZipsCmd}",
+			},
+		})
+
+	AssembleVintfRule = pctx.StaticRule("AssembleVintfRule", blueprint.RuleParams{
+		Command:     `rm -f $out && VINTF_IGNORE_TARGET_FCM_VERSION=true ${AssembleVintf} -i $in -o $out`,
+		CommandDeps: []string{"${AssembleVintf}"},
+		Description: "run assemble_vintf",
+	})
+
+	// Used only when USE_REWRAPPER=true is set, to restrict non-RBE jobs to the local parallelism value
 	localPool = blueprint.NewBuiltinPool("local_pool")
 
 	// Used only by RuleBuilder to identify remoteable rules. Does not actually get created in ninja.
@@ -142,14 +172,36 @@ func init() {
 	pctx.VariableFunc("RBEWrapper", func(ctx PackageVarContext) string {
 		return ctx.Config().RBEWrapper()
 	})
+
+	pctx.HostBinToolVariable("MergeZipsCmd", "merge_zips")
+	pctx.HostBinToolVariable("AssembleVintf", "assemble_vintf")
 }
 
 // CopyFileRule creates a ninja rule to copy path to outPath.
-func CopyFileRule(ctx ModuleContext, path Path, outPath OutputPath) {
+func CopyFileRule(ctx ModuleContext, path Path, outPath WritablePath, validations ...Path) {
 	ctx.Build(pctx, BuildParams{
 		Rule:        Cp,
 		Input:       path,
 		Output:      outPath,
 		Description: "copy " + outPath.Base(),
+		Validations: validations,
 	})
+}
+
+// ErrorRule creates a ninja action that fails to build the given file, failing with the
+// provided error message.
+func ErrorRule(ctx BuilderContext, path WritablePath, msg string) {
+	ctx.Build(pctx, BuildParams{
+		Rule:   errorRule,
+		Output: path,
+		Args: map[string]string{
+			"error": proptools.NinjaAndShellEscape(msg),
+		},
+	})
+}
+
+// IsErrorRule returns true if the given rule was created by ErrorRuleFunc. Intended for use
+// in tests.
+func IsErrorRule(rule blueprint.Rule) bool {
+	return rule == errorRule
 }

@@ -42,6 +42,7 @@ var fixture = android.GroupFixturePreparers(
 	java.PrepareForTestWithJavaDefaultModules,
 	phony.PrepareForTestWithPhony,
 	PrepareForTestWithFilesystemBuildComponents,
+	prepareForTestWithAndroidDeviceComponents,
 )
 
 func TestFileSystemDeps(t *testing.T) {
@@ -802,4 +803,162 @@ func TestRamdiskPartitionSetsDevNodes(t *testing.T) {
 		true,
 		java.CheckModuleHasDependency(t, result.TestContext, "ramdisk_filesystem", "android_common", "ramdisk_node_list"),
 	)
+}
+
+func TestFileSystemWithNativeBridgeDeps(t *testing.T) {
+	result := android.GroupFixturePreparers(
+		fixture,
+		android.PrepareForNativeBridgeEnabled,
+	).RunTestWithBp(t, `
+		android_filesystem {
+			name: "myfilesystem",
+			compile_multilib: "both",
+			native_bridge_supported: true,
+			deps: ["lib_no_native_bridge", "lib_both"],
+			multilib: {
+				native_bridge: {
+					deps: ["lib_both", "lib_only_native_bridge"],
+				},
+			},
+		}
+
+		cc_library {
+			name: "lib_no_native_bridge",
+			stl: "none",
+			system_shared_libs: [],
+		}
+		// Device arch and NativeBridge arch
+		cc_library {
+			name: "lib_both",
+			native_bridge_supported: true,
+			stl: "none",
+			system_shared_libs: [],
+		}
+		cc_library {
+			name: "lib_only_native_bridge",
+			native_bridge_supported: true,
+			enabled: false,
+			target: {
+				native_bridge: {
+					enabled: true,
+				},
+			},
+			stl: "none",
+			system_shared_libs: [],
+		}
+	`)
+
+	// produces "myfilesystem.img"
+	result.ModuleForTests(t, "myfilesystem", "android_common").Output("myfilesystem.img")
+
+	fs := result.ModuleForTests(t, "myfilesystem", "android_common").Module().(*filesystem)
+	expected := []string{
+		// Non NativeBridge
+		"lib64/lib_no_native_bridge.so",
+		"lib64/lib_both.so",
+		// NativeBridge
+		"lib/arm/lib_both.so",
+		"lib/arm/lib_only_native_bridge.so",
+		"lib64/arm64/lib_both.so",
+		"lib64/arm64/lib_only_native_bridge.so",
+	}
+	for _, e := range expected {
+		android.AssertStringListContains(t, "missing entry", fs.entries, e)
+	}
+}
+
+func TestCrossPartitionVintfInstalls(t *testing.T) {
+	result := fixture.RunTestWithBp(t, `
+		android_filesystem {
+			name: "myfilesystem",
+			deps: [
+				"binfoo",
+			],
+		}
+
+		cc_binary {
+			name: "binfoo",
+			stl: "none",
+			vintf_fragments: [
+				"binfoo_manifest.xml",
+			],
+		}
+
+		android_filesystem {
+			name: "myfilesystem_skip_vintf",
+			partition_type: "vendor",
+			android_filesystem_deps: {
+				system: "myfilesystem",
+			},
+		}
+
+		android_filesystem {
+			name: "myfilesystem_include_vintf",
+			include_files_of: ["myfilesystem"],
+			type: "compressed_cpio",
+		}
+	`)
+
+	skipVintfFilesystem := result.ModuleForTests(t, "myfilesystem_skip_vintf", "android_common")
+	inputs := skipVintfFilesystem.Output("staging_dir.timestamp").Implicits
+	for _, input := range inputs {
+		android.AssertStringDoesNotContain(t,
+			"myfilesystem_skip_vintf should not include vintf manifest of a system binary",
+			input.String(),
+			"binfoo_manifest.xml",
+		)
+	}
+}
+
+func TestRamdiskFragmentInBootImg(t *testing.T) {
+	result := fixture.RunTestWithBp(t, `
+android_filesystem {
+	name: "vendor_ramdisk",
+	type: "compressed_cpio",
+}
+android_filesystem {
+	name: "vendor_ramdisk_fragment",
+	type: "compressed_cpio",
+	ramdisk_fragment_name: "dlkm",
+}
+bootimg {
+	name: "vendor_boot",
+	boot_image_type: "vendor_boot",
+	header_version: "4",
+	ramdisk_module: "vendor_ramdisk",
+	ramdisk_fragment_modules: ["vendor_ramdisk_fragment"],
+}`)
+
+	vendorBootImg := result.ModuleForTests(t, "vendor_boot", "android_arm64_armv8-a")
+	mkBootimgCmd := vendorBootImg.Rule("build_bootimg").RuleParams.Command
+	android.AssertStringDoesContain(t, "Did not find vendor_ramdisk_fragment when building bootimg", mkBootimgCmd, "--ramdisk_name dlkm --vendor_ramdisk_fragment out/soong/.intermediates/vendor_ramdisk_fragment/android_common/vendor_ramdisk_fragment.img")
+}
+
+func TestRamdiskFragmentInTargetFiles(t *testing.T) {
+	result := fixture.RunTestWithBp(t, `
+android_filesystem {
+	name: "vendor_ramdisk",
+	type: "compressed_cpio",
+}
+android_filesystem {
+	name: "vendor_ramdisk_fragment",
+	type: "compressed_cpio",
+	ramdisk_fragment_name: "dlkm",
+}
+bootimg {
+	name: "vendor_boot",
+	boot_image_type: "vendor_boot",
+	header_version: "4",
+	ramdisk_module: "vendor_ramdisk",
+	ramdisk_fragment_modules: ["vendor_ramdisk_fragment"],
+}
+android_device {
+	name: "test_device",
+	vendor_boot_partition_name: "vendor_boot",
+}
+`)
+
+	vendorBootImg := result.ModuleForTests(t, "test_device", "android_arm64_armv8-a")
+	mkBootimgCmd := vendorBootImg.Rule("target_files_dir").RuleParams.Command
+	android.AssertStringDoesContain(t, "Did not find dlkm in vendor_ramdisk_fragments file used for target_files.zip creation", mkBootimgCmd, "echo dlkm > out/soong/.intermediates/test_device/android_arm64_armv8-a/target_files_dir/VENDOR_BOOT/vendor_ramdisk_fragments")
 }

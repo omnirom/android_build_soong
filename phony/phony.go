@@ -57,13 +57,17 @@ func (p *phony) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	p.hostRequiredModuleNames = ctx.HostRequiredModuleNames()
 	p.targetRequiredModuleNames = ctx.TargetRequiredModuleNames()
 
-	ctx.VisitDirectDepsWithTag(android.RequiredDepTag, func(dep android.Module) {
+	ctx.VisitDirectDepsProxyWithTag(android.RequiredDepTag, func(dep android.ModuleProxy) {
 		if o, ok := android.OtherModuleProvider(ctx, dep, android.OutputFilesProvider); ok {
 			p.outputDeps = append(p.outputDeps, o.DefaultOutputFiles...)
 		}
 	})
 
-	ctx.Phony(p.Name(), p.outputDeps...)
+	moduleInfoJSON := ctx.ModuleInfoJSON()
+	moduleInfoJSON.Class = []string{"FAKE"}
+	moduleInfoJSON.SystemSharedLibs = []string{"none"}
+	moduleInfoJSON.ExtraRequired = p.requiredModuleNames
+	ctx.SetOutputFiles(p.outputDeps, "")
 }
 
 func (p *phony) AndroidMk() android.AndroidMkData {

@@ -52,6 +52,16 @@ type toolchainLibraryDecorator struct {
 	Properties toolchainLibraryProperties
 }
 
+// toolchainCrateRoot implements toolchainCompiler.
+func (t *toolchainLibraryDecorator) toolchainCrateRoot() *string {
+	return t.Properties.Toolchain_crate_root
+}
+
+// toolchainSrcs implements toolchainCompiler.
+func (t *toolchainLibraryDecorator) toolchainSrcs() []string {
+	return t.Properties.Toolchain_srcs
+}
+
 // rust_toolchain_library produces all rust variants.
 func rustToolchainLibraryFactory() android.Module {
 	module, library := NewRustLibrary(android.HostAndDeviceSupported)
@@ -87,12 +97,19 @@ func initToolchainLibrary(module *Module, library *libraryDecorator) android.Mod
 	return module.Init()
 }
 
+type toolchainCompiler interface {
+	toolchainCrateRoot() *string
+	toolchainSrcs() []string
+}
+
+var _ toolchainCompiler = (*toolchainLibraryDecorator)(nil)
+
 func rustSetToolchainSource(ctx android.LoadHookContext) {
-	if toolchainLib, ok := ctx.Module().(*Module).compiler.(*toolchainLibraryDecorator); ok {
+	if toolchainLib, ok := ctx.Module().(*Module).compiler.(toolchainCompiler); ok {
 		prefix := filepath.Join("linux-x86", GetRustPrebuiltVersion(ctx))
-		versionedCrateRoot := path.Join(prefix, android.String(toolchainLib.Properties.Toolchain_crate_root))
-		versionedSrcs := make([]string, len(toolchainLib.Properties.Toolchain_srcs))
-		for i, src := range toolchainLib.Properties.Toolchain_srcs {
+		versionedCrateRoot := path.Join(prefix, android.String(toolchainLib.toolchainCrateRoot()))
+		versionedSrcs := make([]string, len(toolchainLib.toolchainSrcs()))
+		for i, src := range toolchainLib.toolchainSrcs() {
 			versionedSrcs[i] = path.Join(prefix, src)
 		}
 
@@ -105,13 +122,13 @@ func rustSetToolchainSource(ctx android.LoadHookContext) {
 		p.Srcs = versionedSrcs
 		ctx.AppendProperties(p)
 	} else {
-		ctx.ModuleErrorf("Called rustSetToolchainSource on a non-Rust Module.")
+		ctx.ModuleErrorf("Called rustSetToolchainSource on a non-Toolchain Module.")
 	}
 }
 
 // GetRustPrebuiltVersion returns the RUST_PREBUILTS_VERSION env var, or the default version if it is not defined.
 func GetRustPrebuiltVersion(ctx android.LoadHookContext) string {
-	return ctx.AConfig().GetenvWithDefault("RUST_PREBUILTS_VERSION", config.RustDefaultVersion)
+	return ctx.Config().GetenvWithDefault("RUST_PREBUILTS_VERSION", config.RustDefaultVersion)
 }
 
 type toolchainRustcPrebuiltProperties struct {

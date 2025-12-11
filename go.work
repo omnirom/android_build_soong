@@ -4,14 +4,18 @@ use (
 	.
 	../../external/go-cmp
 	../../external/golang-protobuf
+	../../external/pogreb
 	../../external/starlark-go
 	../blueprint
+	../../build/make/tools/dependency_mapper/proto
 )
 
 replace (
+	github.com/akrylysov/pogreb v0.10.0 => ../../external/pogreb
 	github.com/golang/protobuf v0.0.0 => ../../external/golang-protobuf
 	github.com/google/blueprint v0.0.0 => ../blueprint
 	github.com/google/go-cmp v0.0.0 => ../../external/go-cmp
 	google.golang.org/protobuf v0.0.0 => ../../external/golang-protobuf
 	go.starlark.net v0.0.0 => ../../external/starlark-go
+	go.dependencymapper/protoimpl v0.0.0 => ../../build/make/tools/dependency_mapper/proto
 )

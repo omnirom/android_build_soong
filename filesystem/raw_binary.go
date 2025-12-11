@@ -37,6 +37,13 @@ func init() {
 	android.RegisterModuleType("raw_binary", rawBinaryFactory)
 }
 
+type RawBinaryInfo struct {
+	// symbols info of the raw binary src
+	SrcSymbolInfos android.SymbolicOutputInfos
+}
+
+var RawBinaryInfoProvider = blueprint.NewProvider[RawBinaryInfo]()
+
 type rawBinary struct {
 	android.ModuleBase
 
@@ -90,6 +97,20 @@ func (r *rawBinary) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	r.output = outputFile
 
 	setCommonFilesystemInfo(ctx, r)
+
+	var symbolsInfo android.SymbolicOutputInfos
+	ctx.VisitDirectDepsProxy(func(proxy android.ModuleProxy) {
+		// Find the src module
+		if android.IsSourceDepTagWithOutputTag(ctx.OtherModuleDependencyTag(proxy), "") {
+			if info, ok := android.OtherModuleProvider(ctx, proxy, android.SymbolInfosProvider); ok {
+				symbolsInfo = append(symbolsInfo, info...)
+			}
+		}
+	})
+
+	android.SetProvider(ctx, RawBinaryInfoProvider, RawBinaryInfo{
+		SrcSymbolInfos: symbolsInfo,
+	})
 }
 
 var _ android.AndroidMkEntriesProvider = (*rawBinary)(nil)

@@ -7,6 +7,8 @@ bootstrap_go_package {
     pkgPath: "android/soong/android_sdk",
     deps: [
         "blueprint",
+        "blueprint-pathtools",
+        "blueprint-proptools",
         "soong",
         "soong-android",
         "soong-cc",

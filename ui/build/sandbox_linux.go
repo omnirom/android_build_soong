@@ -16,6 +16,7 @@ package build
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"os/user"
@@ -25,8 +26,7 @@ import (
 )
 
 type Sandbox struct {
-	Enabled              bool
-	DisableWhenUsingGoma bool
+	Enabled bool
 
 	AllowBuildBrokenUsesNetwork bool
 }
@@ -41,8 +41,7 @@ var (
 	katiSandbox     = basicSandbox
 	soongSandbox    = basicSandbox
 	ninjaSandbox    = Sandbox{
-		Enabled:              true,
-		DisableWhenUsingGoma: true,
+		Enabled: true,
 
 		AllowBuildBrokenUsesNetwork: true,
 	}
@@ -67,11 +66,6 @@ func (c *Cmd) sandboxSupported() bool {
 		return false
 	}
 
-	// Goma is incompatible with PID namespaces and Mount namespaces. b/122767582
-	if c.Sandbox.DisableWhenUsingGoma && c.config.UseGoma() {
-		return false
-	}
-
 	sandboxConfig.once.Do(func() {
 		sandboxConfig.group = "nogroup"
 		if _, err := user.LookupGroup(sandboxConfig.group); err != nil {
@@ -93,19 +87,24 @@ func (c *Cmd) sandboxSupported() bool {
 			sandboxConfig.distDir = absPath(c.ctx, derefPath)
 		}
 
-		sandboxArgs := []string{
+		var sandboxArgs []string
+		sandboxArgs = append(sandboxArgs,
 			"-H", "android-build",
 			"-e",
 			"-u", "nobody",
 			"-g", sandboxConfig.group,
-			"-R", "/",
+		)
+		sandboxArgs = append(sandboxArgs,
+			c.readMountArgs()...,
+		)
+		sandboxArgs = append(sandboxArgs,
 			// Mount tmp before srcDir
 			// srcDir is /tmp/.* in integration tests, which is a child dir of /tmp
 			// nsjail throws an error if a child dir is mounted before its parent
 			"-B", "/tmp",
-			c.config.sandboxConfig.SrcDirMountFlag(), sandboxConfig.srcDir,
-			"-B", sandboxConfig.outDir,
-		}
+			c.config.sandboxConfig.SrcDirMountFlag(), c.srcDirArg(),
+			"-B", c.outDirArg(),
+		)
 
 		if _, err := os.Stat(sandboxConfig.distDir); !os.IsNotExist(err) {
 			//Mount dist dir as read-write if it already exists
@@ -217,6 +216,28 @@ func (c *Cmd) workDir() string {
 	return abfsSrcDir
 }
 
+func abfsCacheFromMount() (string, error) {
+	wd, _ := os.Getwd()
+	type Config struct {
+		CacheDir string
+	}
+	type MountDetails struct {
+		Config Config
+	}
+	var m MountDetails
+	file, err := os.Open(filepath.Join(wd, ".repo/mount-details"))
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	d := json.NewDecoder(file)
+	if err := d.Decode(&m); err != nil {
+		return "", err
+	}
+
+	return m.Config.CacheDir, nil
+}
+
 func (c *Cmd) wrapSandbox() {
 	wd := c.workDir()
 
@@ -253,6 +274,10 @@ func (c *Cmd) wrapSandbox() {
 		"--rlimit_cpu", "soft",
 		"--rlimit_fsize", "soft",
 		"--rlimit_nofile", "soft",
+
+		// nsjail defaults to a niceness of 19, the minimum priority.  Raise it to 5 so that UI tasks are still
+		// a higher priority, but the build is a higher priority than the other background tasks that are set to 10.
+		"--nice_level", "5",
 	)
 
 	sandboxArgs = append(sandboxArgs,
@@ -277,14 +302,18 @@ func (c *Cmd) wrapSandbox() {
 		"-q",
 	)
 	if c.config.UseABFS() {
-		sandboxArgs = append(sandboxArgs, "-B", "{ABFS_DIR}")
+		cacheDir, err := abfsCacheFromMount()
+		if err != nil {
+			c.ctx.Fatalln(err)
+		}
+		sandboxArgs = append(sandboxArgs, "-B", cacheDir)
 	}
 
 	// Mount srcDir RW allowlists as Read-Write
 	if len(c.config.sandboxConfig.SrcDirRWAllowlist()) > 0 && !c.config.sandboxConfig.SrcDirIsRO() {
 		errMsg := `Product source tree has been set as ReadWrite, RW allowlist not necessary.
 			To recover, either
-			1. Unset BUILD_BROKEN_SRC_DIR_IS_WRITABLE #or
+			1. Set BUILD_BROKEN_SRC_DIR_IS_WRITABLE=false #or
 			2. Unset BUILD_BROKEN_SRC_DIR_RW_ALLOWLIST`
 		c.ctx.Fatalln(errMsg)
 	}

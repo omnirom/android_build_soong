@@ -8,10 +8,12 @@ bootstrap_go_package {
     deps: [
         "blueprint",
         "blueprint-pathtools",
+        "blueprint-proptools",
         "sbox_proto",
         "soong",
         "soong-aconfig",
         "soong-android",
+        "soong-cc",
         "soong-java",
         "soong-rust",
     ],

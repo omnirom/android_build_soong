@@ -137,6 +137,10 @@ func (c BlueprintConfig) PrimaryBuilderInvocations() []bootstrap.PrimaryBuilderI
 	return c.primaryBuilderInvocations
 }
 
+func (c BlueprintConfig) IsBootstrap() bool {
+	return true
+}
+
 func environmentArgs(config Config, tag string) []string {
 	return []string{
 		"--available_env", shared.JoinPath(config.SoongOutDir(), availableEnvFile),
@@ -198,6 +202,9 @@ func (pb PrimaryBuilderFactory) primaryBuilderInvocation(config Config) bootstra
 	commonArgs := make([]string, 0, 0)
 
 	commonArgs = append(commonArgs, "--kati_suffix", config.KatiSuffix())
+	if !config.SkipKati() {
+		commonArgs = append(commonArgs, "--kati_enabled")
+	}
 
 	if !pb.config.skipSoongTests {
 		commonArgs = append(commonArgs, "-t")
@@ -210,6 +217,11 @@ func (pb PrimaryBuilderFactory) primaryBuilderInvocation(config Config) bootstra
 	if pb.config.moduleDebugFile != "" {
 		commonArgs = append(commonArgs, "--soong_module_debug")
 		commonArgs = append(commonArgs, pb.config.moduleDebugFile)
+	}
+
+	if pb.config.incrementalDebugFile != "" {
+		commonArgs = append(commonArgs, "--incremental-debug-file")
+		commonArgs = append(commonArgs, pb.config.incrementalDebugFile)
 	}
 
 	commonArgs = append(commonArgs, "-l", filepath.Join(pb.config.FileListDir(), "Android.bp.list"))
@@ -286,8 +298,8 @@ func bootstrapEpochCleanup(ctx Context, config Config) {
 }
 
 func bootstrapBlueprint(ctx Context, config Config) {
-	ctx.BeginTrace(metrics.RunSoong, "blueprint bootstrap")
-	defer ctx.EndTrace()
+	e := ctx.BeginTrace(metrics.RunSoong, "blueprint bootstrap")
+	defer e.End()
 
 	st := ctx.Status.StartTool()
 	defer st.Finish()
@@ -515,14 +527,19 @@ func fixOutDirSymlinks(ctx Context, config Config, outDir string) error {
 			// No previous working directory recorded, nothing to do.
 			return nil
 		}
+		ctx.Println(fmt.Sprintf("Failed to read pcwd: %v", err))
 		return err
 	}
+
 	prevCWD = strings.Trim(string(pcwd), "\n")
 
-	if prevCWD == cwd {
-		// We are in the same source dir, nothing to update.
+	if prevCWD == cwd || prevCWD == "" {
+		// We are in the same source dir, or prevCWD came up empty for some reason,
+		// so nothing to update.
 		return nil
 	}
+
+	ctx.Println(fmt.Sprintf("CWD directory changed from %v to %v, updating output symlinks", prevCWD, cwd))
 
 	symlinkWg.Add(1)
 	if err := updateSymlinks(ctx, outDir, prevCWD, cwd, newUpdateSemaphore()); err != nil {
@@ -530,6 +547,7 @@ func fixOutDirSymlinks(ctx Context, config Config, outDir string) error {
 	}
 	symlinkWg.Wait()
 	ctx.Println(fmt.Sprintf("Updated %d/%d symlinks in dir %v", numUpdated, numFound, outDir))
+
 	return nil
 }
 
@@ -554,9 +572,9 @@ func migrateOutputSymlinks(ctx Context, config Config) error {
 	return fixOutDirSymlinks(ctx, config, outDir)
 }
 
-func runSoong(ctx Context, config Config) {
-	ctx.BeginTrace(metrics.RunSoong, "soong")
-	defer ctx.EndTrace()
+func runSoong(ctx Context, config Config, enforceNoSoongOutput bool) {
+	e := ctx.BeginTrace(metrics.RunSoong, "soong")
+	defer e.End()
 
 	if err := migrateOutputSymlinks(ctx, config); err != nil {
 		ctx.Fatalf("failed to migrate output directory to current TOP dir: %v", err)
@@ -586,8 +604,8 @@ func runSoong(ctx Context, config Config) {
 	}
 
 	func() {
-		ctx.BeginTrace(metrics.RunSoong, "environment check")
-		defer ctx.EndTrace()
+		e := ctx.BeginTrace(metrics.RunSoong, "environment check")
+		defer e.End()
 
 		checkEnvironmentFile(ctx, soongBuildEnv, config.UsedEnvFile(soongBuildTag))
 
@@ -601,86 +619,94 @@ func runSoong(ctx Context, config Config) {
 	}()
 
 	ninja := func(targets ...string) {
-		ctx.BeginTrace(metrics.RunSoong, "bootstrap")
-		defer ctx.EndTrace()
+		e := ctx.BeginTrace(metrics.RunSoong, "bootstrap")
+		defer e.End()
 
 		fifo := filepath.Join(config.OutDir(), ".ninja_fifo")
 		nr := status.NewNinjaReader(ctx, ctx.Status.StartTool(), fifo)
-		defer nr.Close()
+		func() {
+			defer nr.Close()
+			var ninjaCmd string
+			var ninjaArgs []string
+			switch config.ninjaCommand {
+			case NINJA_N2:
+				ninjaCmd = config.N2Bin()
+				ninjaArgs = []string{
+					// TODO: implement these features, or remove them.
+					//"-d", "keepdepfile",
+					//"-d", "stats",
+					//"-o", "usesphonyoutputs=yes",
+					//"-o", "preremoveoutputs=yes",
+					//"-w", "dupbuild=err",
+					//"-w", "outputdir=err",
+					//"-w", "missingoutfile=err",
+					"-v",
+					"-j", strconv.Itoa(config.Parallel()),
+					"--frontend-file", fifo,
+					"-f", filepath.Join(config.SoongOutDir(), "bootstrap.ninja"),
+				}
+			case NINJA_SISO:
+				ninjaCmd = config.SisoBin()
+				ninjaArgs = []string{
+					"ninja",
+					// TODO: implement these features, or remove them.
+					//"-d", "keepdepfile",
+					//"-d", "stats",
+					//"-o", "usesphonyoutputs=yes",
+					//"-o", "preremoveoutputs=yes",
+					//"-w", "dupbuild=err",
+					//"-w", "outputdir=err",
+					//"-w", "missingoutfile=err",
+					"-v",
+					"-j", strconv.Itoa(config.Parallel()),
+					//"--frontend-file", fifo,
+					"--log_dir", config.SoongOutDir(),
+					"-f", filepath.Join(config.SoongOutDir(), "bootstrap.ninja"),
+				}
+			default:
+				// NINJA_NINJA is the default.
+				ninjaCmd = config.NinjaBin()
+				ninjaArgs = []string{
+					"-d", "keepdepfile",
+					"-d", "stats",
+					"-o", "usesphonyoutputs=yes",
+					"-o", "preremoveoutputs=yes",
+					"-w", "dupbuild=err",
+					"-w", "outputdir=err",
+					"-w", "missingoutfile=err",
+					"-j", strconv.Itoa(config.Parallel()),
+					"--frontend_file", fifo,
+					"-f", filepath.Join(config.SoongOutDir(), "bootstrap.ninja"),
+				}
+			}
 
-		var ninjaCmd string
-		var ninjaArgs []string
-		switch config.ninjaCommand {
-		case NINJA_N2:
-			ninjaCmd = config.N2Bin()
-			ninjaArgs = []string{
-				// TODO: implement these features, or remove them.
-				//"-d", "keepdepfile",
-				//"-d", "stats",
-				//"-o", "usesphonyoutputs=yes",
-				//"-o", "preremoveoutputs=yes",
-				//"-w", "dupbuild=err",
-				//"-w", "outputdir=err",
-				//"-w", "missingoutfile=err",
-				"-v",
-				"-j", strconv.Itoa(config.Parallel()),
-				"--frontend-file", fifo,
-				"-f", filepath.Join(config.SoongOutDir(), "bootstrap.ninja"),
+			if extra, ok := config.Environment().Get("SOONG_UI_NINJA_ARGS"); ok {
+				ctx.Printf(`CAUTION: arguments in $SOONG_UI_NINJA_ARGS=%q, e.g. "-n", can make soong_build FAIL or INCORRECT`, extra)
+				ninjaArgs = append(ninjaArgs, strings.Fields(extra)...)
 			}
-		case NINJA_SISO:
-			ninjaCmd = config.SisoBin()
-			ninjaArgs = []string{
-				"ninja",
-				// TODO: implement these features, or remove them.
-				//"-d", "keepdepfile",
-				//"-d", "stats",
-				//"-o", "usesphonyoutputs=yes",
-				//"-o", "preremoveoutputs=yes",
-				//"-w", "dupbuild=err",
-				//"-w", "outputdir=err",
-				//"-w", "missingoutfile=err",
-				"-v",
-				"-j", strconv.Itoa(config.Parallel()),
-				//"--frontend-file", fifo,
-				"--log_dir", config.SoongOutDir(),
-				"-f", filepath.Join(config.SoongOutDir(), "bootstrap.ninja"),
-			}
-		default:
-			// NINJA_NINJA is the default.
-			ninjaCmd = config.NinjaBin()
-			ninjaArgs = []string{
-				"-d", "keepdepfile",
-				"-d", "stats",
-				"-o", "usesphonyoutputs=yes",
-				"-o", "preremoveoutputs=yes",
-				"-w", "dupbuild=err",
-				"-w", "outputdir=err",
-				"-w", "missingoutfile=err",
-				"-j", strconv.Itoa(config.Parallel()),
-				"--frontend_file", fifo,
-				"-f", filepath.Join(config.SoongOutDir(), "bootstrap.ninja"),
-			}
+
+			ninjaArgs = append(ninjaArgs, targets...)
+
+			cmd := Command(ctx, config, e, "soong bootstrap",
+				ninjaCmd, ninjaArgs...)
+
+			var ninjaEnv Environment
+
+			// This is currently how the command line to invoke soong_build finds the
+			// root of the source tree and the output root
+			ninjaEnv.Set("TOP", os.Getenv("TOP"))
+			SetupLitePath(ctx, config, "")
+			ninjaPath, _ := config.Environment().Get("PATH")
+			ninjaEnv.Set("PATH", ninjaPath)
+
+			cmd.Environment = &ninjaEnv
+			cmd.Sandbox = soongSandbox
+			cmd.RunAndStreamOrFatal()
+		}()
+
+		if enforceNoSoongOutput && nr.HasAnyOutput() {
+			ctx.Fatalf("Soong must not output anything to stdout/stderr on a successful build, please remove the prints")
 		}
-
-		if extra, ok := config.Environment().Get("SOONG_UI_NINJA_ARGS"); ok {
-			ctx.Printf(`CAUTION: arguments in $SOONG_UI_NINJA_ARGS=%q, e.g. "-n", can make soong_build FAIL or INCORRECT`, extra)
-			ninjaArgs = append(ninjaArgs, strings.Fields(extra)...)
-		}
-
-		ninjaArgs = append(ninjaArgs, targets...)
-
-		cmd := Command(ctx, config, "soong bootstrap",
-			ninjaCmd, ninjaArgs...)
-
-		var ninjaEnv Environment
-
-		// This is currently how the command line to invoke soong_build finds the
-		// root of the source tree and the output root
-		ninjaEnv.Set("TOP", os.Getenv("TOP"))
-
-		cmd.Environment = &ninjaEnv
-		cmd.Sandbox = soongSandbox
-		cmd.RunAndStreamOrFatal()
 	}
 
 	targets := make([]string, 0, 0)
@@ -745,8 +771,8 @@ func runSoong(ctx Context, config Config) {
 // globs, it only reruns globs whose dependencies are newer than the
 // time in the ".globs_time" file.
 func checkGlobs(ctx Context, finalOutFile string) error {
-	ctx.BeginTrace(metrics.RunSoong, "check_globs")
-	defer ctx.EndTrace()
+	e := ctx.BeginTrace(metrics.RunSoong, "check_globs")
+	defer e.End()
 	st := ctx.Status.StartTool()
 	st.Status("Running globs...")
 	defer st.Finish()
@@ -948,8 +974,8 @@ func loadSoongBuildMetrics(ctx Context, config Config, oldTimestamp time.Time) {
 }
 
 func runMicrofactory(ctx Context, config Config, name string, pkg string, mapping map[string]string) {
-	ctx.BeginTrace(metrics.RunSoong, name)
-	defer ctx.EndTrace()
+	e := ctx.BeginTrace(metrics.RunSoong, name)
+	defer e.End()
 	cfg := microfactory.Config{TrimPath: absPath(ctx, ".")}
 	for pkgPrefix, pathPrefix := range mapping {
 		cfg.Map(pkgPrefix, pathPrefix)

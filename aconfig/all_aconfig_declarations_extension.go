@@ -62,10 +62,10 @@ func (ext *allAconfigDeclarationsExtension) GenerateAndroidBuildActions(ctx andr
 
 	var parsedFlagsFile android.Path
 	ctx.VisitDirectDepsProxyWithTag(allAconfigDeclarationsDependencyTag, func(proxy android.ModuleProxy) {
-		if info, ok := android.OtherModuleProvider(ctx, proxy, allAconfigDeclarationsInfoProvider); ok {
-			parsedFlagsFile = info.parsedFlagsFile
+		if info, ok := android.OtherModuleProvider(ctx, proxy, AllAconfigDeclarationsInfoProvider); ok {
+			parsedFlagsFile = info.ParsedFlagsFile
 		} else {
-			ctx.PropertyErrorf("base", "base must provide allAconfigDeclarationsInfo")
+			ctx.PropertyErrorf("base", "base must provide AllAconfigDeclarationsInfo")
 		}
 	})
 

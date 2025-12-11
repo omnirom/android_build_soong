@@ -51,6 +51,12 @@ type JavaFuzzTest struct {
 	jniFilePaths       android.Paths
 }
 
+type JavaFuzzTestInfo struct {
+	JniFilePaths android.Paths
+}
+
+var JavaFuzzTestInfoProvider = blueprint.NewProvider[JavaFuzzTestInfo]()
+
 // java_fuzz builds and links sources into a `.jar` file for the device.
 // This generates .class files in a jar which can then be instrumented before
 // fuzzing in Android Runtime (ART: Android OS on emulator or device)
@@ -131,9 +137,42 @@ func (j *JavaFuzzTest) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 
 	}
 
-	j.Test.GenerateAndroidBuildActions(ctx)
+	checkMinSdkVersionMts(ctx, j.MinSdkVersion(ctx))
+	j.Test.generateAndroidBuildActionsWithConfig(ctx, nil)
 
-	fuzz.SetFuzzPackagedModuleInfo(ctx, &j.fuzzPackagedModule)
+	var compatibilitySupportFiles android.Paths
+	compatibilitySupportFiles = append(compatibilitySupportFiles, j.implementationJarFile)
+	compatibilitySupportFiles = append(compatibilitySupportFiles, j.jniFilePaths...)
+	compatibilitySupportFiles = append(compatibilitySupportFiles, j.fuzzPackagedModule.Corpus...)
+	if j.fuzzPackagedModule.Dictionary != nil {
+		compatibilitySupportFiles = append(compatibilitySupportFiles, j.fuzzPackagedModule.Dictionary)
+	}
+
+	ctx.SetTestSuiteInfo(android.TestSuiteInfo{
+		TestSuites:                j.testProperties.Test_suites,
+		MainFile:                  j.outputFile,
+		MainFileStem:              j.Stem(),
+		MainFileExt:               ".jar",
+		ConfigFile:                j.testConfig,
+		ExtraConfigs:              j.extraTestConfigs,
+		NeedsArchFolder:           ctx.Device(),
+		CompatibilitySupportFiles: compatibilitySupportFiles,
+		PerTestcaseDirectory:      proptools.Bool(j.testProperties.Per_testcase_directory),
+		IsUnitTest:                proptools.Bool(j.testProperties.Test_options.Unit_test),
+	})
+
+	fuzzModuleValidator := fuzz.FuzzModule{
+		j.ModuleBase,
+		j.DefaultableModuleBase,
+		j.ApexModuleBase,
+	}
+
+	if fuzz.IsValid(ctx, fuzzModuleValidator) {
+		fuzz.SetFuzzPackagedModuleInfo(ctx, &j.fuzzPackagedModule)
+		android.SetProvider(ctx, JavaFuzzTestInfoProvider, JavaFuzzTestInfo{
+			JniFilePaths: j.jniFilePaths,
+		})
+	}
 }
 
 type javaFuzzPackager struct {
@@ -149,9 +188,9 @@ func (s *javaFuzzPackager) GenerateBuildActions(ctx android.SingletonContext) {
 	archDirs := make(map[fuzz.ArchOs][]fuzz.FileToZip)
 
 	s.FuzzTargets = make(map[string]bool)
-	ctx.VisitAllModules(func(module android.Module) {
+	ctx.VisitAllModuleProxies(func(module android.ModuleProxy) {
 		// Discard non-fuzz targets.
-		javaFuzzModule, ok := module.(*JavaFuzzTest)
+		javaInfo, ok := android.OtherModuleProvider(ctx, module, JavaInfoProvider)
 		if !ok {
 			return
 		}
@@ -159,25 +198,21 @@ func (s *javaFuzzPackager) GenerateBuildActions(ctx android.SingletonContext) {
 		if !ok {
 			return
 		}
-
-		hostOrTargetString := "target"
-		if javaFuzzModule.Target().HostCross {
-			hostOrTargetString = "host_cross"
-		} else if javaFuzzModule.Host() {
-			hostOrTargetString = "host"
-		}
-
-		fuzzModuleValidator := fuzz.FuzzModule{
-			javaFuzzModule.ModuleBase,
-			javaFuzzModule.DefaultableModuleBase,
-			javaFuzzModule.ApexModuleBase,
-		}
-
-		if ok := fuzz.IsValid(ctx, fuzzModuleValidator); !ok {
+		javaFuzzTestInfo, ok := android.OtherModuleProvider(ctx, module, JavaFuzzTestInfoProvider)
+		if !ok {
 			return
 		}
 
-		archString := javaFuzzModule.Arch().ArchType.String()
+		commonInfo := android.OtherModuleProviderOrDefault(ctx, module, android.CommonModuleInfoProvider)
+
+		hostOrTargetString := "target"
+		if commonInfo.Target.HostCross {
+			hostOrTargetString = "host_cross"
+		} else if commonInfo.Host {
+			hostOrTargetString = "host"
+		}
+
+		archString := commonInfo.Target.Arch.ArchType.String()
 		archDir := android.PathForIntermediates(ctx, "fuzz", hostOrTargetString, archString)
 		archOs := fuzz.ArchOs{HostOrTarget: hostOrTargetString, Arch: archString, Dir: archDir.String()}
 
@@ -188,14 +223,17 @@ func (s *javaFuzzPackager) GenerateBuildActions(ctx android.SingletonContext) {
 		files = s.PackageArtifacts(ctx, module, &fuzzInfo, archDir, builder)
 
 		// Add .jar
-		if !javaFuzzModule.Host() {
-			files = append(files, fuzz.FileToZip{SourceFilePath: javaFuzzModule.implementationJarFile, DestinationPathPrefix: "classes"})
+		if !commonInfo.Host {
+			for _, jar := range javaInfo.ImplementationJars {
+				files = append(files, fuzz.FileToZip{SourceFilePath: jar, DestinationPathPrefix: "classes"})
+			}
 		}
 
-		files = append(files, fuzz.FileToZip{SourceFilePath: javaFuzzModule.outputFile})
+		outputFile := android.OutputFileForModule(ctx, module, "")
+		files = append(files, fuzz.FileToZip{SourceFilePath: outputFile})
 
 		// Add jni .so files
-		for _, fPath := range javaFuzzModule.jniFilePaths {
+		for _, fPath := range javaFuzzTestInfo.JniFilePaths {
 			files = append(files, fuzz.FileToZip{SourceFilePath: fPath})
 		}
 
@@ -205,6 +243,14 @@ func (s *javaFuzzPackager) GenerateBuildActions(ctx android.SingletonContext) {
 		}
 	})
 	s.CreateFuzzPackage(ctx, archDirs, fuzz.Java, pctx)
+
+	// Create the phony and dist rules
+	ctx.Phony("haiku-java", s.Packages...)
+	ctx.DistForGoals([]string{"haiku-java"}, s.Packages...)
+	for _, target := range android.SortedKeys(s.FuzzTargets) {
+		ctx.Phony("haiku-java", android.PathForPhony(ctx, target))
+	}
+
 }
 
 func (s *javaFuzzPackager) MakeVars(ctx android.MakeVarsContext) {

@@ -57,6 +57,9 @@ func (sdkTransitionMutator) Split(ctx android.BaseModuleContext) []string {
 }
 
 func (sdkTransitionMutator) OutgoingTransition(ctx android.OutgoingTransitionContext, sourceVariation string) string {
+	if _, ok := ctx.DepTag().(android.UsesUnbundledVariantDepTag); ok {
+		return "sdk"
+	}
 	return sourceVariation
 }
 
@@ -78,8 +81,15 @@ func (sdkTransitionMutator) IncomingTransition(ctx android.IncomingTransitionCon
 			}
 		}
 	}
-
-	if ctx.IsAddingDependency() {
+	_, usesUnbundledVariantDepTag := ctx.DepTag().(android.UsesUnbundledVariantDepTag)
+	// If we've reached this point, the module doesn't have an sdk variant. If we're adding
+	// a dependency, we want to pass the sdk variant through to cause a missing dependency error,
+	// so that sdk modules can't depend on non-sdk modules and smuggle the use of private apis.
+	// However, when the unbundled_builder depends on modules, it wants to prefer the sdk variant
+	// but fall back to non-sdk if it doesn't exist. It's ok in this case because the
+	// unbundled_builder is just a module for disting other modules, it doesn't have any code of its
+	// own.
+	if ctx.IsAddingDependency() && !usesUnbundledVariantDepTag {
 		return incomingVariation
 	} else {
 		return ""
@@ -92,48 +102,45 @@ func (sdkTransitionMutator) Mutate(ctx android.BottomUpMutatorContext, variation
 	}
 
 	switch m := ctx.Module().(type) {
-	case LinkableInterface:
-		ccModule, isCcModule := ctx.Module().(*Module)
+	case VersionedLinkableInterface:
 		if m.AlwaysSdk() {
 			if variation != "sdk" {
 				ctx.ModuleErrorf("tried to create variation %q for module with AlwaysSdk set, expected \"sdk\"", variation)
 			}
 
-			ccModule.Properties.IsSdkVariant = true
+			m.SetSdkVariant()
 		} else if m.UseSdk() || m.SplitPerApiLevel() {
 			if variation == "" {
 				// Clear the sdk_version property for the platform (non-SDK) variant so later code
 				// doesn't get confused by it.
-				ccModule.Properties.Sdk_version = nil
+				m.SetSdkVersion(nil)
 			} else {
 				// Mark the SDK variant.
-				ccModule.Properties.IsSdkVariant = true
+				m.SetSdkVariant()
 
 				// SDK variant never gets installed because the variant is to be embedded in
 				// APKs, not to be installed to the platform.
-				ccModule.Properties.PreventInstall = true
+				m.SetPreventInstall()
 			}
 
-			if ctx.Config().UnbundledBuildApps() {
+			if ctx.Config().HasUnbundledBuildApps() {
 				if variation == "" {
 					// For an unbundled apps build, hide the platform variant from Make
 					// so that other Make modules don't link against it, but against the
 					// SDK variant.
-					ccModule.Properties.HideFromMake = true
+					m.SetHideFromMake()
 				}
 			} else {
 				if variation == "sdk" {
 					// For a platform build, mark the SDK variant so that it gets a ".sdk" suffix when
 					// exposed to Make.
-					ccModule.Properties.SdkAndPlatformVariantVisibleToMake = true
+					m.SetSdkAndPlatformVariantVisibleToMake()
 				}
 			}
 		} else {
-			if isCcModule {
-				// Clear the sdk_version property for modules that don't have an SDK variant so
-				// later code doesn't get confused by it.
-				ccModule.Properties.Sdk_version = nil
-			}
+			// Clear the sdk_version property for modules that don't have an SDK variant so
+			// later code doesn't get confused by it.
+			m.SetSdkVersion(nil)
 		}
 	}
 }

@@ -37,6 +37,7 @@ bootstrap_go_package {
         "cmd_lib/bpfix.go",
     ],
     deps: [
+        "blueprint-parser",
         "bpfix-lib",
     ],
 }

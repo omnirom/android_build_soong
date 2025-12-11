@@ -3,7 +3,7 @@ package dexpreopt
 import "android/soong/android"
 
 func init() {
-	android.InitRegistrationContext.RegisterSingletonType("system_server_zip_singleton", systemServerZipSingletonFactory)
+	android.InitRegistrationContext.RegisterParallelSingletonType("system_server_zip_singleton", systemServerZipSingletonFactory)
 }
 
 func systemServerZipSingletonFactory() android.Singleton {
@@ -26,19 +26,19 @@ func (s *systemServerZipSingleton) GenerateBuildActions(ctx android.SingletonCon
 		FlagWithOutput("-o ", out).
 		FlagWithArg("-C ", systemServerDexjarsDir.String())
 
-	for i := 0; i < global.SystemServerJars.Len(); i++ {
+	for i := range global.SystemServerJars.Len() {
 		jar := global.SystemServerJars.Jar(i) + ".jar"
 		cmd.FlagWithInput("-f ", systemServerDexjarsDir.Join(ctx, jar))
 	}
-	for i := 0; i < global.StandaloneSystemServerJars.Len(); i++ {
+	for i := range global.StandaloneSystemServerJars.Len() {
 		jar := global.StandaloneSystemServerJars.Jar(i) + ".jar"
 		cmd.FlagWithInput("-f ", systemServerDexjarsDir.Join(ctx, jar))
 	}
-	for i := 0; i < global.ApexSystemServerJars.Len(); i++ {
+	for i := range global.ApexSystemServerJars.Len() {
 		jar := global.ApexSystemServerJars.Jar(i) + ".jar"
 		cmd.FlagWithInput("-f ", systemServerDexjarsDir.Join(ctx, jar))
 	}
-	for i := 0; i < global.ApexStandaloneSystemServerJars.Len(); i++ {
+	for i := range global.ApexStandaloneSystemServerJars.Len() {
 		jar := global.ApexStandaloneSystemServerJars.Jar(i) + ".jar"
 		cmd.FlagWithInput("-f ", systemServerDexjarsDir.Join(ctx, jar))
 	}

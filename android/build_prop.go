@@ -142,19 +142,17 @@ func (p *buildPropModule) GenerateAndroidBuildActions(ctx ModuleContext) {
 
 	cmd.FlagWithInput("--build-hostname-file=", config.BuildHostnameFile(ctx))
 	cmd.FlagWithInput("--build-number-file=", config.BuildNumberFile(ctx))
-	// shouldn't depend on BuildFingerprintFile and BuildThumbprintFile to prevent from rebuilding
-	// on every incremental build.
-	cmd.FlagWithArg("--build-fingerprint-file=", config.BuildFingerprintFile(ctx).String())
+	cmd.FlagWithInput("--build-fingerprint-file=", config.BuildFingerprintFile(ctx))
 	// Export build thumbprint only if the product has specified at least one oem fingerprint property
 	// b/17888863
 	if shouldAddBuildThumbprint(config) {
-		// In the previous make implementation, a dependency was not added on the thumbprint file
-		cmd.FlagWithArg("--build-thumbprint-file=", config.BuildThumbprintFile(ctx).String())
+		cmd.FlagWithInput("--build-thumbprint-file=", config.BuildThumbprintFile(ctx))
 	}
 	cmd.FlagWithArg("--build-username=", config.Getenv("BUILD_USERNAME"))
 	// shouldn't depend on BUILD_DATETIME_FILE to prevent from rebuilding on every incremental
 	// build.
 	cmd.FlagWithArg("--date-file=", ctx.Config().Getenv("BUILD_DATETIME_FILE"))
+	cmd.OrderOnly(config.BuildDateFile(ctx))
 	cmd.FlagWithInput("--platform-preview-sdk-fingerprint-file=", ApiFingerprintPath(ctx))
 	cmd.FlagWithInput("--product-config=", PathForModuleSrc(ctx, proptools.String(p.properties.Product_config)))
 	cmd.FlagWithArg("--partition=", partition)

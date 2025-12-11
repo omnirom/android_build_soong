@@ -402,3 +402,44 @@ func TestGenerateProfileEvenIfDexpreoptIsDisabled(t *testing.T) {
 
 	android.AssertArrayString(t, "outputs", expected, dexpreopt.AllOutputs())
 }
+
+func TestAssumeValueFlags(t *testing.T) {
+	for _, platformSdkVersion := range []string{"", "28"} {
+		t.Run(platformSdkVersion, func(t *testing.T) {
+			preparers := android.GroupFixturePreparers(
+				PrepareForTestWithDexpreopt,
+				dexpreopt.PrepareForTestWithDexpreoptConfig,
+				dexpreopt.FixtureSetEnableUffdGc("false"),
+				dexpreopt.FixtureSetPlatformSdkVersion(platformSdkVersion),
+			)
+
+			result := preparers.RunTestWithBp(t, `
+				java_library {
+					name: "foo",
+					installable: true,
+					dex_preopt: {
+						profile: "art-profile",
+					},
+					srcs: ["a.java"],
+					sdk_version: "current",
+				}`)
+
+			ctx := result.TestContext
+
+			// Ensure that we always have a valid (but possibly empty) assumed
+			// value flags file for use with dex2oat input.
+			ctx.SingletonForTests(t, "dexpreopt-soong-config").Output("out/soong/dexpreopt/assume_value_flags.txt")
+
+			// If the SDK version is set, it should exist in the command to
+			// generate the assumed value flags file for use with dex2oat input.
+			if platformSdkVersion != "" {
+				rule := ctx.SingletonForTests(t, "dexpreopt-soong-config").Rule("dexpreopt_assume_value_flags")
+				android.AssertStringDoesContain(t, "", rule.RuleParams.Command,
+					"echo '--assume-value=Landroid/os/Build$$VERSION;->SDK_INT:"+platformSdkVersion+"'")
+				android.AssertStringPathsRelativeToTopEquals(t, "", ctx.Config(), []string{
+					"out/soong/dexpreopt/assume_value_flags.txt",
+				}, rule.AllOutputs())
+			}
+		})
+	}
+}

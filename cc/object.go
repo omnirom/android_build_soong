@@ -250,7 +250,3 @@ func (object *objectLinker) moduleInfoJSON(ctx ModuleContext, moduleInfoJSON *an
 	object.baseLinker.moduleInfoJSON(ctx, moduleInfoJSON)
 	moduleInfoJSON.Class = []string{"STATIC_LIBRARIES"}
 }
-
-func (object *objectLinker) testSuiteInfo(ctx ModuleContext) {
-	// not a test
-}

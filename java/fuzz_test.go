@@ -25,7 +25,7 @@ import (
 
 var prepForJavaFuzzTest = android.GroupFixturePreparers(
 	PrepareForTestWithJavaDefaultModules,
-	cc.PrepareForTestWithCcBuildComponents,
+	cc.PrepareForTestWithCcDefaultModules,
 	android.FixtureRegisterWithContext(RegisterJavaFuzzBuildComponents),
 )
 

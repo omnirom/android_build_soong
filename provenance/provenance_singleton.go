@@ -45,9 +45,11 @@ var (
 		})
 )
 
-type ProvenanceMetadata interface {
-	ProvenanceMetaDataFile() android.Path
+type ProvenanceMetadataInfo struct {
+	ProvenanceMetaDataFile android.Path
 }
+
+var ProvenanceMetadataInfoProvider = blueprint.NewProvider[ProvenanceMetadataInfo]()
 
 func init() {
 	RegisterProvenanceSingleton(android.InitRegistrationContext)
@@ -69,18 +71,14 @@ type provenanceInfoSingleton struct {
 
 func (p *provenanceInfoSingleton) GenerateBuildActions(context android.SingletonContext) {
 	allMetaDataFiles := make([]android.Path, 0)
-	moduleFilter := func(module android.Module) bool {
-		if !module.Enabled(context) || module.IsSkipInstall() {
-			return false
+	context.VisitAllModuleProxies(func(module android.ModuleProxy) {
+		commonInfo := android.OtherModulePointerProviderOrDefault(context, module, android.CommonModuleInfoProvider)
+		if !commonInfo.Enabled || commonInfo.SkipInstall {
+			return
 		}
-		if p, ok := module.(ProvenanceMetadata); ok {
-			return p.ProvenanceMetaDataFile() != nil
-		}
-		return false
-	}
-	context.VisitAllModulesIf(moduleFilter, func(module android.Module) {
-		if p, ok := module.(ProvenanceMetadata); ok {
-			allMetaDataFiles = append(allMetaDataFiles, p.ProvenanceMetaDataFile())
+
+		if p, ok := android.OtherModuleProvider(context, module, ProvenanceMetadataInfoProvider); ok {
+			allMetaDataFiles = append(allMetaDataFiles, p.ProvenanceMetaDataFile)
 		}
 	})
 	p.mergedMetaDataFile = android.PathForOutput(context, "provenance_metadata.textproto")
@@ -102,7 +100,7 @@ func (p *provenanceInfoSingleton) GenerateBuildActions(context android.Singleton
 	context.DistForGoal("droidcore", p.mergedMetaDataFile)
 }
 
-func GenerateArtifactProvenanceMetaData(ctx android.ModuleContext, artifactPath android.Path, installedFile android.InstallPath) android.Path {
+func GenerateArtifactProvenanceMetaData(ctx android.ModuleContext, artifactPath android.Path, installedFile android.InstallPath) {
 	onDevicePathOfInstalledFile := android.InstallPathToOnDevicePath(ctx, installedFile)
 	artifactMetaDataFile := android.PathForIntermediates(ctx, "provenance_metadata", ctx.ModuleDir(), ctx.ModuleName(), "provenance_metadata.textproto")
 	ctx.Build(pctx, android.BuildParams{
@@ -115,5 +113,7 @@ func GenerateArtifactProvenanceMetaData(ctx android.ModuleContext, artifactPath 
 			"install_path": onDevicePathOfInstalledFile,
 		}})
 
-	return artifactMetaDataFile
+	android.SetProvider(ctx, ProvenanceMetadataInfoProvider, ProvenanceMetadataInfo{
+		ProvenanceMetaDataFile: artifactMetaDataFile,
+	})
 }

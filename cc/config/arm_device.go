@@ -15,7 +15,6 @@
 package config
 
 import (
-	"fmt"
 	"strings"
 
 	"android/soong/android"
@@ -42,8 +41,6 @@ var (
 		// Revert this after b/322359235 is fixed
 		"-Wl,-mllvm", "-Wl,-enable-shrink-wrap=false",
 	}
-
-	armLldflags = armLdflags
 
 	armFixCortexA8LdFlags = []string{"-Wl,--fix-cortex-a8"}
 
@@ -186,7 +183,6 @@ const (
 
 func init() {
 	pctx.StaticVariable("ArmLdflags", strings.Join(armLdflags, " "))
-	pctx.StaticVariable("ArmLldflags", strings.Join(armLldflags, " "))
 
 	pctx.StaticVariable("ArmFixCortexA8LdFlags", strings.Join(armFixCortexA8LdFlags, " "))
 	pctx.StaticVariable("ArmNoFixCortexA8LdFlags", strings.Join(armNoFixCortexA8LdFlags, " "))
@@ -252,7 +248,6 @@ type toolchainArm struct {
 	toolchainBionic
 	toolchain32Bit
 	ldflags         string
-	lldflags        string
 	toolchainCflags string
 }
 
@@ -287,11 +282,7 @@ func (t *toolchainArm) Cppflags() string {
 }
 
 func (t *toolchainArm) Ldflags() string {
-	return t.ldflags
-}
-
-func (t *toolchainArm) Lldflags() string {
-	return t.lldflags // TODO: handle V8 cases
+	return t.ldflags // TODO: handle V8 cases
 }
 
 func (t *toolchainArm) InstructionSetFlags(isa string) (string, error) {
@@ -310,7 +301,6 @@ func (toolchainArm) LibclangRuntimeLibraryArch() string {
 }
 
 func armToolchainFactory(arch android.Arch) Toolchain {
-	var fixCortexA8 string
 	toolchainCflags := make([]string, 2, 3)
 
 	toolchainCflags[0] = "${config.ArmToolchainCflags}"
@@ -319,29 +309,8 @@ func armToolchainFactory(arch android.Arch) Toolchain {
 	toolchainCflags = append(toolchainCflags,
 		variantOrDefault(armCpuVariantCflagsVar, arch.CpuVariant))
 
-	switch arch.ArchVariant {
-	case "armv7-a-neon":
-		switch arch.CpuVariant {
-		case "cortex-a8", "":
-			// Generic ARM might be a Cortex A8 -- better safe than sorry
-			fixCortexA8 = "${config.ArmFixCortexA8LdFlags}"
-		default:
-			fixCortexA8 = "${config.ArmNoFixCortexA8LdFlags}"
-		}
-	case "armv7-a":
-		fixCortexA8 = "${config.ArmFixCortexA8LdFlags}"
-	case "armv8-a", "armv8-2a":
-		// Nothing extra for armv8-a/armv8-2a
-	default:
-		panic(fmt.Sprintf("Unknown ARM architecture version: %q", arch.ArchVariant))
-	}
-
 	return &toolchainArm{
-		ldflags: strings.Join([]string{
-			"${config.ArmLdflags}",
-			fixCortexA8,
-		}, " "),
-		lldflags:        "${config.ArmLldflags}",
+		ldflags:         "${config.ArmLdflags}",
 		toolchainCflags: strings.Join(toolchainCflags, " "),
 	}
 }

@@ -94,28 +94,23 @@ type visibilityRule interface {
 }
 
 // Describes the properties provided by a module that contain visibility rules.
-type visibilityPropertyImpl struct {
+type visibilityProperty struct {
 	name            string
 	stringsProperty *[]string
 }
 
-type visibilityProperty interface {
-	getName() string
-	getStrings() []string
-}
-
-func newVisibilityProperty(name string, stringsProperty *[]string) visibilityProperty {
-	return visibilityPropertyImpl{
+func newVisibilityProperty(name string, stringsProperty *[]string) *visibilityProperty {
+	return &visibilityProperty{
 		name:            name,
 		stringsProperty: stringsProperty,
 	}
 }
 
-func (p visibilityPropertyImpl) getName() string {
+func (p visibilityProperty) getName() string {
 	return p.name
 }
 
-func (p visibilityPropertyImpl) getStrings() []string {
+func (p visibilityProperty) getStrings() []string {
 	return *p.stringsProperty
 }
 
@@ -533,7 +528,7 @@ func visibilityRuleEnforcer(ctx BottomUpMutatorContext) {
 	qualified := createVisibilityModuleReference(ctx.ModuleName(), ctx.ModuleDir(), ctx.Module())
 
 	// Visit all the dependencies making sure that this module has access to them all.
-	ctx.VisitDirectDeps(func(dep Module) {
+	ctx.VisitDirectDepsProxy(func(dep ModuleProxy) {
 		// Ignore dependencies that have an ExcludeFromVisibilityEnforcementTag
 		tag := ctx.OtherModuleDependencyTag(dep)
 		if _, ok := tag.(ExcludeFromVisibilityEnforcementTag); ok {
@@ -680,7 +675,7 @@ func AddVisibilityProperty(module Module, name string, stringsProperty *[]string
 	addVisibilityProperty(module, name, stringsProperty)
 }
 
-func addVisibilityProperty(module Module, name string, stringsProperty *[]string) visibilityProperty {
+func addVisibilityProperty(module Module, name string, stringsProperty *[]string) *visibilityProperty {
 	base := module.base()
 	property := newVisibilityProperty(name, stringsProperty)
 	base.visibilityPropertyInfo = append(base.visibilityPropertyInfo, property)

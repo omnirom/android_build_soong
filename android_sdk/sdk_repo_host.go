@@ -16,7 +16,6 @@ package android_sdk
 
 import (
 	"fmt"
-	"io"
 	"path/filepath"
 	"strings"
 
@@ -25,6 +24,7 @@ import (
 	"github.com/google/blueprint/proptools"
 
 	"android/soong/android"
+	"android/soong/cc"
 	"android/soong/cc/config"
 )
 
@@ -43,12 +43,6 @@ type sdkRepoHost struct {
 	android.PackagingBase
 
 	properties sdkRepoHostProperties
-
-	outputBaseName string
-	outputFile     android.OptionalPath
-
-	// TODO(b/357908583): Temp field, remove this once we support Android Mk providers
-	installFile android.InstallPath
 }
 
 type remapProperties struct {
@@ -92,6 +86,14 @@ func newSdkRepoHostModule() *sdkRepoHost {
 	return s
 }
 
+// We need to implement IsNativeCoverageNeeded so that in coverage builds we don't get packaging
+// conflicts with required deps that always use the coverage variant.
+func (p *sdkRepoHost) IsNativeCoverageNeeded(ctx cc.IsNativeCoverageNeededContext) bool {
+	return ctx.DeviceConfig().NativeCoverageEnabled()
+}
+
+var _ cc.UseCoverage = (*sdkRepoHost)(nil)
+
 type dependencyTag struct {
 	blueprint.BaseDependencyTag
 	android.PackagingItemAlwaysDepTag
@@ -129,10 +131,12 @@ func (s *sdkRepoHost) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	noticeFile := android.PathForModuleOut(ctx, "NOTICES.txt")
 	android.BuildNoticeTextOutputFromLicenseMetadata(
 		ctx, noticeFile, "", "",
-		[]string{
-			android.PathForModuleInstall(ctx, "sdk-repo").String() + "/",
-			outputZipFile.String(),
-		})
+		android.BuildNoticeFromLicenseDataArgs{
+			StripPrefix: []string{
+				android.PathForModuleInstall(ctx, "sdk-repo").String() + "/",
+				outputZipFile.String(),
+			},
+		}, ctx.ModuleProxy())
 	builder.Command().Text("cp").
 		Input(noticeFile).
 		Text(filepath.Join(dir.String(), "NOTICE.txt"))
@@ -189,9 +193,7 @@ func (s *sdkRepoHost) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		Flag("-o -name '*.txt' -o -name '*.windows' -o -name '*.xml' -print0").
 		// Using -n 500 for xargs to limit the max number of arguments per call to line_endings
 		// to 500. This avoids line_endings failing with "arguments too long".
-		Text("| xargs -0 -n 500 ").
-		BuiltTool("line_endings").
-		Flag("unix")
+		Text("| xargs -0 -n 500 dos2unix")
 
 	// Exclude some file types (roughly matching sdk.exclude.atree)
 	builder.Command().
@@ -235,24 +237,15 @@ func (s *sdkRepoHost) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	}
 	name := fmt.Sprintf("sdk-repo-%s-%s", osName, s.BaseModuleName())
 
-	s.outputBaseName = name
-	s.outputFile = android.OptionalPathForPath(outputZipFile)
 	installPath := android.PathForModuleInstall(ctx, "sdk-repo")
 	name = name + ".zip"
-	ctx.InstallFile(installPath, name, outputZipFile)
-	// TODO(b/357908583): Temp field, remove this once we support Android Mk providers
-	s.installFile = installPath.Join(ctx, name)
-}
+	installFile := ctx.InstallFile(installPath, name, outputZipFile)
 
-func (s *sdkRepoHost) AndroidMk() android.AndroidMkData {
-	return android.AndroidMkData{
-		Custom: func(w io.Writer, name, prefix, moduleDir string, data android.AndroidMkData) {
-			fmt.Fprintln(w, ".PHONY:", name, "sdk_repo", "sdk-repo-"+name)
-			fmt.Fprintln(w, "sdk_repo", "sdk-repo-"+name+":", s.installFile.String())
-
-			fmt.Fprintf(w, "$(call dist-for-goals,sdk_repo sdk-repo-%s,%s:%s-FILE_NAME_TAG_PLACEHOLDER.zip)\n\n", s.BaseModuleName(), s.outputFile.String(), s.outputBaseName)
-		},
-	}
+	shortName := "sdk-repo-" + s.BaseModuleName()
+	ctx.Phony("sdk_repo", installFile)
+	ctx.Phony(shortName, installFile)
+	ctx.DistForGoalWithFilenameTag("sdk_repo", outputZipFile, name)
+	ctx.DistForGoalWithFilenameTag(shortName, outputZipFile, name)
 }
 
 func remapPackageSpecs(specs map[string]android.PackagingSpec, remaps []remapProperties) error {

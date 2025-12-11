@@ -27,5 +27,6 @@ blueprint_go_binary {
     ],
     deps: [
         "soong-finder",
+        "soong-finder-fs",
     ],
 }

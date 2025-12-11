@@ -17,15 +17,13 @@ package cc
 import (
 	"testing"
 
-	"github.com/google/blueprint"
-
 	"android/soong/android"
 )
 
 func TestNdkHeaderDependency(t *testing.T) {
 	isDep := func(ctx *android.TestResult, from, toExpected android.Module) bool {
 		foundDep := false
-		ctx.VisitDirectDeps(from, func(toActual blueprint.Module) {
+		ctx.VisitDirectDeps(from, func(toActual android.Module) {
 			if toExpected.Name() == toActual.Name() {
 				foundDep = true
 			}

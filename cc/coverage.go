@@ -38,6 +38,14 @@ var (
 		"-fcoverage-mapping",
 		"-Wno-pass-failed",
 		"-D__ANDROID_CLANG_COVERAGE__",
+
+		// Bug: http://b/408093589, http://b/396515430: LLVM change 4089763883 to
+		// global merge regressed code coverage, marking previously covered lines
+		// as uncovered.  Disable global merge until the regression is fixed.
+		// -Wunused-command-line-argument needs to be disabled because
+		// -mno-global-merge is reported as unused in LTO mode.
+		"-mno-global-merge",
+		"-Wno-unused-command-line-argument",
 	}
 	clangCoverageHWASanFlags = []string{
 		"-mllvm",
@@ -149,11 +157,11 @@ func (cov *coverage) flags(ctx ModuleContext, flags Flags, deps PathDeps) (Flags
 			// For static libraries, the only thing that changes our object files
 			// are included whole static libraries, so check to see if any of
 			// those have coverage enabled.
-			ctx.VisitDirectDeps(func(m android.Module) {
+			ctx.VisitDirectDepsProxy(func(m android.ModuleProxy) {
 				if depTag, ok := ctx.OtherModuleDependencyTag(m).(libraryDependencyTag); ok {
 					if depTag.static() && depTag.wholeStatic {
-						if cc, ok := m.(*Module); ok && cc.coverage != nil {
-							if cc.coverage.linkCoverage {
+						if info, ok := android.OtherModuleProvider(ctx, m, LinkableInfoProvider); ok {
+							if info.LinkCoverage {
 								cov.linkCoverage = true
 							}
 						}
@@ -163,18 +171,13 @@ func (cov *coverage) flags(ctx ModuleContext, flags Flags, deps PathDeps) (Flags
 		} else {
 			// For executables and shared libraries, we need to check all of
 			// our static dependencies.
-			ctx.VisitDirectDeps(func(m android.Module) {
-				cc, ok := m.(*Module)
-				if !ok || cc.coverage == nil {
-					return
-				}
-
-				if static, ok := cc.linker.(libraryInterface); !ok || !static.static() {
-					return
-				}
-
-				if cc.coverage.linkCoverage {
-					cov.linkCoverage = true
+			ctx.VisitDirectDepsProxy(func(m android.ModuleProxy) {
+				if _, ok := android.OtherModuleProvider(ctx, m, StaticLibraryInfoProvider); ok {
+					if info, ok := android.OtherModuleProvider(ctx, m, LinkableInfoProvider); ok {
+						if info.LinkCoverage {
+							cov.linkCoverage = true
+						}
+					}
 				}
 			})
 		}
@@ -185,8 +188,8 @@ func (cov *coverage) flags(ctx ModuleContext, flags Flags, deps PathDeps) (Flags
 			flags.Local.LdFlags = append(flags.Local.LdFlags, "--coverage")
 
 			if ctx.Device() {
-				coverage := ctx.GetDirectDepWithTag(getGcovProfileLibraryName(ctx), CoverageDepTag).(*Module)
-				deps.WholeStaticLibs = append(deps.WholeStaticLibs, coverage.OutputFile().Path())
+				coverage := ctx.GetDirectDepProxyWithTag(getGcovProfileLibraryName(ctx), CoverageDepTag)
+				deps.WholeStaticLibs = append(deps.WholeStaticLibs, android.OutputFileForModule(ctx, coverage, ""))
 				flags.Local.LdFlags = append(flags.Local.LdFlags, "-Wl,--wrap,getenv")
 			}
 		} else if clangCoverage {
@@ -196,8 +199,8 @@ func (cov *coverage) flags(ctx ModuleContext, flags Flags, deps PathDeps) (Flags
 			}
 
 			if ctx.Device() {
-				coverage := ctx.GetDirectDepWithTag(getClangProfileLibraryName(ctx), CoverageDepTag).(*Module)
-				deps.WholeStaticLibs = append(deps.WholeStaticLibs, coverage.OutputFile().Path())
+				coverage := ctx.GetDirectDepProxyWithTag(getClangProfileLibraryName(ctx), CoverageDepTag)
+				deps.WholeStaticLibs = append(deps.WholeStaticLibs, android.OutputFileForModule(ctx, coverage, ""))
 				flags.Local.LdFlags = append(flags.Local.LdFlags, "-Wl,--wrap,open")
 			}
 		}
@@ -207,12 +210,22 @@ func (cov *coverage) flags(ctx ModuleContext, flags Flags, deps PathDeps) (Flags
 }
 
 func (cov *coverage) begin(ctx BaseModuleContext) {
-	if ctx.Host() && !ctx.Os().Linux() {
-		// TODO(dwillemsen): because of -nodefaultlibs, we must depend on libclang_rt.profile-*.a
-		// Just turn off for now.
-	} else {
+	if IsCoverageEnabled(ctx) {
 		cov.Properties = SetCoverageProperties(ctx, cov.Properties, ctx.nativeCoverage(), ctx.useSdk(), ctx.sdkVersion())
 	}
+}
+
+func IsCoverageEnabled(ctx android.BaseModuleContext) bool {
+	if ctx.Host() {
+		// Host coverage is only supported on Linux 64-bit binaries
+		if !ctx.Os().Linux() {
+			return false
+		}
+		if ctx.Arch().ArchType.Multilib == "lib32" {
+			return false
+		}
+	}
+	return true
 }
 
 func SetCoverageProperties(ctx android.BaseModuleContext, properties CoverageProperties, moduleTypeHasCoverage bool,
@@ -271,6 +284,10 @@ type Coverage interface {
 	EnableCoverageIfNeeded()
 }
 
+type UseCoverageDeptag interface {
+	IsNativeCoverageNeededDepTag(ctx IsNativeCoverageNeededContext) bool
+}
+
 type coverageTransitionMutator struct{}
 
 func (c coverageTransitionMutator) Split(ctx android.BaseModuleContext) []string {
@@ -312,6 +329,13 @@ func (c coverageTransitionMutator) IncomingTransition(ctx android.IncomingTransi
 		return "cov"
 	} else {
 		return ""
+	}
+
+	// non-coverage variants have PreventInstall = true, so we need certain deptags that are
+	// used for installation to use the coverage variant so that filesystem modules will package
+	// them correctly.
+	if x, ok := ctx.DepTag().(UseCoverageDeptag); (ok && x.IsNativeCoverageNeededDepTag(ctx)) || ctx.DepTag() == android.RequiredDepTag {
+		return "cov"
 	}
 
 	return incomingVariation

@@ -82,8 +82,8 @@ func SetupLitePath(ctx Context, config Config, tmpDir string) {
 		return
 	}
 
-	ctx.BeginTrace(metrics.RunSetupTool, "litepath")
-	defer ctx.EndTrace()
+	e := ctx.BeginTrace(metrics.RunSetupTool, "litepath")
+	defer e.End()
 
 	origPath, _ := config.Environment().Get("PATH")
 
@@ -145,8 +145,8 @@ func SetupPath(ctx Context, config Config) {
 		return
 	}
 
-	ctx.BeginTrace(metrics.RunSetupTool, "path")
-	defer ctx.EndTrace()
+	e := ctx.BeginTrace(metrics.RunSetupTool, "path")
+	defer e.End()
 
 	origPath, _ := config.Environment().Get("PATH")
 	// The directory containing symlinks from binaries in $PATH to the interposer.

@@ -48,7 +48,7 @@ type SanitizeProperties struct {
 			// if set, enables sync memory tagging
 			Memtag_heap *bool `android:"arch_variant"`
 		}
-	}
+	} `android:"arch_variant"`
 	SanitizerEnabled bool `blueprint:"mutated"`
 
 	// Used when we need to place libraries in their own directory, such as ASAN.
@@ -92,15 +92,20 @@ var hwasanFlags = []string{
 	"-C llvm-args=--aarch64-enable-global-isel-at-O=-1",
 	"-C llvm-args=-fast-isel=false",
 	"-C llvm-args=-instcombine-lower-dbg-declare=0",
-
+}
+var hwasanFlagsExtra = []string{
 	// Additional flags for HWASAN-ified Rust/C interop
+	"-C llvm-args=-hwasan-mapping-offset-dynamic=ifunc",
+}
+var hwasanFlagsDeprecated = []string{
+	// --hwasan-with-ifunc is replaced by -hwasan-mapping-offset-dynamic=ifunc in LLVM 20
 	"-C llvm-args=--hwasan-with-ifunc",
 }
 
 func init() {
 }
-func (sanitize *sanitize) props() []interface{} {
-	return []interface{}{&sanitize.Properties}
+func (sanitize *sanitize) props() []any {
+	return []any{&sanitize.Properties}
 }
 
 func (sanitize *sanitize) begin(ctx BaseModuleContext) {
@@ -166,7 +171,7 @@ func (sanitize *sanitize) begin(ctx BaseModuleContext) {
 			s.Address = proptools.BoolPtr(true)
 		}
 
-		if found, globalSanitizers = android.RemoveFromList("fuzzer", globalSanitizers); found && s.Fuzzer == nil {
+		if found, _ = android.RemoveFromList("fuzzer", globalSanitizers); found && s.Fuzzer == nil {
 			// TODO(b/204776996): HWASan for static Rust binaries isn't supported yet, and fuzzer enables HWAsan
 			if !ctx.RustModule().StaticExecutable() {
 				s.Fuzzer = proptools.BoolPtr(true)
@@ -174,7 +179,7 @@ func (sanitize *sanitize) begin(ctx BaseModuleContext) {
 		}
 
 		// Global Diag Sanitizers
-		if found, globalSanitizersDiag = android.RemoveFromList("memtag_heap", globalSanitizersDiag); found &&
+		if found, _ = android.RemoveFromList("memtag_heap", globalSanitizersDiag); found &&
 			s.Diag.Memtag_heap == nil && Bool(s.Memtag_heap) {
 			s.Diag.Memtag_heap = proptools.BoolPtr(true)
 		}
@@ -242,6 +247,11 @@ func (sanitize *sanitize) flags(ctx ModuleContext, flags Flags, deps PathDeps) (
 
 	if Bool(sanitize.Properties.Sanitize.Hwaddress) {
 		flags.RustFlags = append(flags.RustFlags, hwasanFlags...)
+		if config.GetRustVersion(ctx) >= "1.87" {
+			flags.RustFlags = append(flags.RustFlags, hwasanFlagsExtra...)
+		} else {
+			flags.RustFlags = append(flags.RustFlags, hwasanFlagsDeprecated...)
+		}
 	}
 
 	if Bool(sanitize.Properties.Sanitize.Address) {
@@ -253,10 +263,6 @@ func (sanitize *sanitize) flags(ctx ModuleContext, flags Flags, deps PathDeps) (
 		}
 	}
 	return flags, deps
-}
-
-func (sanitize *sanitize) deps(ctx BaseModuleContext, deps Deps) Deps {
-	return deps
 }
 
 func rustSanitizerRuntimeMutator(mctx android.BottomUpMutatorContext) {
@@ -369,7 +375,7 @@ func (sanitize *sanitize) isSanitizerExplicitlyDisabled(t cc.SanitizerType) bool
 		return true
 	}
 	sanitizerVal := sanitize.getSanitizerBoolPtr(t)
-	return sanitizerVal != nil && *sanitizerVal == false
+	return sanitizerVal != nil && !*sanitizerVal
 }
 
 // There isn't an analog of the method above (ie:isSanitizerExplicitlyEnabled)
@@ -383,7 +389,7 @@ func (sanitize *sanitize) isSanitizerEnabled(t cc.SanitizerType) bool {
 	}
 
 	sanitizerVal := sanitize.getSanitizerBoolPtr(t)
-	return sanitizerVal != nil && *sanitizerVal == true
+	return sanitizerVal != nil && *sanitizerVal
 }
 
 func (sanitize *sanitize) getSanitizerBoolPtr(t cc.SanitizerType) *bool {
@@ -401,7 +407,7 @@ func (sanitize *sanitize) getSanitizerBoolPtr(t cc.SanitizerType) *bool {
 	}
 }
 
-func (sanitize *sanitize) AndroidMk(ctx AndroidMkContext, entries *android.AndroidMkEntries) {
+func (sanitize *sanitize) AndroidMk(ctx AndroidMkContext, entries *android.AndroidMkInfo) {
 	// Add a suffix for hwasan rlib libraries to allow surfacing both the sanitized and
 	// non-sanitized variants to make without a name conflict.
 	if entries.Class == "RLIB_LIBRARIES" || entries.Class == "STATIC_LIBRARIES" {

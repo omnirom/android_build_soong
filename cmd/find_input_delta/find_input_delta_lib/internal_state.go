@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"regexp"
 	"slices"
 
@@ -29,7 +30,7 @@ import (
 
 // Load the internal state from a file.
 // If the file does not exist, an empty state is returned.
-func LoadState(filename string, fsys fs.ReadFileFS) (*fid_proto.PartialCompileInputs, error) {
+func loadState(filename string, fsys fs.ReadFileFS) (*fid_proto.PartialCompileInputs, error) {
 	var message = &fid_proto.PartialCompileInputs{}
 	data, err := fsys.ReadFile(filename)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -45,31 +46,51 @@ type StatReadFileFS interface {
 }
 
 // Create the internal state by examining the inputs.
-func CreateState(inputs []string, inspect_contents bool, fsys StatReadFileFS) (*fid_proto.PartialCompileInputs, error) {
+func createState(version string, tools, inputs []string, inspect_contents bool, fsys StatReadFileFS) (*fid_proto.PartialCompileInputs, error) {
 	ret := &fid_proto.PartialCompileInputs{}
+	if version != "" {
+		ret.Version = proto.String(version)
+	}
+	statFile := func(input string, inspect bool) (pci *fid_proto.PartialCompileInput, err error) {
+		stat, err := fs.Stat(fsys, input)
+		if err != nil {
+			return nil, err
+		}
+		pci = &fid_proto.PartialCompileInput{
+			Name:      proto.String(input),
+			MtimeNsec: proto.Int64(stat.ModTime().UnixNano()),
+			// If we ever have an easy hash, assign it here.
+		}
+		if inspect {
+			// NOTE: When we find it useful, we can parallelize the file inspection for speed.
+			contents, err := inspectFileContents(input)
+			if err != nil {
+				return pci, err
+			}
+			if contents != nil {
+				pci.Contents = contents
+			}
+		}
+		return pci, nil
+	}
+
+	slices.Sort(tools)
+	for _, tool := range tools {
+		pci, err := statFile(tool, false)
+		if err != nil {
+			return ret, err
+		}
+		ret.Tools = append(ret.Tools, pci)
+	}
+
 	slices.Sort(inputs)
 	for _, input := range inputs {
-		stat, err := fs.Stat(fsys, input)
+		pci, err := statFile(input, inspect_contents)
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
 				continue
 			}
 			return ret, err
-		}
-		pci := &fid_proto.PartialCompileInput{
-			Name:      proto.String(input),
-			MtimeNsec: proto.Int64(stat.ModTime().UnixNano()),
-			// If we ever have an easy hash, assign it here.
-		}
-		if inspect_contents {
-			// NOTE: When we find it useful, we can parallelize the file inspection for speed.
-			contents, err := InspectFileContents(input)
-			if err != nil {
-				return ret, err
-			}
-			if contents != nil {
-				pci.Contents = contents
-			}
 		}
 		ret.InputFiles = append(ret.InputFiles, pci)
 	}
@@ -81,7 +102,7 @@ var InspectExtsZipRegexp = regexp.MustCompile("\\.(jar|apex|apk)[0-9]*$")
 
 // Inspect the file and extract the state of the elements in the archive.
 // If this is not an archive of some sort, nil is returned.
-func InspectFileContents(name string) ([]*fid_proto.PartialCompileInput, error) {
+func inspectFileContents(name string) ([]*fid_proto.PartialCompileInput, error) {
 	if InspectExtsZipRegexp.Match([]byte(name)) {
 		return inspectZipFileContents(name)
 	}
@@ -111,7 +132,7 @@ func inspectZipFileContents(name string) ([]*fid_proto.PartialCompileInput, erro
 	return ret, nil
 }
 
-func WriteState(s *fid_proto.PartialCompileInputs, path string) error {
+func writeState(s *fid_proto.PartialCompileInputs, path string) error {
 	data, err := proto.Marshal(s)
 	if err != nil {
 		return err
@@ -119,14 +140,30 @@ func WriteState(s *fid_proto.PartialCompileInputs, path string) error {
 	return pathtools.WriteFileIfChanged(path, data, 0644)
 }
 
-func CompareInternalState(prior, other *fid_proto.PartialCompileInputs, target string) *FileList {
-	return CompareInputFiles(prior.GetInputFiles(), other.GetInputFiles(), target)
+func compareInternalState(prior, other *fid_proto.PartialCompileInputs, target string) *FileList {
+	// If Version or any Tools are different, then claim every input is new.
+	nilInputs := []*fid_proto.PartialCompileInput{}
+	if prior.Version != other.Version {
+		return compareInputFiles(nilInputs, other.GetInputFiles(), target)
+	} else {
+		_priorToolsMap := make(map[string]*fid_proto.PartialCompileInput)
+		for _, v := range prior.GetTools() {
+			_priorToolsMap[v.GetName()] = v
+		}
+		for _, v := range other.GetTools() {
+			tool := v.GetName()
+			if _, ok := _priorToolsMap[tool]; !ok || !proto.Equal(_priorToolsMap[tool], v) {
+				return compareInputFiles(nilInputs, other.GetInputFiles(), target)
+			}
+		}
+	}
+	// Check the inputs for changes.
+	return compareInputFiles(prior.GetInputFiles(), other.GetInputFiles(), target)
 }
 
-func CompareInputFiles(prior, other []*fid_proto.PartialCompileInput, name string) *FileList {
+func compareInputFiles(prior, other []*fid_proto.PartialCompileInput, name string) *FileList {
 	fl := FileListFactory(name)
 	PriorMap := make(map[string]*fid_proto.PartialCompileInput, len(prior))
-	// We know that the lists are properly sorted, so we can simply compare them.
 	for _, v := range prior {
 		PriorMap[v.GetName()] = v
 	}
@@ -139,7 +176,7 @@ func CompareInputFiles(prior, other []*fid_proto.PartialCompileInput, name strin
 			fl.addFile(name)
 		} else if !proto.Equal(PriorMap[name], v) {
 			// Changed file
-			fl.changeFile(name, CompareInputFiles(PriorMap[name].GetContents(), v.GetContents(), name))
+			fl.changeFile(name, compareInputFiles(PriorMap[name].GetContents(), v.GetContents(), name))
 		}
 	}
 	for _, v := range prior {
@@ -150,4 +187,31 @@ func CompareInputFiles(prior, other []*fid_proto.PartialCompileInput, name strin
 		}
 	}
 	return fl
+}
+
+func GenerateFileList(target, prior_state_file, new_state_file, version string, tools, inputs []string, inspect bool, fsys StatReadFileFS) (file_list *FileList, err error) {
+	// Read the prior state
+	prior_state, err := loadState(prior_state_file, fsys)
+	if err != nil {
+		return
+	}
+	// Create the new state
+	new_state, err := createState(version, tools, inputs, inspect, fsys)
+	if err != nil {
+		return
+	}
+	if err = writeState(new_state, new_state_file); err != nil {
+		return
+	}
+
+	file_list = compareInternalState(prior_state, new_state, target)
+
+	metrics_dir := os.Getenv("SOONG_METRICS_AGGREGATION_DIR")
+	out_dir := os.Getenv("OUT_DIR")
+	if metrics_dir != "" {
+		if err = file_list.WriteMetrics(metrics_dir, out_dir); err != nil {
+			return
+		}
+	}
+	return
 }

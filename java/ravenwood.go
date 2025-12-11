@@ -16,6 +16,7 @@ package java
 import (
 	"strconv"
 
+	"android/soong/aconfig"
 	"android/soong/android"
 	"android/soong/tradefed"
 
@@ -35,16 +36,23 @@ func RegisterRavenwoodBuildComponents(ctx android.RegistrationContext) {
 var ravenwoodLibContentTag = dependencyTag{name: "ravenwoodlibcontent"}
 var ravenwoodUtilsTag = dependencyTag{name: "ravenwoodutils"}
 var ravenwoodRuntimeTag = dependencyTag{name: "ravenwoodruntime"}
-var ravenwoodTestResourceApkTag = dependencyTag{name: "ravenwoodtestresapk"}
-var ravenwoodTestInstResourceApkTag = dependencyTag{name: "ravenwoodtest-inst-res-apk"}
+var ravenwoodTargetResourceApkTag = dependencyTag{name: "ravenwood-target-res-apk"}
+var allAconfigModuleTag = dependencyTag{name: "all_aconfig"}
 
 var genManifestProperties = pctx.AndroidStaticRule("genManifestProperties",
 	blueprint.RuleParams{
 		Command: "echo targetSdkVersionInt=$targetSdkVersionInt > $out && " +
 			"echo targetSdkVersionRaw=$targetSdkVersionRaw >> $out && " +
 			"echo packageName=$packageName >> $out && " +
-			"echo instPackageName=$instPackageName >> $out",
-	}, "targetSdkVersionInt", "targetSdkVersionRaw", "packageName", "instPackageName")
+			"echo targetPackageName=$targetPackageName >> $out && " +
+			"echo instrumentationClass=$instrumentationClass >> $out && " +
+			"echo moduleName=$moduleName >> $out && " +
+			"echo resourceApk=$resourceApk >> $out && " +
+			"echo targetResourceApk=$targetResourceApk >> $out",
+	},
+	"targetSdkVersionInt", "targetSdkVersionRaw", "packageName", "targetPackageName",
+	"instrumentationClass", "moduleName", "resourceApk", "targetResourceApk",
+)
 
 const ravenwoodUtilsName = "ravenwood-utils"
 const ravenwoodRuntimeName = "ravenwood-runtime"
@@ -64,40 +72,35 @@ func getLibPath(archType android.ArchType) string {
 }
 
 type ravenwoodTestProperties struct {
-	Jni_libs proptools.Configurable[[]string]
-
-	// Specify another android_app module here to copy it to the test directory, so that
-	// the ravenwood test can access it. This APK will be loaded as resources of the test
-	// target app.
-	// TODO: For now, we simply refer to another android_app module and copy it to the
-	// test directory. Eventually, android_ravenwood_test should support all the resource
-	// related properties and build resources from the `res/` directory.
-	Resource_apk *string
-
-	// Specify another android_app module here to copy it to the test directory, so that
-	// the ravenwood test can access it. This APK will be loaded as resources of the test
-	// instrumentation app itself.
-	Inst_resource_apk *string
+	// Specify the name of the Instrumentation subclass to use.
+	// (e.g. "androidx.test.runner.AndroidJUnitRunner")
+	Instrumentation_class *string
 
 	// Specify the package name of the test target apk.
 	// This will be set to the target Context's package name.
 	// (i.e. Instrumentation.getTargetContext().getPackageName())
 	// If this is omitted, Package_name will be used.
-	Package_name *string
+	Target_package_name *string
 
-	// Specify the package name of this test module.
-	// This will be set to the test Context's package name.
-	//(i.e. Instrumentation.getContext().getPackageName())
-	Inst_package_name *string
+	// Specify another android_app module here to copy it to the test directory, so that
+	// the ravenwood test can access it. This APK will be loaded as resources of the test
+	// target app.
+	Target_resource_apk *string
+
+	// Specify whether to build resources.
+	Build_resources *bool
 }
 
 type ravenwoodTest struct {
 	Library
+	aapt
 
 	ravenwoodTestProperties ravenwoodTestProperties
 
 	testProperties testProperties
-	testConfig     android.Path
+
+	testConfig android.Path
+	data       android.Paths
 
 	forceOSType   android.OsType
 	forceArchType android.ArchType
@@ -107,7 +110,7 @@ func ravenwoodTestFactory() android.Module {
 	module := &ravenwoodTest{}
 
 	module.addHostAndDeviceProperties()
-	module.AddProperties(&module.testProperties, &module.ravenwoodTestProperties)
+	module.AddProperties(&module.aaptProperties, &module.testProperties, &module.ravenwoodTestProperties)
 
 	module.Module.dexpreopter.isTest = true
 	module.Module.linter.properties.Lint.Test_module_type = proptools.BoolPtr(true)
@@ -149,17 +152,22 @@ func (r *ravenwoodTest) DepsMutator(ctx android.BottomUpMutatorContext) {
 	}
 
 	// Add jni libs
-	for _, lib := range r.ravenwoodTestProperties.Jni_libs.GetOrDefault(ctx, nil) {
+	for _, lib := range r.testProperties.Jni_libs.GetOrDefault(ctx, nil) {
 		ctx.AddVariationDependencies(ctx.Config().BuildOSTarget.Variations(), jniLibTag, lib)
 	}
 
 	// Resources APK
-	if resourceApk := proptools.String(r.ravenwoodTestProperties.Resource_apk); resourceApk != "" {
-		ctx.AddVariationDependencies(nil, ravenwoodTestResourceApkTag, resourceApk)
+	if resourceApk := proptools.String(r.ravenwoodTestProperties.Target_resource_apk); resourceApk != "" {
+		ctx.AddVariationDependencies(nil, ravenwoodTargetResourceApkTag, resourceApk)
 	}
 
-	if resourceApk := proptools.String(r.ravenwoodTestProperties.Inst_resource_apk); resourceApk != "" {
-		ctx.AddVariationDependencies(nil, ravenwoodTestInstResourceApkTag, resourceApk)
+	sdkDep := decodeSdkDep(ctx, android.SdkContext(r))
+	if sdkDep.hasFrameworkLibs() {
+		r.aapt.deps(ctx, sdkDep)
+	}
+
+	for _, aconfig_declaration := range r.aaptProperties.Flags_packages {
+		ctx.AddDependency(ctx.Module(), aconfigDeclarationTag, aconfig_declaration)
 	}
 }
 
@@ -168,13 +176,44 @@ func (r *ravenwoodTest) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	r.forceArchType = ctx.Config().BuildArch
 
 	r.testConfig = tradefed.AutoGenTestConfig(ctx, tradefed.AutoGenTestConfigOptions{
-		TestConfigProp:         r.testProperties.Test_config,
-		TestConfigTemplateProp: r.testProperties.Test_config_template,
-		TestSuites:             r.testProperties.Test_suites,
-		AutoGenConfig:          r.testProperties.Auto_gen_config,
-		DeviceTemplate:         "${RavenwoodTestConfigTemplate}",
-		HostTemplate:           "${RavenwoodTestConfigTemplate}",
+		TestConfigProp:          r.testProperties.Test_config,
+		TestConfigTemplateProp:  r.testProperties.Test_config_template,
+		OptionsForAutogenerated: r.testProperties.Test_options.Tradefed_options,
+		TestRunnerOptions:       r.testProperties.Test_options.Test_runner_options,
+		TestSuites:              r.testProperties.Test_suites,
+		AutoGenConfig:           r.testProperties.Auto_gen_config,
+		DeviceTemplate:          "${RavenwoodTestConfigTemplate}",
+		HostTemplate:            "${RavenwoodTestConfigTemplate}",
 	})
+	r.data = android.PathsForModuleSrc(ctx, r.testProperties.Data)
+	r.data = append(r.data, android.PathsForModuleSrc(ctx, r.testProperties.Device_common_data)...)
+	r.data = append(r.data, android.PathsForModuleSrc(ctx, r.testProperties.Device_first_data)...)
+	r.data = append(r.data, android.PathsForModuleSrc(ctx, r.testProperties.Device_first_prefer32_data)...)
+	r.data = append(r.data, android.PathsForModuleSrc(ctx, r.testProperties.Host_common_data)...)
+	r.data = append(r.data, android.PathsForModuleSrc(ctx, r.testProperties.Host_first_data)...)
+
+	r.data = android.SortedUniquePaths(r.data)
+
+	var testData []android.DataPath
+	for _, data := range r.data {
+		dataPath := android.DataPath{SrcPath: data}
+		testData = append(testData, dataPath)
+	}
+	for _, d := range r.extraOutputFiles {
+		testData = append(testData, android.DataPath{SrcPath: d})
+	}
+
+	// When setting the manifest property, we only want to set it for aaptProperties.
+	// Explicitly remove it from the Module properties to prevent it from using
+	// AndroidManifest.xml as JAR manifest, creating a malformed JAR file.
+	r.Module.properties.Manifest = nil
+
+	// Build resources before Java sources.
+	var resourceApk android.Path
+	if proptools.Bool(r.ravenwoodTestProperties.Build_resources) {
+		r.aaptBuildActions(ctx)
+		resourceApk = r.aapt.exportPackage
+	}
 
 	// Always enable Ravenizer for ravenwood tests.
 	r.Library.ravenizer.enabled = true
@@ -227,36 +266,53 @@ func (r *ravenwoodTest) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 
 	resApkInstallPath := installPath.Join(ctx, "ravenwood-res-apks")
 
-	copyResApk := func(tag blueprint.DependencyTag, toFileName string) {
-		if resApk := ctx.GetDirectDepsProxyWithTag(tag); len(resApk) > 0 {
-			installFile := android.OutputFileForModule(ctx, resApk[0], "")
-			installResApk := ctx.InstallFile(resApkInstallPath, toFileName, installFile)
-			installDeps = append(installDeps, installResApk)
-		}
+	var resApkName string
+	var targetResApkName string
+
+	if resourceApk != nil {
+		installResApk := ctx.InstallFile(resApkInstallPath, "ravenwood-res.apk", resourceApk)
+		installDeps = append(installDeps, installResApk)
+		resApkName = "ravenwood-res.apk"
 	}
-	copyResApk(ravenwoodTestResourceApkTag, "ravenwood-res.apk")
-	copyResApk(ravenwoodTestInstResourceApkTag, "ravenwood-inst-res.apk")
+
+	if resApk := ctx.GetDirectDepsProxyWithTag(ravenwoodTargetResourceApkTag); len(resApk) > 0 {
+		installFile := android.OutputFileForModule(ctx, resApk[0], "")
+		installResApk := ctx.InstallFile(resApkInstallPath, "ravenwood-target-res.apk", installFile)
+		installDeps = append(installDeps, installResApk)
+		targetResApkName = "ravenwood-target-res.apk"
+	}
 
 	// Generate manifest properties
 	propertiesOutputPath := android.PathForModuleGen(ctx, "ravenwood.properties")
 
 	targetSdkVersion := proptools.StringDefault(r.deviceProperties.Target_sdk_version, "")
 	targetSdkVersionInt := r.TargetSdkVersion(ctx).FinalOrFutureInt() // FinalOrFutureInt may be 10000.
-	packageName := proptools.StringDefault(r.ravenwoodTestProperties.Package_name, "")
-	instPackageName := proptools.StringDefault(r.ravenwoodTestProperties.Inst_package_name, "")
+	packageName := r.aapt.aaptProperties.Package_name.GetOrDefault(ctx, "")
+	targetPackageName := proptools.StringDefault(r.ravenwoodTestProperties.Target_package_name, "")
+	instClassName := proptools.StringDefault(r.ravenwoodTestProperties.Instrumentation_class, "")
 	ctx.Build(pctx, android.BuildParams{
 		Rule:        genManifestProperties,
 		Description: "genManifestProperties",
 		Output:      propertiesOutputPath,
 		Args: map[string]string{
-			"targetSdkVersionInt": strconv.Itoa(targetSdkVersionInt),
-			"targetSdkVersionRaw": targetSdkVersion,
-			"packageName":         packageName,
-			"instPackageName":     instPackageName,
+			"targetSdkVersionInt":  strconv.Itoa(targetSdkVersionInt),
+			"targetSdkVersionRaw":  targetSdkVersion,
+			"packageName":          packageName,
+			"targetPackageName":    targetPackageName,
+			"instrumentationClass": instClassName,
+			"moduleName":           ctx.ModuleName(),
+			"resourceApk":          resApkName,
+			"targetResourceApk":    targetResApkName,
 		},
 	})
 	installProps := ctx.InstallFile(installPath, "ravenwood.properties", propertiesOutputPath)
 	installDeps = append(installDeps, installProps)
+
+	// Copy data files
+	for _, data := range r.data {
+		installedData := ctx.InstallFile(installPath, data.Rel(), data)
+		installDeps = append(installDeps, installedData)
+	}
 
 	// Install our JAR with all dependencies
 	ctx.InstallFile(installPath, ctx.ModuleName()+".jar", r.outputFile, installDeps...)
@@ -275,19 +331,61 @@ func (r *ravenwoodTest) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	})
 }
 
-func (r *ravenwoodTest) AndroidMkEntries() []android.AndroidMkEntries {
-	entriesList := r.Library.AndroidMkEntries()
-	entries := &entriesList[0]
-	entries.ExtraEntries = append(entries.ExtraEntries,
-		func(ctx android.AndroidMkExtraEntriesContext, entries *android.AndroidMkEntries) {
-			entries.SetBool("LOCAL_UNINSTALLABLE_MODULE", true)
-			entries.AddStrings("LOCAL_COMPATIBILITY_SUITE",
-				"general-tests", "ravenwood-tests")
-			if r.testConfig != nil {
-				entries.SetPath("LOCAL_FULL_TEST_CONFIG", r.testConfig)
-			}
-		})
-	return entriesList
+// This method is adapted from AndroidApp.aaptBuildActions() in app.go, with changes
+// irrelevant to RavenwoodTest removed.
+func (r *ravenwoodTest) aaptBuildActions(ctx android.ModuleContext) {
+	usePlatformAPI := proptools.Bool(r.Module.deviceProperties.Platform_apis)
+	if ctx.Module().(android.SdkContext).SdkVersion(ctx).Kind == android.SdkModule {
+		usePlatformAPI = true
+	}
+	r.aapt.usesNonSdkApis = usePlatformAPI
+
+	aconfigTextFilePaths := getAconfigFilePaths(ctx)
+
+	r.aapt.buildActions(ctx,
+		aaptBuildActionOptions{
+			sdkContext:                     android.SdkContext(r),
+			enforceDefaultTargetSdkVersion: true,
+			forceNonFinalResourceIDs:       true,
+			aconfigTextFiles:               aconfigTextFilePaths,
+			usesLibrary:                    &r.usesLibrary,
+		},
+	)
+
+	android.SetProvider(ctx, FlagsPackagesProvider, FlagsPackages{
+		AconfigTextFiles: aconfigTextFilePaths,
+	})
+
+	// Add R classes into classpath
+	if r.useResourceProcessorBusyBox(ctx) {
+		// When building an app with ResourceProcessorBusyBox enabled ResourceProcessorBusyBox has already
+		// created R.class files that provide IDs for resources in busybox/R.jar.  Pass that file in the
+		// classpath when compiling everything else, and add it to the final classes jar.
+		r.extraClasspathJars = append(r.extraClasspathJars, r.aapt.rJar)
+		r.extraCombinedJars = append(r.extraCombinedJars, r.aapt.rJar)
+	} else {
+		// When building an app without ResourceProcessorBusyBox the aapt2 rule creates R.srcjar containing
+		// R.java files for the app's package and the packages from all transitive static android_library
+		// dependencies.  Compile the srcjar alongside the rest of the sources.
+		r.extraSrcJars = append(r.extraSrcJars, r.aapt.aaptSrcJar)
+	}
+}
+
+func (r *ravenwoodTest) PrepareAndroidMKProviderInfo(config android.Config) *android.AndroidMkProviderInfo {
+	info := r.Library.prepareAndroidMKProviderInfo(config)
+
+	if info.PrimaryInfo.OutputFile.Valid() {
+		info.PrimaryInfo.SetBool("LOCAL_UNINSTALLABLE_MODULE", true)
+		info.PrimaryInfo.AddStrings("LOCAL_COMPATIBILITY_SUITE",
+			"general-tests", "ravenwood-tests")
+		if r.testConfig != nil {
+			info.PrimaryInfo.SetPath("LOCAL_FULL_TEST_CONFIG", r.testConfig)
+		}
+	}
+
+	r.addHostDexAndroidMkInfo(info)
+
+	return info
 }
 
 type ravenwoodLibgroupProperties struct {
@@ -338,6 +436,10 @@ func (r *ravenwoodLibgroup) DepsMutator(ctx android.BottomUpMutatorContext) {
 	for _, lib := range r.ravenwoodLibgroupProperties.Jni_libs.GetOrDefault(ctx, nil) {
 		ctx.AddVariationDependencies(ctx.Config().BuildOSTarget.Variations(), jniLibTag, lib)
 	}
+
+	if r.Name() == ravenwoodRuntimeName {
+		ctx.AddVariationDependencies(nil, allAconfigModuleTag, aconfig.AllAconfigModule)
+	}
 }
 
 func (r *ravenwoodLibgroup) GenerateAndroidBuildActions(ctx android.ModuleContext) {
@@ -355,11 +457,17 @@ func (r *ravenwoodLibgroup) GenerateAndroidBuildActions(ctx android.ModuleContex
 		names: jniDepNames,
 	})
 
+	install := func(to android.InstallPath, srcs ...android.Path) {
+		for _, s := range srcs {
+			ctx.InstallFile(to, s.Base(), s)
+		}
+	}
+
 	// Install our runtime into expected location for packaging
 	installPath := android.PathForModuleInstall(ctx, r.BaseModuleName())
 	for _, lib := range r.ravenwoodLibgroupProperties.Libs {
 		libModule := ctx.GetDirectDepProxyWithTag(lib, ravenwoodLibContentTag)
-		if libModule == nil {
+		if libModule.IsNil() {
 			if ctx.Config().AllowMissingDependencies() {
 				ctx.AddMissingDependencies([]string{lib})
 			} else {
@@ -368,24 +476,50 @@ func (r *ravenwoodLibgroup) GenerateAndroidBuildActions(ctx android.ModuleContex
 			continue
 		}
 		libJar := android.OutputFileForModule(ctx, libModule, "")
-		ctx.InstallFile(installPath, lib+".jar", libJar)
+		ctx.InstallFile(installPath, libJar.Base(), libJar)
 	}
 	soInstallPath := android.PathForModuleInstall(ctx, r.BaseModuleName()).Join(ctx, getLibPath(r.forceArchType))
 
 	for _, jniLib := range jniLibs {
-		ctx.InstallFile(soInstallPath, jniLib.path.Base(), jniLib.path)
+		install(soInstallPath, jniLib.path)
 	}
 
 	dataInstallPath := installPath.Join(ctx, "ravenwood-data")
 	data := android.PathsForModuleSrc(ctx, r.ravenwoodLibgroupProperties.Data)
 	for _, file := range data {
-		ctx.InstallFile(dataInstallPath, file.Base(), file)
+		install(dataInstallPath, file)
 	}
 
 	fontsInstallPath := installPath.Join(ctx, "fonts")
 	fonts := android.PathsForModuleSrc(ctx, r.ravenwoodLibgroupProperties.Fonts)
 	for _, file := range fonts {
-		ctx.InstallFile(fontsInstallPath, file.Base(), file)
+		install(fontsInstallPath, file)
+	}
+
+	// Copy aconfig flag storage files.
+	if r.Name() == ravenwoodRuntimeName {
+		allAconfigFound := false
+		if allAconfig := ctx.GetDirectDepProxyWithTag(aconfig.AllAconfigModule, allAconfigModuleTag); !allAconfig.IsNil() {
+			aadi, ok := android.OtherModuleProvider(ctx, allAconfig, aconfig.AllAconfigDeclarationsInfoProvider)
+			if ok {
+				// Binary proto file and the text proto.
+				// We don't really use the text proto file, but having this would make debugging easier.
+				install(installPath.Join(ctx, "aconfig/metadata/aconfig/etc"), aadi.ParsedFlagsFile, aadi.TextProtoFlagsFile)
+
+				// The "new" storage files.
+				install(installPath.Join(ctx, "aconfig/metadata/aconfig/maps"), aadi.StoragePackageMap, aadi.StorageFlagMap)
+				install(installPath.Join(ctx, "aconfig/metadata/aconfig/boot"), aadi.StorageFlagVal, aadi.StorageFlagInfo)
+
+				allAconfigFound = true
+			}
+		}
+		if !allAconfigFound {
+			if ctx.Config().AllowMissingDependencies() {
+				ctx.AddMissingDependencies([]string{aconfig.AllAconfigModule})
+			} else {
+				ctx.ModuleErrorf("missing dependency %q", aconfig.AllAconfigModule)
+			}
+		}
 	}
 
 	// Normal build should perform install steps

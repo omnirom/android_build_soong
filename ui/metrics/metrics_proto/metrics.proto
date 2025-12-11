@@ -15,6 +15,7 @@
 syntax = "proto2";
 
 package soong_build_metrics;
+
 option go_package = "android/soong/ui/metrics/metrics_proto";
 
 message MetricsBase {
@@ -22,7 +23,7 @@ message MetricsBase {
   optional int64 build_date_timestamp = 1;
 
   // It is usually used to specify the branch name [and release candidate].
-  optional string build_id  = 2;
+  optional string build_id = 2;
 
   // The platform version codename, eg. P, Q, REL.
   optional string platform_version_codename = 3;
@@ -63,7 +64,8 @@ message MetricsBase {
   // The host os information, eg. linux.
   optional string host_os = 11;
 
-  // The host os extra information, eg. Linux-4.17.0-3rodete2-amd64-x86_64-Debian-GNU.
+  // The host os extra information, eg.
+  // Linux-4.17.0-3rodete2-amd64-x86_64-Debian-GNU.
   optional string host_os_extra = 12;
 
   // The host cross os information, eg. windows.
@@ -78,7 +80,8 @@ message MetricsBase {
   // The directory for generated built artifacts installation, eg. out.
   optional string out_dir = 16;
 
-  // The metrics for calling various tools (microfactory) before Soong_UI starts.
+  // The metrics for calling various tools (microfactory) before Soong_UI
+  // starts.
   repeated PerfInfo setup_tools = 17;
 
   // The metrics for calling Kati by multiple times.
@@ -95,7 +98,7 @@ message MetricsBase {
 
   // Deprecated because instead of embedding in a MetricsBase, we keep
   // SoongBuildMetrics in its own file
-  optional SoongBuildMetrics soong_build_metrics = 22 [deprecated=true];
+  optional SoongBuildMetrics soong_build_metrics = 22 [deprecated = true];
 
   optional BuildConfig build_config = 23;
 
@@ -108,8 +111,7 @@ message MetricsBase {
   // The build command that the user entered to the build system.
   optional string build_command = 26;
 
-  // The metrics for calling Bazel.
-  repeated PerfInfo bazel_runs = 27;
+  reserved 27;
 
   // The metrics of the experiment config fetcher
   optional ExpConfigFetcher exp_config_fetcher = 28;
@@ -134,8 +136,8 @@ message MetricsBase {
 
   // Environment variables that have changed value since the previous build,
   // which were responsible for retriggering build analysis.
-  // Note that not all changed environment variables result in analysis retriggering.
-  // If there was no previous build, this list will be empty.
+  // Note that not all changed environment variables result in analysis
+  // retriggering. If there was no previous build, this list will be empty.
   repeated string changed_environment_variable = 34;
 
   // Metrics related to optimized builds.
@@ -154,39 +156,38 @@ message BuildConfig {
     HINT_FROM_SOONG = 4;
   }
 
-  optional bool use_goma = 1;
-
   optional bool use_rbe = 2;
 
-  optional bool force_use_goma = 3;
+  reserved 4;
 
-  // Whether the Bazel is acting as the Ninja executor for this build.
-  optional bool bazel_as_ninja = 4;
-
-  // Whether build is occurring in a mixed build mode, where Bazel maintains the
-  // definition and build of some modules in cooperation with Soong.
-  optional bool bazel_mixed_build = 5;
+  reserved 5;
 
   // These are the targets soong passes to ninja, these targets include special
   // targets such as droid as well as the regular build targets.
   repeated string targets = 6;
 
-  // Whether the user explicitly disabled bazel mixed builds for this build.
-  optional bool force_disable_bazel_mixed_build = 7;
+  reserved 7;
 
   // NOT_USED - ninja doesn't use weight list.
   // NINJA_LOG - ninja uses weight list based on previous builds by ninja log
   // EVENLY_DISTRIBUTED - ninja thinks every task has the same weight.
   // EXTERNAL_FILE - ninja uses an external custom weight list
   // HINT_FROM_SOONG - ninja uses a prioritized module list from Soong
-  optional NinjaWeightListSource ninja_weight_list_source = 8 [default = NOT_USED];
+  optional NinjaWeightListSource ninja_weight_list_source = 8
+      [default = NOT_USED];
 
   // Values of some build-affecting environment variables.
   optional SoongEnvVars soong_env_vars = 9;
 
-  // Whether this build uses soong-only (no kati) mode (either via environment variable,
-  // command line flag or product config.
+  // Whether this build uses soong-only (no kati) mode (either via environment
+  // variable, command line flag or product config.
   optional bool soong_only = 10;
+
+  reserved 1;
+  reserved 3;
+
+  // Whether the build used rewrapper.
+  optional bool use_rewrapper = 11;
 }
 
 message SoongEnvVars {
@@ -195,6 +196,12 @@ message SoongEnvVars {
 
   // SOONG_USE_PARTIAL_COMPILE
   optional string use_partial_compile = 2;
+
+  // NETWORK_FILE_SYSTEM_TYPE - Used to compare performance of Cog, CartFS, etc.
+  optional string network_file_system_type = 3;
+
+  // BUILD_TRIGGER_TYPE - How the build was triggered.
+  optional string build_trigger = 4;
 }
 
 message SystemResourceInfo {
@@ -252,7 +259,7 @@ message PerfInfo {
   optional uint64 real_time = 4;
 
   // The number of MB for memory use (deprecated as it is too generic).
-  optional uint64 memory_use = 5 [deprecated=true];
+  optional uint64 memory_use = 5 [deprecated = true];
 
   // The resource information of each executed process.
   repeated ProcessResourceInfo processes_resource_info = 6;
@@ -309,7 +316,7 @@ message ProcessResourceInfo {
   optional uint64 major_page_faults = 6;
 
   // Total IO input in kilobytes.
-  optional uint64 io_input_kb= 7;
+  optional uint64 io_input_kb = 7;
 
   // Total IO output in kilobytes.
   optional uint64 io_output_kb = 8;
@@ -337,19 +344,6 @@ message ModuleTypeInfo {
   optional uint32 num_of_modules = 3;
 }
 
-message CriticalUserJourneyMetrics {
-  // The name of a critical user journey test.
-  optional string name = 1;
-
-  // The metrics produced when running the critical user journey test.
-  optional MetricsBase metrics = 2;
-}
-
-message CriticalUserJourneysMetrics {
-  // A set of metrics from a run of the critical user journey tests.
-  repeated CriticalUserJourneyMetrics cujs = 1;
-}
-
 message SoongBuildMetrics {
   // The number of modules handled by soong_build.
   optional uint32 modules = 1;
@@ -369,11 +363,17 @@ message SoongBuildMetrics {
   // Runtime metrics for soong_build execution.
   repeated PerfInfo events = 6;
 
-  // Mixed Builds information
-  optional MixedBuildsInfo mixed_builds_info = 7;
+  reserved 7;
 
   // Performance during for soong_build execution.
   repeated PerfCounters perf_counters = 8;
+
+  // The number of modules that supports incremental build.
+  optional uint32 incremental_supported = 9;
+
+  // The number of modules that are restored from cache during incremental
+  // build.
+  optional uint32 incremental_restored = 10;
 }
 
 message ExpConfigFetcher {
@@ -396,38 +396,19 @@ message ExpConfigFetcher {
   optional uint64 micros = 3;
 }
 
-message MixedBuildsInfo{
-  // Modules may be listed below as both enabled for Mixed Builds
-  // and disabled for Mixed Builds. This implies that some variants
-  // of the module are handled by Bazel in a Mixed Build, and other
-  // variants of the same module are handled by Soong.
-
-  // Modules that are enabled for Mixed Builds.
-  repeated string mixed_build_enabled_modules = 1;
-
-  // Modules that are not currently eligible to be handled
-  // by Bazel in a Mixed Build.
-  // Note that not all modules exempt from Bazel handling are
-  // listed. This list includes only modules which are of a
-  // Mixed-Build supported module type but are nevertheless not
-  // handled by Bazel. This may occur due to being present in
-  // the mixed build denylist, or as part of an unsupported
-  // mixed build variant type such as Windows.
-
-  // Modules that are not enabled for MixedBuilds
-  repeated string mixed_build_disabled_modules = 2;
-}
-
 // CriticalPathInfo contains critical path nodes's information.
-// A critical path is a path determining the minimum time needed for the whole build given perfect parallelism.
+// A critical path is a path determining the minimum time needed for the whole
+// build given perfect parallelism.
 message CriticalPathInfo {
   // Real time which the build system spent in microseconds
   optional uint64 elapsed_time_micros = 1;
-  // The sum of execution time of the longest path from leave to the root in microseconds
+  // The sum of execution time of the longest path from leave to the root in
+  // microseconds
   optional uint64 critical_path_time_micros = 2;
   // Detailed job information in a critical path.
   repeated JobInfo critical_path = 4;
-  // Detailed job information for long running jobs (>30 seconds). These may or may not also be on a critical path.
+  // Detailed job information for long running jobs (>30 seconds). These may or
+  // may not also be on a critical path.
   repeated JobInfo long_running_jobs = 5;
 }
 

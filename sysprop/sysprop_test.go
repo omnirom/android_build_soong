@@ -391,7 +391,8 @@ func TestMinSdkVersionIsForwarded(t *testing.T) {
 	`)
 
 	ccModule := result.ModuleForTests(t, "libsysprop-platform", "android_arm64_armv8-a_shared").Module().(*cc.Module)
-	propFromCc := proptools.String(ccModule.Properties.Min_sdk_version)
+	eval := ccModule.ConfigurableEvaluator(android.PanickingConfigAndErrorContext(result.TestContext))
+	propFromCc := ccModule.Properties.Min_sdk_version.GetOrDefault(eval, "")
 	android.AssertStringEquals(t, "min_sdk_version forwarding to cc module", "29", propFromCc)
 
 	javaModule := result.ModuleForTests(t, "sysprop-platform", "android_common").Module().(*java.Library)

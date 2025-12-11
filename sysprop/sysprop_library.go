@@ -86,14 +86,21 @@ func init() {
 	pctx.HostBinToolVariable("syspropRustCmd", "sysprop_rust")
 }
 
+var SyspropLibraryInfoProvider = blueprint.NewProvider[SyspropLibraryInfo]()
+
+type SyspropLibraryInfo struct {
+	CheckApiFileTimeStamp android.WritablePath
+	CurrentApiFile        android.OptionalPath
+}
+
 // syspropJavaGenRule module generates srcjar containing generated java APIs.
 // It also depends on check api rule, so api check has to pass to use sysprop_library.
 func (g *syspropJavaGenRule) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	var checkApiFileTimeStamp android.WritablePath
 
-	ctx.VisitDirectDeps(func(dep android.Module) {
-		if m, ok := dep.(*syspropLibrary); ok {
-			checkApiFileTimeStamp = m.checkApiFileTimeStamp
+	ctx.VisitDirectDepsProxy(func(dep android.ModuleProxy) {
+		if info, ok := android.OtherModuleProvider(ctx, dep, SyspropLibraryInfoProvider); ok {
+			checkApiFileTimeStamp = info.CheckApiFileTimeStamp
 		}
 	})
 
@@ -136,9 +143,9 @@ func syspropJavaGenFactory() android.Module {
 func (g *syspropRustGenRule) GenerateSource(ctx rust.ModuleContext, deps rust.PathDeps) android.Path {
 	var checkApiFileTimeStamp android.WritablePath
 
-	ctx.VisitDirectDeps(func(dep android.Module) {
-		if m, ok := dep.(*syspropLibrary); ok {
-			checkApiFileTimeStamp = m.checkApiFileTimeStamp
+	ctx.VisitDirectDepsProxy(func(dep android.ModuleProxy) {
+		if info, ok := android.OtherModuleProvider(ctx, dep, SyspropLibraryInfoProvider); ok {
+			checkApiFileTimeStamp = info.CheckApiFileTimeStamp
 		}
 	})
 
@@ -207,8 +214,6 @@ type syspropLibrary struct {
 	properties syspropLibraryProperties
 
 	checkApiFileTimeStamp android.WritablePath
-	latestApiFile         android.OptionalPath
-	currentApiFile        android.OptionalPath
 	dumpedApiFile         android.WritablePath
 }
 
@@ -335,10 +340,6 @@ func (m *syspropLibrary) BaseModuleName() string {
 	return m.ModuleBase.Name()
 }
 
-func (m *syspropLibrary) CurrentSyspropApiFile() android.OptionalPath {
-	return m.currentApiFile
-}
-
 // GenerateAndroidBuildActions of sysprop_library handles API dump and API check.
 // generated java_library will depend on these API files.
 func (m *syspropLibrary) GenerateAndroidBuildActions(ctx android.ModuleContext) {
@@ -357,8 +358,8 @@ func (m *syspropLibrary) GenerateAndroidBuildActions(ctx android.ModuleContext) 
 	apiDirectoryPath := path.Join(ctx.ModuleDir(), "api")
 	currentApiFilePath := path.Join(apiDirectoryPath, baseModuleName+"-current.txt")
 	latestApiFilePath := path.Join(apiDirectoryPath, baseModuleName+"-latest.txt")
-	m.currentApiFile = android.ExistentPathForSource(ctx, currentApiFilePath)
-	m.latestApiFile = android.ExistentPathForSource(ctx, latestApiFilePath)
+	currentApiFile := android.ExistentPathForSource(ctx, currentApiFilePath)
+	latestApiFile := android.ExistentPathForSource(ctx, latestApiFilePath)
 
 	// dump API rule
 	rule := android.NewRuleBuilder(pctx, ctx)
@@ -379,15 +380,15 @@ func (m *syspropLibrary) GenerateAndroidBuildActions(ctx android.ModuleContext) 
 	// method.
 	var apiFileList android.Paths
 	currentApiArgument := os.DevNull
-	if m.currentApiFile.Valid() {
-		apiFileList = append(apiFileList, m.currentApiFile.Path())
-		currentApiArgument = m.currentApiFile.String()
+	if currentApiFile.Valid() {
+		apiFileList = append(apiFileList, currentApiFile.Path())
+		currentApiArgument = currentApiFile.String()
 	}
 
 	latestApiArgument := os.DevNull
-	if m.latestApiFile.Valid() {
-		apiFileList = append(apiFileList, m.latestApiFile.Path())
-		latestApiArgument = m.latestApiFile.String()
+	if latestApiFile.Valid() {
+		apiFileList = append(apiFileList, latestApiFile.Path())
+		latestApiArgument = latestApiFile.String()
 	}
 
 	// 1. compares current.txt to api-dump.txt
@@ -431,6 +432,11 @@ func (m *syspropLibrary) GenerateAndroidBuildActions(ctx android.ModuleContext) 
 		Output(m.checkApiFileTimeStamp)
 
 	rule.Build(baseModuleName+"_check_api", baseModuleName+" check api")
+
+	android.SetProvider(ctx, SyspropLibraryInfoProvider, SyspropLibraryInfo{
+		CheckApiFileTimeStamp: m.checkApiFileTimeStamp,
+		CurrentApiFile:        currentApiFile,
+	})
 }
 
 func (m *syspropLibrary) AndroidMk() android.AndroidMkData {
@@ -538,10 +544,10 @@ type rustLibraryProperties struct {
 	Sysprop_srcs      []string `android:"path"`
 	Scope             string
 	Check_api         *string
-	Srcs              []string
+	Srcs              proptools.Configurable[[]string]
 	Installable       *bool
 	Crate_name        string
-	Rustlibs          []string
+	Rustlibs          proptools.Configurable[[]string]
 	Vendor_available  *bool
 	Product_available *bool
 	Apex_available    []string
@@ -685,10 +691,10 @@ func syspropLibraryHook(ctx android.LoadHookContext, m *syspropLibrary) {
 		Check_api:    proptools.StringPtr(ctx.ModuleName()),
 		Installable:  m.properties.Installable,
 		Crate_name:   m.rustCrateName(),
-		Rustlibs: []string{
+		Rustlibs: proptools.NewSimpleConfigurable([]string{
 			"liblog_rust",
 			"librustutils",
-		},
+		}),
 		Vendor_available:  m.properties.Vendor_available,
 		Product_available: m.properties.Product_available,
 		Apex_available:    m.ApexProperties.Apex_available,

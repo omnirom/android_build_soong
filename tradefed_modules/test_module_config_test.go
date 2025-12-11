@@ -14,15 +14,14 @@
 package tradefed_modules
 
 import (
-	"android/soong/android"
-	"android/soong/java"
-	"android/soong/sh"
 	"fmt"
 	"strconv"
 	"strings"
 	"testing"
 
-	"github.com/google/blueprint"
+	"android/soong/android"
+	"android/soong/java"
+	"android/soong/sh"
 )
 
 const bp = `
@@ -510,7 +509,7 @@ func TestTestOnlyProvider(t *testing.T) {
 	// marked as test-only are marked as test-only.
 
 	actualTestOnly := []string{}
-	ctx.VisitAllModules(func(m blueprint.Module) {
+	ctx.VisitAllModules(func(m android.Module) {
 		if provider, ok := android.OtherModuleProvider(ctx.TestContext.OtherModuleProviderAdaptor(), m, android.TestOnlyProviderKey); ok {
 			if provider.TestOnly {
 				actualTestOnly = append(actualTestOnly, m.Name())

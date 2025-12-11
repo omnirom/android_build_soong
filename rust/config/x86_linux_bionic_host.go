@@ -61,7 +61,7 @@ func (t *toolchainLinuxBionicX8664) RustTriple() string {
 
 func (t *toolchainLinuxBionicX8664) ToolchainLinkFlags() string {
 	// Prepend the lld flags from cc_config so we stay in sync with cc
-	return "${cc_config.LinuxBionicLldflags} ${config.LinuxBionicToolchainLinkFlags}"
+	return "${cc_config.LinuxBionicLdflags} ${config.LinuxBionicToolchainLinkFlags}"
 }
 
 func (t *toolchainLinuxBionicX8664) ToolchainRustFlags() string {

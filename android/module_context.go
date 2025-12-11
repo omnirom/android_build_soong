@@ -85,29 +85,12 @@ type BuildParams struct {
 	PhonyOutput bool
 }
 
-type ModuleBuildParams BuildParams
-
 type ModuleContext interface {
 	BaseModuleContext
 
 	// BlueprintModuleContext returns the blueprint.ModuleContext that the ModuleContext wraps.  It may only be
 	// used by the golang module types that need to call into the bootstrap module types.
 	BlueprintModuleContext() blueprint.ModuleContext
-
-	// Deprecated: use ModuleContext.Build instead.
-	ModuleBuild(pctx PackageContext, params ModuleBuildParams)
-
-	// Returns a list of paths expanded from globs and modules referenced using ":module" syntax.  The property must
-	// be tagged with `android:"path" to support automatic source module dependency resolution.
-	//
-	// Deprecated: use PathsForModuleSrc or PathsForModuleSrcExcludes instead.
-	ExpandSources(srcFiles, excludes []string) Paths
-
-	// Returns a single path expanded from globs and modules referenced using ":module" syntax.  The property must
-	// be tagged with `android:"path" to support automatic source module dependency resolution.
-	//
-	// Deprecated: use PathForModuleSrc instead.
-	ExpandSource(srcFile, prop string) Path
 
 	ExpandOptionalSource(srcFile *string, prop string) OptionalPath
 
@@ -185,6 +168,11 @@ type ModuleContext interface {
 	// dependency tags for which IsInstallDepNeeded returns true.
 	PackageFile(installPath InstallPath, name string, srcPath Path) PackagingSpec
 
+	// PackageFileWithFakeFullInstall creates a PackagingSpec, but does not require a full
+	// install by android_device.
+	// This is experimental, and is only meant to be used by Soong only builds.
+	PackageFileWithFakeFullInstall(installPath InstallPath, name string, srcPath Path) PackagingSpec
+
 	CheckbuildFile(srcPaths ...Path)
 	UncheckedModule()
 
@@ -193,7 +181,10 @@ type ModuleContext interface {
 	InstallInSanitizerDir() bool
 	InstallInRamdisk() bool
 	InstallInVendorRamdisk() bool
+	InstallPathSkipFirstStageRamdisk() bool
+	InstallInVendorKernelRamdisk() bool
 	InstallInDebugRamdisk() bool
+	InstallInTestHarnessRamdisk() bool
 	InstallInRecovery() bool
 	InstallInRoot() bool
 	InstallInOdm() bool
@@ -267,6 +258,11 @@ type ModuleContext interface {
 	// goal is built.
 	DistForGoalWithFilename(goal string, path Path, filename string)
 
+	// DistForGoalWithFilenameTag creates a rule to copy a Path to the artifacts
+	// directory on the build server with the given filename appended with the
+	// `-FILE_NAME_TAG_PLACEHOLDER` suffix when the specified goal is built.
+	DistForGoalWithFilenameTag(goal string, path Path, filename string)
+
 	// DistForGoals creates a rule to copy one or more Paths to the artifacts
 	// directory on the build server when any of the specified goals are built.
 	DistForGoals(goals []string, paths ...Path)
@@ -275,6 +271,15 @@ type ModuleContext interface {
 	// directory on the build server with the given filename when any of the
 	// specified goals are built.
 	DistForGoalsWithFilename(goals []string, path Path, filename string)
+
+	// Defines this module as a compatibility suite test and gives all the information needed
+	// to build the suite.
+	SetTestSuiteInfo(info TestSuiteInfo)
+
+	// ModulePhonyFiles registers the srcPaths as dependencies of the module name phony target.
+	// This is similar to OutputFiles, but can be used for files that are not intended to be
+	// consumed by other modules. These files are built as part of checkbuild.
+	ModulePhonyFiles(srcPaths ...Path)
 }
 
 type moduleContext struct {
@@ -283,6 +288,7 @@ type moduleContext struct {
 	packagingSpecs   []PackagingSpec
 	installFiles     InstallPaths
 	checkbuildFiles  Paths
+	modulePhonyFiles Paths
 	checkbuildTarget Path
 	uncheckedModule  bool
 	module           Module
@@ -334,26 +340,25 @@ type moduleContext struct {
 	complianceMetadataInfo *ComplianceMetadataInfo
 
 	dists []dist
+
+	testSuiteInfo    TestSuiteInfo
+	testSuiteInfoSet bool
 }
 
 var _ ModuleContext = &moduleContext{}
 
 func (m *moduleContext) ninjaError(params BuildParams, err error) (PackageContext, BuildParams) {
 	return pctx, BuildParams{
-		Rule:            ErrorRule,
+		Rule:            errorRule,
 		Description:     params.Description,
 		Output:          params.Output,
 		Outputs:         params.Outputs,
 		ImplicitOutput:  params.ImplicitOutput,
 		ImplicitOutputs: params.ImplicitOutputs,
 		Args: map[string]string{
-			"error": err.Error(),
+			"error": proptools.NinjaAndShellEscape(err.Error()),
 		},
 	}
-}
-
-func (m *moduleContext) ModuleBuild(pctx PackageContext, params ModuleBuildParams) {
-	m.Build(pctx, BuildParams(params))
 }
 
 // Convert build parameters from their concrete Android types into their string representations,
@@ -417,8 +422,8 @@ func (m *moduleContext) Rule(pctx PackageContext, name string, params blueprint.
 
 	if m.config.UseRemoteBuild() {
 		if params.Pool == nil {
-			// When USE_GOMA=true or USE_RBE=true are set and the rule is not supported by goma/RBE, restrict
-			// jobs to the local parallelism value
+			// When USE_REWRAPPER=true is set and the rule is not supported by RBE,
+			// restrict jobs to the local parallelism value
 			params.Pool = localPool
 		} else if params.Pool == remotePool {
 			// remotePool is a fake pool used to identify rule that are supported for remoting. If the rule's
@@ -461,6 +466,9 @@ func (m *moduleContext) Phony(name string, deps ...Path) {
 			panic("Phony dep cannot be nil")
 		}
 	}
+	if name == "" {
+		panic("Phony name cannot be the empty string")
+	}
 	m.phonies[name] = append(m.phonies[name], deps...)
 }
 
@@ -472,27 +480,15 @@ func (m *moduleContext) GetMissingDependencies() []string {
 	return missingDeps
 }
 
-func (m *moduleContext) GetDirectDepWithTag(name string, tag blueprint.DependencyTag) Module {
-	deps := m.getDirectDepsInternal(name, tag)
+func (m *moduleContext) GetDirectDepProxyWithTag(name string, tag blueprint.DependencyTag) ModuleProxy {
+	deps := m.getDirectDepsProxyInternal(name, tag)
 	if len(deps) == 1 {
 		return deps[0]
 	} else if len(deps) >= 2 {
 		panic(fmt.Errorf("Multiple dependencies having same BaseModuleName() %q found from %q",
 			name, m.ModuleName()))
 	} else {
-		return nil
-	}
-}
-
-func (m *moduleContext) GetDirectDepProxyWithTag(name string, tag blueprint.DependencyTag) *ModuleProxy {
-	deps := m.getDirectDepsProxyInternal(name, tag)
-	if len(deps) == 1 {
-		return &deps[0]
-	} else if len(deps) >= 2 {
-		panic(fmt.Errorf("Multiple dependencies having same BaseModuleName() %q found from %q",
-			name, m.ModuleName()))
-	} else {
-		return nil
+		return ModuleProxy{}
 	}
 }
 
@@ -520,8 +516,20 @@ func (m *moduleContext) InstallInVendorRamdisk() bool {
 	return m.module.InstallInVendorRamdisk()
 }
 
+func (m *moduleContext) InstallPathSkipFirstStageRamdisk() bool {
+	return m.module.InstallPathSkipFirstStageRamdisk()
+}
+
+func (m *moduleContext) InstallInVendorKernelRamdisk() bool {
+	return m.module.InstallInVendorKernelRamdisk()
+}
+
 func (m *moduleContext) InstallInDebugRamdisk() bool {
 	return m.module.InstallInDebugRamdisk()
+}
+
+func (m *moduleContext) InstallInTestHarnessRamdisk() bool {
+	return m.module.InstallInTestHarnessRamdisk()
 }
 
 func (m *moduleContext) InstallInRecovery() bool {
@@ -622,6 +630,11 @@ func (m *moduleContext) PackageFile(installPath InstallPath, name string, srcPat
 	return m.packageFile(fullInstallPath, srcPath, false, false)
 }
 
+func (m *moduleContext) PackageFileWithFakeFullInstall(installPath InstallPath, name string, srcPath Path) PackagingSpec {
+	fullInstallPath := installPath.Join(m, name)
+	return m.packageFile(fullInstallPath, srcPath, false, true)
+}
+
 func (m *moduleContext) getAconfigPaths() Paths {
 	return m.aconfigFilePaths
 }
@@ -632,7 +645,7 @@ func (m *moduleContext) setAconfigPaths(paths Paths) {
 
 func (m *moduleContext) getOwnerAndOverrides() (string, []string) {
 	owner := m.ModuleName()
-	overrides := slices.Clone(m.Module().base().commonProperties.Overrides)
+	overrides := slices.Clone(m.Module().base().baseProperties.Overrides)
 	if b, ok := m.Module().(OverridableModule); ok {
 		if b.GetOverriddenBy() != "" {
 			// overriding variant of base module
@@ -660,7 +673,9 @@ func (m *moduleContext) packageFile(fullInstallPath InstallPath, srcPath Path, e
 		owner:                 owner,
 		requiresFullInstall:   requiresFullInstall,
 		fullInstallPath:       fullInstallPath,
+		installInSanitizerDir: m.InstallInSanitizerDir(),
 		variation:             m.ModuleSubDir(),
+		prebuilt:              IsModulePrebuilt(m, m.Module()),
 	}
 	m.packagingSpecs = append(m.packagingSpecs, spec)
 	return spec
@@ -803,19 +818,21 @@ func (m *moduleContext) InstallSymlink(installPath InstallPath, name string, src
 
 	owner, overrides := m.getOwnerAndOverrides()
 	m.packagingSpecs = append(m.packagingSpecs, PackagingSpec{
-		relPathInPackage:    Rel(m, fullInstallPath.PartitionDir(), fullInstallPath.String()),
-		srcPath:             nil,
-		symlinkTarget:       relPath,
-		executable:          false,
-		partition:           fullInstallPath.partition,
-		skipInstall:         m.skipInstall(),
-		aconfigPaths:        uniquelist.Make(m.getAconfigPaths()),
-		archType:            m.target.Arch.ArchType,
-		overrides:           uniquelist.Make(overrides),
-		owner:               owner,
-		requiresFullInstall: m.requiresFullInstall(),
-		fullInstallPath:     fullInstallPath,
-		variation:           m.ModuleSubDir(),
+		relPathInPackage:      Rel(m, fullInstallPath.PartitionDir(), fullInstallPath.String()),
+		srcPath:               nil,
+		symlinkTarget:         relPath,
+		executable:            false,
+		partition:             fullInstallPath.partition,
+		skipInstall:           m.skipInstall(),
+		aconfigPaths:          uniquelist.Make(m.getAconfigPaths()),
+		archType:              m.target.Arch.ArchType,
+		overrides:             uniquelist.Make(overrides),
+		owner:                 owner,
+		requiresFullInstall:   m.requiresFullInstall(),
+		fullInstallPath:       fullInstallPath,
+		installInSanitizerDir: m.InstallInSanitizerDir(),
+		variation:             m.ModuleSubDir(),
+		prebuilt:              IsModulePrebuilt(m, m.Module()),
 	})
 
 	return fullInstallPath
@@ -854,19 +871,21 @@ func (m *moduleContext) InstallAbsoluteSymlink(installPath InstallPath, name str
 
 	owner, overrides := m.getOwnerAndOverrides()
 	m.packagingSpecs = append(m.packagingSpecs, PackagingSpec{
-		relPathInPackage:    Rel(m, fullInstallPath.PartitionDir(), fullInstallPath.String()),
-		srcPath:             nil,
-		symlinkTarget:       absPath,
-		executable:          false,
-		partition:           fullInstallPath.partition,
-		skipInstall:         m.skipInstall(),
-		aconfigPaths:        uniquelist.Make(m.getAconfigPaths()),
-		archType:            m.target.Arch.ArchType,
-		overrides:           uniquelist.Make(overrides),
-		owner:               owner,
-		requiresFullInstall: m.requiresFullInstall(),
-		fullInstallPath:     fullInstallPath,
-		variation:           m.ModuleSubDir(),
+		relPathInPackage:      Rel(m, fullInstallPath.PartitionDir(), fullInstallPath.String()),
+		srcPath:               nil,
+		symlinkTarget:         absPath,
+		executable:            false,
+		partition:             fullInstallPath.partition,
+		skipInstall:           m.skipInstall(),
+		aconfigPaths:          uniquelist.Make(m.getAconfigPaths()),
+		archType:              m.target.Arch.ArchType,
+		overrides:             uniquelist.Make(overrides),
+		owner:                 owner,
+		requiresFullInstall:   m.requiresFullInstall(),
+		fullInstallPath:       fullInstallPath,
+		installInSanitizerDir: m.InstallInSanitizerDir(),
+		variation:             m.ModuleSubDir(),
+		prebuilt:              IsModulePrebuilt(m, m.Module()),
 	})
 
 	return fullInstallPath
@@ -964,22 +983,6 @@ func (m *moduleContext) ComplianceMetadataInfo() *ComplianceMetadataInfo {
 	return m.complianceMetadataInfo
 }
 
-// Returns a list of paths expanded from globs and modules referenced using ":module" syntax.  The property must
-// be tagged with `android:"path" to support automatic source module dependency resolution.
-//
-// Deprecated: use PathsForModuleSrc or PathsForModuleSrcExcludes instead.
-func (m *moduleContext) ExpandSources(srcFiles, excludes []string) Paths {
-	return PathsForModuleSrcExcludes(m, srcFiles, excludes)
-}
-
-// Returns a single path expanded from globs and modules referenced using ":module" syntax.  The property must
-// be tagged with `android:"path" to support automatic source module dependency resolution.
-//
-// Deprecated: use PathForModuleSrc instead.
-func (m *moduleContext) ExpandSource(srcFile, _ string) Path {
-	return PathForModuleSrc(m, srcFile)
-}
-
 // Returns an optional single path expanded from globs and modules referenced using ":module" syntax if
 // the srcFile is non-nil.  The property must be tagged with `android:"path" to support automatic source module
 // dependency resolution.
@@ -1018,6 +1021,15 @@ func (c *moduleContext) DistForGoalWithFilename(goal string, path Path, filename
 	c.DistForGoalsWithFilename([]string{goal}, path, filename)
 }
 
+func (c *moduleContext) DistForGoalWithFilenameTag(goal string, path Path, filename string) {
+	insertBeforeExtension := func(file, insertion string) string {
+		ext := filepath.Ext(file)
+		return strings.TrimSuffix(file, ext) + insertion + ext
+	}
+
+	c.DistForGoalWithFilename(goal, path, insertBeforeExtension(filename, "-FILE_NAME_TAG_PLACEHOLDER"))
+}
+
 func (c *moduleContext) DistForGoals(goals []string, paths ...Path) {
 	var copies distCopies
 	for _, path := range paths {
@@ -1037,4 +1049,21 @@ func (c *moduleContext) DistForGoalsWithFilename(goals []string, path Path, file
 		goals: slices.Clone(goals),
 		paths: distCopies{{from: path, dest: filename}},
 	})
+}
+
+func (c *moduleContext) SetTestSuiteInfo(info TestSuiteInfo) {
+	if c.testSuiteInfoSet {
+		panic("Cannot call SetTestSuiteInfo twice")
+	}
+	c.testSuiteInfo = info
+	c.testSuiteInfoSet = true
+}
+
+func (m *moduleContext) ModulePhonyFiles(srcPaths ...Path) {
+	for _, srcPath := range srcPaths {
+		if srcPath == nil {
+			panic("ModulePhonyFiles() files cannot be nil")
+		}
+	}
+	m.modulePhonyFiles = append(m.modulePhonyFiles, srcPaths...)
 }

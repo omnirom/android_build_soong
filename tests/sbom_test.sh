@@ -39,7 +39,7 @@ function run_soong {
   local targets="$1"; shift
   if [ "$#" -ge 1 ]; then
     local apps=$1; shift
-    TARGET_PRODUCT="${target_product}" TARGET_RELEASE="${target_release}" TARGET_BUILD_VARIANT="${target_build_variant}" OUT_DIR="${out_dir}" TARGET_BUILD_UNBUNDLED=true TARGET_BUILD_APPS=$apps \
+    SOONG_ONLY=false TARGET_PRODUCT="${target_product}" TARGET_RELEASE="${target_release}" TARGET_BUILD_VARIANT="${target_build_variant}" OUT_DIR="${out_dir}" TARGET_BUILD_UNBUNDLED=true TARGET_BUILD_APPS=$apps \
         build/soong/soong_ui.bash --make-mode ${targets}
   else
     TARGET_PRODUCT="${target_product}" TARGET_RELEASE="${target_release}" TARGET_BUILD_VARIANT="${target_build_variant}" OUT_DIR="${out_dir}" \
@@ -84,10 +84,6 @@ function test_sbom_aosp_cf_x86_64_phone {
   lz4=$out_dir/host/linux-x86/bin/lz4
 
   declare -A diff_excludes
-  diff_excludes[system]="\
-    -I /etc/NOTICE.xml.gz \
-    -I /odm_dlkm/etc \
-    -I /vendor_dlkm/etc"
 
   # Example output of dump.erofs is as below, and the data used in the test start
   # at line 11. Column 1 is inode id, column 2 is inode type and column 3 is name.
@@ -240,10 +236,10 @@ function verify_packages_licenses {
     exit 1
   fi
 
-  # PRODUCT and 6 prebuilt packages have "PackageLicenseDeclared: NOASSERTION"
+  # PRODUCT and 4 prebuilt packages have "PackageLicenseDeclared: NOASSERTION"
   # All other packages have declared licenses
   num_of_packages_with_noassertion_license=$(grep 'PackageLicenseDeclared: NOASSERTION' $sbom_file | wc -l)
-  if [ $num_of_packages_with_noassertion_license = 13 ]
+  if [ $num_of_packages_with_noassertion_license -lt 10 ]
   then
     echo "Number of packages with NOASSERTION license is correct."
   else
@@ -262,60 +258,138 @@ function verify_packages_licenses {
   fi
 }
 
-function test_sbom_unbundled_apex {
+function test_sbom_unbundled_modules {
   # Setup
   out_dir="$(setup)"
+
+  APEXES="\
+    com.google.android.adbd \
+    com.google.android.adservices \
+    com.google.android.appsearch \
+    com.google.android.art \
+    com.google.android.bt \
+    com.google.android.cellbroadcast \
+    com.google.android.configinfrastructure \
+    com.google.android.conscrypt \
+    com.google.android.crashrecovery \
+    com.google.android.extservices \
+    com.google.android.healthfitness \
+    com.google.android.ipsec \
+    com.google.android.media \
+    com.google.android.media.swcodec \
+    com.google.android.mediaprovider \
+    com.google.android.neuralnetworks \
+    com.google.android.nfcservices \
+    com.google.android.ondevicepersonalization \
+    com.google.android.os.statsd \
+    com.google.android.permission \
+    com.google.android.profiling \
+    com.google.android.resolv \
+    com.google.android.rkpd \
+    com.google.android.scheduling \
+    com.google.android.sdkext \
+    com.google.android.tethering \
+    com.google.android.tzdata6 \
+    com.google.android.uprobestats \
+    com.google.android.uwb \
+    com.google.android.wifi"
+
+  APKS="\
+    CaptivePortalLoginGoogle \
+    DocumentsUIGoogle \
+    GoogleExtServices \
+    GooglePermissionController \
+    NetworkStackGoogle \
+    NetworkStackNextGoogle"
 
   # run_soong to build com.android.adbd.apex
-  run_soong "${out_dir}" "sbom deapexer" "com.android.adbd"
+  run_soong "${out_dir}" "sbom dist apex-ls deapexer debugfs fsck.erofs" "${APEXES} ${APKS}"
 
+  apex_ls=${out_dir}/host/linux-x86/bin/apex-ls
   deapexer=${out_dir}/host/linux-x86/bin/deapexer
-  debugfs=${out_dir}/host/linux-x86/bin/debugfs_static
-  apex_file=${out_dir}/target/product/module_arm64/system/apex/com.android.adbd.apex
-  echo "============ Diffing files in $apex_file and SBOM"
-  set +e
-  # deapexer prints the list of all files and directories
-  # sed extracts the file/directory names
-  # grep removes directories
-  # sed removes leading ./ in file names
-  diff -I /system/apex/com.android.adbd.apex -I apex_manifest.pb \
-      <($deapexer --debugfs_path=$debugfs list --extents ${apex_file} | sed -E 's#(.*) \[.*\]$#\1#' | grep -v "/$" | sed -E 's#^\./(.*)#\1#' | sort -n) \
-      <(grep '"fileName": ' ${apex_file}.spdx.json | sed -E 's/.*"fileName": "(.*)",/\1/' | sort -n )
+  debugfs=${out_dir}/host/linux-x86/bin/debugfs
+  fsckerofs=${out_dir}/host/linux-x86/bin/fsck.erofs
+  dist_dir=${DIST_DIR-${out_dir}/dist}
+  diff_found=false
+  for apex_name in ${APEXES}; do
+    # Verify file list
+    apex_file=${out_dir}/target/product/module_arm64/system/apex/${apex_name}.apex
+    sbom_file=${dist_dir}/sbom/${apex_name}.apex.spdx.json
+    echo "============ Diffing files in $apex_file and SBOM"
+    set +e
+    # apex-ls prints the list of all files and directories
+    # grep removes directories
+    # sed removes leading ./ in file names
+    diff <(${apex_ls} ${apex_file} | grep -v "/$" | grep -v "apex_manifest.pb$" | sed -E 's#^\./(.*)#\1#' | sort -n) \
+         <(grep '"fileName": ' ${sbom_file} | sed -E 's/.*"fileName": "(.*)",/\1/' | grep -v "${apex_name}.apex" | grep -v '\.[a]$' | grep -v '/android_.*\.o$' | grep -v '\.rlib$' | grep -v '/android_common_.*\.jar$' | grep -v '/linux_glibc_common/.*\.jar$' | sort -n )
 
-  if [ $? != "0" ]; then
-    echo "Diffs found in $apex_file and SBOM"
+    if [ $? != "0" ]; then
+      echo "Diffs found in $apex_file and SBOM"
+      diff_found=true
+    else
+      echo "No diffs."
+    fi
+    set -e
+
+    # Verify checksum of files
+    apex_unzipped=${out_dir}/target/product/module_arm64/system/apex/${apex_name}_unziped
+    rm -rf ${apex_unzipped}
+    ${deapexer} --debugfs_path ${debugfs} --fsckerofs_path ${fsckerofs} extract ${apex_file} ${apex_unzipped}
+
+    apex_file_checksum_in_sbom=
+    declare -A checksums_in_sbom
+    while read -r filename; do
+      read -r checksum
+      case ${filename} in
+        /*) # apex file
+          apex_file_checksum_in_sbom=${checksum}
+          ;;
+        *) # files in apex
+          checksums_in_sbom[${filename}]=${checksum}
+          ;;
+      esac
+    done <<< "$(grep -E '("fileName":)|("checksumValue":)'  ${sbom_file} | sed -E 's/(.*"fileName": |.*"checksumValue": )"(.*)",?/\2/')"
+
+    checksum_is_wrong=false
+    while read -r filename; do
+        file_sha1=$(sha1sum ${apex_unzipped}/${filename} | cut -d' ' -f1)
+        if [ "${file_sha1}" != "${checksums_in_sbom[$filename]}" ]; then
+          echo "Checksum is wrong: ${apex_file}#${filename}"
+          checksum_is_wrong=true
+        fi
+    done <<< "$(find ${apex_unzipped} -mindepth 1 -type f -printf '%P\n' | grep -v "^apex_manifest.pb$")"
+
+    apex_file_sha1=$(sha1sum ${apex_file} | cut -d' ' -f1)
+    if [ "${apex_file_sha1}" != "${apex_file_checksum_in_sbom}" ]; then
+      echo "Checksum is wrong: ${apex_file}"
+      checksum_is_wrong=true
+    fi
+
+    if [ "${checksum_is_wrong}" = "true" ]; then
+      diff_found=true
+    else
+      echo "Checksums are OK."
+    fi
+  done
+
+  # Verify SBOM of APKs
+  for apk in ${APKS}; do
+    sbom_file=${dist_dir}/sbom/${apk}.apk.spdx.json
+    echo "============ Diffing files in ${apk}.apk and SBOM"
+    # There is only one file in SBOM of APKs
+    file_number=$(grep '"fileName": ' ${sbom_file} | sed -E 's/.*"fileName": "(.*)",/\1/' | wc -l)
+    if [ "$file_number" != "1" ]; then
+      echo "Diffs found in $sbom_file"
+      diff_found=true
+    else
+      echo "No diffs."
+    fi
+  done
+
+  if [ $diff_found = "true" ]; then
+    echo "Diff found, exit with error."
     exit 1
-  else
-    echo "No diffs."
   fi
-  set -e
-
-  # Teardown
-  cleanup "${out_dir}"
-}
-
-function test_sbom_unbundled_apk {
-  # Setup
-  out_dir="$(setup)"
-
-  # run_soong to build Browser2.apk
-  run_soong "${out_dir}" "sbom" "Browser2"
-
-  sbom_file=${out_dir}/target/product/module_arm64/system/product/app/Browser2/Browser2.apk.spdx.json
-  echo "============ Diffing files in Browser2.apk and SBOM"
-  set +e
-  # There is only one file in SBOM of APKs
-  diff \
-      <(echo "/system/product/app/Browser2/Browser2.apk" ) \
-      <(grep '"fileName": ' ${sbom_file} | sed -E 's/.*"fileName": "(.*)",/\1/' )
-
-  if [ $? != "0" ]; then
-    echo "Diffs found in $sbom_file"
-    exit 1
-  else
-    echo "No diffs."
-  fi
-  set -e
 
   # Teardown
   cleanup "${out_dir}"
@@ -351,8 +425,7 @@ case $target_product in
     test_sbom_aosp_cf_x86_64_phone
     ;;
   module_arm64)
-    test_sbom_unbundled_apex
-    test_sbom_unbundled_apk
+    test_sbom_unbundled_modules
     ;;
   *)
     echo "Unknown TARGET_PRODUCT: $target_product"

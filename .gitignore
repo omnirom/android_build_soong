@@ -4,3 +4,4 @@
 *.iws
 *.swp
 /.vscode
+*.pyc

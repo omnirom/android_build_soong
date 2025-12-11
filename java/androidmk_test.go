@@ -22,9 +22,14 @@ import (
 	"android/soong/cc"
 )
 
+var prepareForJavaAndroidMkTest = android.GroupFixturePreparers(
+	prepareForJavaTest,
+	android.PrepareForTestWithAndroidMk,
+)
+
 func TestRequired(t *testing.T) {
 	t.Parallel()
-	ctx, _ := testJava(t, `
+	ctx := prepareForJavaAndroidMkTest.RunTestWithBp(t, `
 		java_library {
 			name: "foo",
 			srcs: ["a.java"],
@@ -33,10 +38,10 @@ func TestRequired(t *testing.T) {
 	`)
 
 	mod := ctx.ModuleForTests(t, "foo", "android_common").Module()
-	entries := android.AndroidMkEntriesForTest(t, ctx, mod)[0]
+	info := android.AndroidMkInfoForTest(t, ctx.TestContext, mod)
 
 	expected := []string{"libfoo"}
-	actual := entries.EntryMap["LOCAL_REQUIRED_MODULES"]
+	actual := info.PrimaryInfo.EntryMap["LOCAL_REQUIRED_MODULES"]
 	if !reflect.DeepEqual(expected, actual) {
 		t.Errorf("Unexpected required modules - expected: %q, actual: %q", expected, actual)
 	}
@@ -44,7 +49,7 @@ func TestRequired(t *testing.T) {
 
 func TestHostdex(t *testing.T) {
 	t.Parallel()
-	ctx, _ := testJava(t, `
+	ctx := prepareForJavaAndroidMkTest.RunTestWithBp(t, `
 		java_library {
 			name: "foo",
 			srcs: ["a.java"],
@@ -53,19 +58,19 @@ func TestHostdex(t *testing.T) {
 	`)
 
 	mod := ctx.ModuleForTests(t, "foo", "android_common").Module()
-	entriesList := android.AndroidMkEntriesForTest(t, ctx, mod)
-	if len(entriesList) != 2 {
-		t.Errorf("two entries are expected, but got %d", len(entriesList))
+	info := android.AndroidMkInfoForTest(t, ctx.TestContext, mod)
+	if len(info.ExtraInfo) != 1 {
+		t.Errorf("one extra entry is expected, but got %d", len(info.ExtraInfo))
 	}
 
-	mainEntries := &entriesList[0]
+	mainEntries := &info.PrimaryInfo
 	expected := []string{"foo"}
 	actual := mainEntries.EntryMap["LOCAL_MODULE"]
 	if !reflect.DeepEqual(expected, actual) {
 		t.Errorf("Unexpected module name - expected: %q, actual: %q", expected, actual)
 	}
 
-	subEntries := &entriesList[1]
+	subEntries := &info.ExtraInfo[0]
 	expected = []string{"foo-hostdex"}
 	actual = subEntries.EntryMap["LOCAL_MODULE"]
 	if !reflect.DeepEqual(expected, actual) {
@@ -75,7 +80,7 @@ func TestHostdex(t *testing.T) {
 
 func TestHostdexRequired(t *testing.T) {
 	t.Parallel()
-	ctx, _ := testJava(t, `
+	ctx := prepareForJavaAndroidMkTest.RunTestWithBp(t, `
 		java_library {
 			name: "foo",
 			srcs: ["a.java"],
@@ -85,19 +90,25 @@ func TestHostdexRequired(t *testing.T) {
 	`)
 
 	mod := ctx.ModuleForTests(t, "foo", "android_common").Module()
-	entriesList := android.AndroidMkEntriesForTest(t, ctx, mod)
-	if len(entriesList) != 2 {
-		t.Errorf("two entries are expected, but got %d", len(entriesList))
+	info := android.AndroidMkInfoForTest(t, ctx.TestContext, mod)
+	if len(info.ExtraInfo) != 1 {
+		t.Errorf("one extra entries is expected, but got %d", len(info.ExtraInfo))
 	}
 
-	mainEntries := &entriesList[0]
+	if len(info.ExtraInfo) != 1 {
+		t.Errorf("one extra entries is expected, but got %d", len(info.ExtraInfo))
+	}
+
+	mainEntries := &info.PrimaryInfo
+
 	expected := []string{"libfoo"}
 	actual := mainEntries.EntryMap["LOCAL_REQUIRED_MODULES"]
 	if !reflect.DeepEqual(expected, actual) {
 		t.Errorf("Unexpected required modules - expected: %q, actual: %q", expected, actual)
 	}
 
-	subEntries := &entriesList[1]
+	subEntries := &info.ExtraInfo[0]
+
 	expected = []string{"libfoo"}
 	actual = subEntries.EntryMap["LOCAL_REQUIRED_MODULES"]
 	if !reflect.DeepEqual(expected, actual) {
@@ -107,7 +118,7 @@ func TestHostdexRequired(t *testing.T) {
 
 func TestHostdexSpecificRequired(t *testing.T) {
 	t.Parallel()
-	ctx, _ := testJava(t, `
+	ctx := prepareForJavaAndroidMkTest.RunTestWithBp(t, `
 		java_library {
 			name: "foo",
 			srcs: ["a.java"],
@@ -121,17 +132,23 @@ func TestHostdexSpecificRequired(t *testing.T) {
 	`)
 
 	mod := ctx.ModuleForTests(t, "foo", "android_common").Module()
-	entriesList := android.AndroidMkEntriesForTest(t, ctx, mod)
-	if len(entriesList) != 2 {
-		t.Errorf("two entries are expected, but got %d", len(entriesList))
+	info := android.AndroidMkInfoForTest(t, ctx.TestContext, mod)
+	if len(info.ExtraInfo) != 1 {
+		t.Fatalf("one extra entries is expected, but got %d", len(info.ExtraInfo))
 	}
 
-	mainEntries := &entriesList[0]
+	mainEntries := &info.PrimaryInfo
+
 	if r, ok := mainEntries.EntryMap["LOCAL_REQUIRED_MODULES"]; ok {
 		t.Errorf("Unexpected required modules: %q", r)
 	}
 
-	subEntries := &entriesList[1]
+	if len(info.ExtraInfo) != 1 {
+		t.Fatalf("one extra entries is expected, but got %d", len(info.ExtraInfo))
+	}
+
+	subEntries := &info.ExtraInfo[0]
+
 	expected := []string{"libfoo"}
 	actual := subEntries.EntryMap["LOCAL_REQUIRED_MODULES"]
 	if !reflect.DeepEqual(expected, actual) {
@@ -142,7 +159,7 @@ func TestHostdexSpecificRequired(t *testing.T) {
 func TestJavaSdkLibrary_RequireXmlPermissionFile(t *testing.T) {
 	t.Parallel()
 	result := android.GroupFixturePreparers(
-		prepareForJavaTest,
+		prepareForJavaAndroidMkTest,
 		PrepareForTestWithJavaSdkLibraryFiles,
 		FixtureWithLastReleaseApis("foo-shared_library", "foo-no_shared_library"),
 	).RunTestWithBp(t, `
@@ -169,8 +186,8 @@ func TestJavaSdkLibrary_RequireXmlPermissionFile(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		mod := result.ModuleForTests(t, tc.moduleName, "android_common").Module()
-		entries := android.AndroidMkEntriesForTest(t, result.TestContext, mod)[0]
-		actual := entries.EntryMap["LOCAL_REQUIRED_MODULES"]
+		info := android.AndroidMkInfoForTest(t, result.TestContext, mod)
+		actual := info.PrimaryInfo.EntryMap["LOCAL_REQUIRED_MODULES"]
 		if !reflect.DeepEqual(tc.expected, actual) {
 			t.Errorf("Unexpected required modules - expected: %q, actual: %q", tc.expected, actual)
 		}
@@ -179,7 +196,7 @@ func TestJavaSdkLibrary_RequireXmlPermissionFile(t *testing.T) {
 
 func TestImportSoongDexJar(t *testing.T) {
 	t.Parallel()
-	result := PrepareForTestWithJavaDefaultModules.RunTestWithBp(t, `
+	result := prepareForJavaAndroidMkTest.RunTestWithBp(t, `
 		java_import {
 			name: "my-java-import",
 			jars: ["a.jar"],
@@ -189,16 +206,16 @@ func TestImportSoongDexJar(t *testing.T) {
 	`)
 
 	mod := result.Module("my-java-import", "android_common")
-	entries := android.AndroidMkEntriesForTest(t, result.TestContext, mod)[0]
+	info := android.AndroidMkInfoForTest(t, result.TestContext, mod)
 	expectedSoongDexJar := "out/soong/.intermediates/my-java-import/android_common/dex/my-java-import.jar"
-	actualSoongDexJar := entries.EntryMap["LOCAL_SOONG_DEX_JAR"]
+	actualSoongDexJar := info.PrimaryInfo.EntryMap["LOCAL_SOONG_DEX_JAR"]
 
 	android.AssertStringPathsRelativeToTopEquals(t, "LOCAL_SOONG_DEX_JAR", result.Config, []string{expectedSoongDexJar}, actualSoongDexJar)
 }
 
 func TestAndroidTestHelperApp_LocalDisableTestConfig(t *testing.T) {
 	t.Parallel()
-	ctx, _ := testJava(t, `
+	ctx := prepareForJavaAndroidMkTest.RunTestWithBp(t, `
 		android_test_helper_app {
 			name: "foo",
 			srcs: ["a.java"],
@@ -206,10 +223,10 @@ func TestAndroidTestHelperApp_LocalDisableTestConfig(t *testing.T) {
 	`)
 
 	mod := ctx.ModuleForTests(t, "foo", "android_common").Module()
-	entries := android.AndroidMkEntriesForTest(t, ctx, mod)[0]
+	info := android.AndroidMkInfoForTest(t, ctx.TestContext, mod)
 
 	expected := []string{"true"}
-	actual := entries.EntryMap["LOCAL_DISABLE_TEST_CONFIG"]
+	actual := info.PrimaryInfo.EntryMap["LOCAL_DISABLE_TEST_CONFIG"]
 	if !reflect.DeepEqual(expected, actual) {
 		t.Errorf("Unexpected flag value - expected: %q, actual: %q", expected, actual)
 	}
@@ -217,7 +234,7 @@ func TestAndroidTestHelperApp_LocalDisableTestConfig(t *testing.T) {
 
 func TestGetOverriddenPackages(t *testing.T) {
 	t.Parallel()
-	ctx, _ := testJava(
+	ctx := prepareForJavaAndroidMkTest.RunTestWithBp(
 		t, `
 		android_app {
 			name: "foo",
@@ -255,8 +272,8 @@ func TestGetOverriddenPackages(t *testing.T) {
 
 	for _, expected := range expectedVariants {
 		mod := ctx.ModuleForTests(t, expected.name, expected.variantName).Module()
-		entries := android.AndroidMkEntriesForTest(t, ctx, mod)[0]
-		actual := entries.EntryMap["LOCAL_OVERRIDES_PACKAGES"]
+		info := android.AndroidMkInfoForTest(t, ctx.TestContext, mod)
+		actual := info.PrimaryInfo.EntryMap["LOCAL_OVERRIDES_PACKAGES"]
 
 		android.AssertDeepEquals(t, "overrides property", expected.overrides, actual)
 	}
@@ -305,8 +322,8 @@ func TestJniAsRequiredDeps(t *testing.T) {
 
 	for _, tc := range testcases {
 		mod := ctx.ModuleForTests(t, tc.name, "android_common").Module()
-		entries := android.AndroidMkEntriesForTest(t, ctx.TestContext, mod)[0]
-		required := entries.EntryMap["LOCAL_REQUIRED_MODULES"]
+		info := android.AndroidMkInfoForTest(t, ctx.TestContext, mod)
+		required := info.PrimaryInfo.EntryMap["LOCAL_REQUIRED_MODULES"]
 		android.AssertDeepEquals(t, "unexpected required deps", tc.expected, required)
 	}
 }

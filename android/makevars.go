@@ -72,15 +72,15 @@ type BaseMakeVarsContext interface {
 type MakeVarsContext interface {
 	BaseMakeVarsContext
 
-	ModuleName(module blueprint.Module) string
-	ModuleDir(module blueprint.Module) string
-	ModuleSubDir(module blueprint.Module) string
-	ModuleType(module blueprint.Module) string
-	otherModuleProvider(module blueprint.Module, key blueprint.AnyProviderKey) (any, bool)
-	BlueprintFile(module blueprint.Module) string
+	ModuleName(module ModuleOrProxy) string
+	ModuleDir(module ModuleOrProxy) string
+	ModuleSubDir(module ModuleOrProxy) string
+	ModuleType(module ModuleOrProxy) string
+	otherModuleProvider(module ModuleOrProxy, key blueprint.AnyProviderKey) (any, bool)
+	BlueprintFile(module ModuleOrProxy) string
 
-	ModuleErrorf(module blueprint.Module, format string, args ...interface{})
-	OtherModulePropertyErrorf(module Module, property, format string, args ...interface{})
+	ModuleErrorf(module ModuleOrProxy, format string, args ...interface{})
+	OtherModulePropertyErrorf(module ModuleOrProxy, property, format string, args ...interface{})
 	Errorf(format string, args ...interface{})
 
 	VisitAllModules(visit func(Module))
@@ -599,6 +599,9 @@ func (c *makeVarsContext) addVariable(name, ninjaStr string, strict, sort bool) 
 }
 
 func (c *makeVarsContext) addPhony(name string, deps []string) {
+	if name == "" {
+		panic("Phony name cannot be the empty string")
+	}
 	c.phonies = append(c.phonies, phony{name, deps})
 }
 

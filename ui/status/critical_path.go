@@ -153,5 +153,5 @@ func (cp *CriticalPath) WriteToMetrics(met *metrics.Metrics) {
 	criticalPathInfo.CriticalPathTimeMicros = proto.Uint64(uint64(criticalTime.Microseconds()))
 	addJobInfos(&criticalPathInfo.LongRunningJobs, cp.longRunningJobs())
 	addJobInfos(&criticalPathInfo.CriticalPath, path)
-	met.SetCriticalPathInfo(criticalPathInfo)
+	met.SetCriticalPathInfo(&criticalPathInfo)
 }

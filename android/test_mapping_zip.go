@@ -15,7 +15,7 @@
 package android
 
 func init() {
-	InitRegistrationContext.RegisterSingletonType("test_mapping_zip_singleton", testMappingZipSingletonFactory)
+	InitRegistrationContext.RegisterParallelSingletonType("test_mapping_zip_singleton", testMappingZipSingletonFactory)
 }
 
 func testMappingZipSingletonFactory() Singleton {
@@ -29,18 +29,10 @@ func (s *testMappingZipSingleton) GenerateBuildActions(ctx SingletonContext) {
 	out := PathForOutput(ctx, "test_mappings.zip")
 	dep := PathForOutput(ctx, "test_mappings.zip.d")
 
-	// disabled-presubmit-tests used to be filled out based on modules that set
-	// LOCAL_PRESUBMIT_DISABLED. But that's no longer used and there was never a soong equivalent
-	// anyways, so just always create an empty file.
-	disabledPresubmitTestsFile := PathForOutput(ctx, "disabled-presubmit-tests")
-	WriteFileRule(ctx, disabledPresubmitTestsFile, "")
-
 	builder := NewRuleBuilder(pctx, ctx)
 	builder.Command().BuiltTool("soong_zip").
 		FlagWithOutput("-o ", out).
-		FlagWithInput("-l ", fileListFile).
-		FlagWithArg("-e ", "disabled-presubmit-tests").
-		FlagWithInput("-f ", disabledPresubmitTestsFile)
+		FlagWithInput("-l ", fileListFile)
 	builder.Command().Textf("echo '%s : ' $(cat %s) > ", out, fileListFile).DepFile(dep)
 	builder.Build("test_mappings_zip", "build TEST_MAPPING zip")
 

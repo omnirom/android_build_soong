@@ -644,7 +644,7 @@ func checkSystemServerOrder(ctx android.ModuleContext, libName string) {
 	config := dexpreopt.GetGlobalConfig(ctx)
 	jars := config.AllSystemServerClasspathJars(ctx)
 	jarIndex := config.AllSystemServerJars(ctx).IndexOfJar(libName)
-	ctx.WalkDeps(func(dep android.Module, parent android.Module) bool {
+	ctx.WalkDepsProxy(func(dep android.ModuleProxy, parent android.ModuleProxy) bool {
 		tag := ctx.OtherModuleDependencyTag(dep)
 		// Ideally this should only be walking relevant dependencies, but to maintain existing behavior
 		// for now just exclude any known irrelevant dependencies that would lead to incorrect errors.

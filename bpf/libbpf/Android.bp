@@ -27,6 +27,7 @@ bootstrap_go_package {
         "soong-android",
         "soong-cc",
         "soong-cc-config",
+        "soong-genrule",
     ],
     srcs: [
         "libbpf_prog.go",

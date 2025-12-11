@@ -77,6 +77,9 @@ func GenerateDexpreoptRule(ctx android.BuilderContext, globalSoong *GlobalSoongC
 	var profile android.WritablePath
 	if generateProfile {
 		profile = profileCommand(ctx, globalSoong, global, module, rule)
+		if mc, ok := ctx.(android.ModuleContext); ok {
+			mc.ComplianceMetadataInfo().AddBuiltFiles(profile.String())
+		}
 	}
 	if generateBootProfile {
 		bootProfileCommand(ctx, globalSoong, global, module, rule)
@@ -214,6 +217,20 @@ func GetSystemServerDexLocation(ctx android.PathContext, global *GlobalConfig, l
 
 	if apex := global.AllPlatformSystemServerJars(ctx).ApexOfJar(lib); apex == "system_ext" {
 		return fmt.Sprintf("/system_ext/framework/%s.jar", lib)
+	}
+
+	return fmt.Sprintf("/system/framework/%s.jar", lib)
+}
+
+// Returns the dex install location of a system server java library.
+func GetSystemServerDexInstallLocation(ctx android.ModuleContext, lib string) string {
+	global := GetGlobalConfig(ctx)
+	if apex := global.AllApexSystemServerJars(ctx).ApexOfJar(lib); apex != "" {
+		return fmt.Sprintf("/apex/%s/javalib/%s.jar", apex, lib)
+	}
+
+	if apex := global.AllPlatformSystemServerJars(ctx).ApexOfJar(lib); apex == "system_ext" {
+		return fmt.Sprintf("/%s/framework/%s.jar", ctx.DeviceConfig().SystemExtPath(), lib)
 	}
 
 	return fmt.Sprintf("/system/framework/%s.jar", lib)
@@ -496,6 +513,10 @@ func dexpreoptCommand(ctx android.BuilderContext, globalSoong *GlobalSoongConfig
 	if profile != nil {
 		cmd.FlagWithInput("--profile-file=", profile)
 	}
+
+	cmd.Text("$(cat").Input(globalSoong.AssumeValueFlags).Text(")")
+
+	cmd.Text("$(cat").Input(globalSoong.ProfileCodeFlag).Text(")")
 
 	rule.Install(odexPath, odexInstallPath)
 	rule.Install(vdexPath, vdexInstallPath)

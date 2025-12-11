@@ -71,8 +71,8 @@ func addDependencyOntoApexModulePair(ctx android.BottomUpMutatorContext, apex st
 // gatherFragments collects fragments that are direct dependencies of this module, as well as
 // any fragments in apexes via the dependency on the apex.  It returns a list of the fragment
 // modules and map from apex name to the fragment in that apex.
-func gatherFragments(ctx android.BaseModuleContext) ([]android.Module, map[string]android.Module) {
-	var fragments []android.Module
+func gatherFragments(ctx android.BaseModuleContext) ([]android.ModuleProxy, map[string]android.ModuleProxy) {
+	var fragments []android.ModuleProxy
 
 	type fragmentInApex struct {
 		module string
@@ -82,7 +82,7 @@ func gatherFragments(ctx android.BaseModuleContext) ([]android.Module, map[strin
 	var fragmentsInApexes []fragmentInApex
 
 	// Find any direct dependencies, as well as a list of the modules in apexes.
-	ctx.VisitDirectDeps(func(module android.Module) {
+	ctx.VisitDirectDepsProxy(func(module android.ModuleProxy) {
 		t := ctx.OtherModuleDependencyTag(module)
 		if bcpTag, ok := t.(bootclasspathDependencyTag); ok && bcpTag.typ == fragment {
 			if bcpTag.moduleInApex != "" {
@@ -93,13 +93,13 @@ func gatherFragments(ctx android.BaseModuleContext) ([]android.Module, map[strin
 		}
 	})
 
-	fragmentsMap := make(map[string]android.Module)
+	fragmentsMap := make(map[string]android.ModuleProxy)
 	for _, fragmentInApex := range fragmentsInApexes {
-		var found android.Module
+		var found android.ModuleProxy
 		// Find a desired module in an apex.
-		ctx.WalkDeps(func(child, parent android.Module) bool {
+		ctx.WalkDepsProxy(func(child, parent android.ModuleProxy) bool {
 			t := ctx.OtherModuleDependencyTag(child)
-			if parent == ctx.Module() {
+			if android.EqualModules(parent, ctx.Module()) {
 				if bcpTag, ok := t.(bootclasspathDependencyTag); ok && bcpTag.typ == fragment && ctx.OtherModuleName(child) == fragmentInApex.apex {
 					// This is the dependency from this module to the apex, recurse into it.
 					return true
@@ -112,7 +112,7 @@ func gatherFragments(ctx android.BaseModuleContext) ([]android.Module, map[strin
 				return false
 			} else if android.RemoveOptionalPrebuiltPrefix(ctx.OtherModuleName(child)) == fragmentInApex.module {
 				// This is the desired module inside the apex.
-				if found != nil && child != found {
+				if !found.IsNil() && child != found {
 					panic(fmt.Errorf("found two conflicting modules %q in apex %q: %s and %s",
 						fragmentInApex.module, fragmentInApex.apex, found, child))
 				}
@@ -120,7 +120,7 @@ func gatherFragments(ctx android.BaseModuleContext) ([]android.Module, map[strin
 			}
 			return false
 		})
-		if found != nil {
+		if !found.IsNil() {
 			if existing, exists := fragmentsMap[fragmentInApex.apex]; exists {
 				ctx.ModuleErrorf("apex %s has multiple fragments, %s and %s", fragmentInApex.apex, fragmentInApex.module, existing)
 			} else {
@@ -137,9 +137,10 @@ func gatherFragments(ctx android.BaseModuleContext) ([]android.Module, map[strin
 
 // gatherApexModulePairDepsWithTag returns the list of dependencies with the supplied tag that was
 // added by addDependencyOntoApexModulePair.
-func gatherApexModulePairDepsWithTag(ctx android.BaseModuleContext, tagType bootclasspathDependencyTagType) ([]android.Module, map[android.Module]string) {
-	var modules []android.Module
-	modulesToApex := make(map[android.Module]string)
+func gatherApexModulePairDepsWithTag(ctx android.BaseModuleContext,
+	tagType bootclasspathDependencyTagType) ([]android.ModuleProxy, map[android.ModuleProxy]string) {
+	var modules []android.ModuleProxy
+	modulesToApex := make(map[android.ModuleProxy]string)
 
 	type moduleInApex struct {
 		module string
@@ -148,7 +149,7 @@ func gatherApexModulePairDepsWithTag(ctx android.BaseModuleContext, tagType boot
 
 	var modulesInApexes []moduleInApex
 
-	ctx.VisitDirectDeps(func(module android.Module) {
+	ctx.VisitDirectDepsProxy(func(module android.ModuleProxy) {
 		t := ctx.OtherModuleDependencyTag(module)
 		if bcpTag, ok := t.(bootclasspathDependencyTag); ok && bcpTag.typ == tagType {
 			if bcpTag.moduleInApex != "" {
@@ -160,10 +161,10 @@ func gatherApexModulePairDepsWithTag(ctx android.BaseModuleContext, tagType boot
 	})
 
 	for _, moduleInApex := range modulesInApexes {
-		var found android.Module
-		ctx.WalkDeps(func(child, parent android.Module) bool {
+		var found android.ModuleProxy
+		ctx.WalkDepsProxy(func(child, parent android.ModuleProxy) bool {
 			t := ctx.OtherModuleDependencyTag(child)
-			if parent == ctx.Module() {
+			if android.EqualModules(parent, ctx.Module()) {
 				if bcpTag, ok := t.(bootclasspathDependencyTag); ok && bcpTag.typ == tagType && ctx.OtherModuleName(child) == moduleInApex.apex {
 					// recurse into the apex
 					return true
@@ -177,7 +178,7 @@ func gatherApexModulePairDepsWithTag(ctx android.BaseModuleContext, tagType boot
 			} else if IsBootclasspathFragmentContentDepTag(t) {
 				return false
 			} else if android.RemoveOptionalPrebuiltPrefix(ctx.OtherModuleName(child)) == moduleInApex.module {
-				if found != nil && child != found {
+				if !found.IsNil() && child != found {
 					panic(fmt.Errorf("found two conflicting modules %q in apex %q: %s and %s",
 						moduleInApex.module, moduleInApex.apex, found, child))
 				}
@@ -185,7 +186,7 @@ func gatherApexModulePairDepsWithTag(ctx android.BaseModuleContext, tagType boot
 			}
 			return false
 		})
-		if found != nil {
+		if !found.IsNil() {
 			modules = append(modules, found)
 			if existing, exists := modulesToApex[found]; exists && existing != moduleInApex.apex {
 				ctx.ModuleErrorf("module %s is in two apexes, %s and %s", moduleInApex.module, existing, moduleInApex.apex)

@@ -29,8 +29,8 @@ package android
 
 import (
 	"fmt"
-	"sort"
-	"sync"
+	"reflect"
+	"slices"
 
 	"github.com/google/blueprint"
 	"github.com/google/blueprint/proptools"
@@ -39,6 +39,8 @@ import (
 // Interface for override module types, e.g. override_android_app, override_apex
 type OverrideModule interface {
 	Module
+
+	GetOverriddenModuleName() string
 
 	getOverridingProperties() []interface{}
 	setOverridingProperties(properties []interface{})
@@ -49,10 +51,6 @@ type OverrideModule interface {
 	// i.e. cases where an overriding module, too, is overridden by a prebuilt module.
 	setOverriddenByPrebuilt(prebuilt Module)
 	getOverriddenByPrebuilt() Module
-
-	// Directory containing the Blueprint definition of the overriding module
-	setModuleDir(string)
-	ModuleDir() string
 }
 
 // Base module struct for override module types
@@ -62,8 +60,6 @@ type OverrideModuleBase struct {
 	overridingProperties []interface{}
 
 	overriddenByPrebuilt Module
-
-	moduleDir string
 }
 
 type OverrideModuleProperties struct {
@@ -71,14 +67,6 @@ type OverrideModuleProperties struct {
 	Base *string
 
 	// TODO(jungjw): Add an optional override_name bool flag.
-}
-
-func (o *OverrideModuleBase) setModuleDir(d string) {
-	o.moduleDir = d
-}
-
-func (o *OverrideModuleBase) ModuleDir() string {
-	return o.moduleDir
 }
 
 func (o *OverrideModuleBase) getOverridingProperties() []interface{} {
@@ -118,12 +106,8 @@ type OverridableModule interface {
 
 	setOverridableProperties(prop []interface{})
 
-	addOverride(o OverrideModule)
-	getOverrides() []OverrideModule
-
-	override(ctx BaseModuleContext, bm OverridableModule, o OverrideModule)
+	override(ctx BaseModuleContext, bm OverridableModule, info overrideTransitionMutatorInfo)
 	GetOverriddenBy() string
-	GetOverriddenByModuleDir() string
 
 	setOverridesProperty(overridesProperties *[]string)
 
@@ -133,20 +117,11 @@ type OverridableModule interface {
 }
 
 type overridableModuleProperties struct {
-	OverriddenBy          string `blueprint:"mutated"`
-	OverriddenByModuleDir string `blueprint:"mutated"`
+	OverriddenBy string `blueprint:"mutated"`
 }
 
 // Base module struct for overridable module types
 type OverridableModuleBase struct {
-	// List of OverrideModules that override this base module
-	overrides []OverrideModule
-	// Used to parallelize registerOverrideMutator executions. Note that only addOverride locks this
-	// mutex. It is because addOverride and getOverride are used in different mutators, and so are
-	// guaranteed to be not mixed. (And, getOverride only reads from overrides, and so don't require
-	// mutex locking.)
-	overridesLock sync.Mutex
-
 	overridableProperties []interface{}
 
 	// If an overridable module has a property to list other modules that itself overrides, it should
@@ -171,30 +146,14 @@ func (b *OverridableModuleBase) setOverridableProperties(prop []interface{}) {
 	b.overridableProperties = prop
 }
 
-func (b *OverridableModuleBase) addOverride(o OverrideModule) {
-	b.overridesLock.Lock()
-	b.overrides = append(b.overrides, o)
-	b.overridesLock.Unlock()
-}
-
-// Should NOT be used in the same mutator as addOverride.
-func (b *OverridableModuleBase) getOverrides() []OverrideModule {
-	b.overridesLock.Lock()
-	sort.Slice(b.overrides, func(i, j int) bool {
-		return b.overrides[i].Name() < b.overrides[j].Name()
-	})
-	b.overridesLock.Unlock()
-	return b.overrides
-}
-
 func (b *OverridableModuleBase) setOverridesProperty(overridesProperty *[]string) {
 	b.overridesProperty = overridesProperty
 }
 
 // Overrides a base module with the given OverrideModule.
-func (b *OverridableModuleBase) override(ctx BaseModuleContext, bm OverridableModule, o OverrideModule) {
+func (b *OverridableModuleBase) override(ctx BaseModuleContext, bm OverridableModule, info overrideTransitionMutatorInfo) {
 	for _, p := range b.overridableProperties {
-		for _, op := range o.getOverridingProperties() {
+		for _, op := range info.overridingProperties {
 			if proptools.TypeEqual(p, op) {
 				err := proptools.ExtendProperties(p, op, nil, proptools.OrderReplace)
 				if err != nil {
@@ -212,8 +171,7 @@ func (b *OverridableModuleBase) override(ctx BaseModuleContext, bm OverridableMo
 	if b.overridesProperty != nil {
 		*b.overridesProperty = append(*b.overridesProperty, ctx.OtherModuleName(bm))
 	}
-	b.overridableModuleProperties.OverriddenBy = o.Name()
-	b.overridableModuleProperties.OverriddenByModuleDir = o.ModuleDir()
+	b.overridableModuleProperties.OverriddenBy = info.name
 }
 
 // GetOverriddenBy returns the name of the override module that has overridden this module.
@@ -224,19 +182,14 @@ func (b *OverridableModuleBase) GetOverriddenBy() string {
 	return b.overridableModuleProperties.OverriddenBy
 }
 
-func (b *OverridableModuleBase) GetOverriddenByModuleDir() string {
-	return b.overridableModuleProperties.OverriddenByModuleDir
-}
-
 func (b *OverridableModuleBase) OverridablePropertiesDepsMutator(ctx BottomUpMutatorContext) {
 }
 
 // Mutators for override/overridable modules. All the fun happens in these functions. It is critical
 // to keep them in this order and not put any order mutators between them.
 func RegisterOverridePostDepsMutators(ctx RegisterMutatorsContext) {
-	ctx.BottomUp("override_deps", overrideModuleDepsMutator).MutatesDependencies() // modifies deps via addOverride
-	ctx.Transition("override", &overrideTransitionMutator{})
-	ctx.BottomUp("override_apply", overrideApplyMutator).MutatesDependencies()
+	ctx.BottomUp("override_deps", overrideModuleDepsMutator)
+	ctx.InfoBasedTransition("override", NewGenericTransitionMutatorAdapter(&overrideTransitionMutator{}))
 	// overridableModuleDepsMutator calls OverridablePropertiesDepsMutator so that overridable modules can
 	// add deps from overridable properties.
 	ctx.BottomUp("overridable_deps", overridableModuleDepsMutator)
@@ -272,97 +225,127 @@ func overrideModuleDepsMutator(ctx BottomUpMutatorContext) {
 			ctx.PropertyErrorf("base", "%q is not a valid module name", base)
 			return
 		}
-		baseModule := ctx.AddDependency(ctx.Module(), overrideBaseDepTag, *module.getOverrideModuleProperties().Base)[0]
-		if o, ok := baseModule.(OverridableModule); ok {
-			overrideModule := ctx.Module().(OverrideModule)
-			overrideModule.setModuleDir(ctx.ModuleDir())
-			o.addOverride(overrideModule)
+
+		ctx.AddDependency(ctx.Module(), overrideBaseDepTag, *module.getOverrideModuleProperties().Base)
+
+		// Make a copy of module.getOverridingProperties so that it won't be modified by any future
+		// mutators, which would violate the immutable providers requirement.
+		overridingProps := slices.Clone(module.getOverridingProperties())
+		for i, props := range overridingProps {
+			overridingProps[i] = proptools.CloneProperties(reflect.ValueOf(props)).Interface()
 		}
+
+		info := overrideTransitionMutatorInfo{
+			name:                 module.Name(),
+			overridingProperties: overridingProps,
+		}
+
+		prebuiltDeps := ctx.GetDirectDepsProxyWithTag(PrebuiltDepTag)
+		for _, prebuiltDep := range prebuiltDeps {
+			depInfo, ok := OtherModuleProvider(ctx, prebuiltDep, PrebuiltInfoProvider)
+			if !ok {
+				panic("PrebuiltDepTag leads to a non-prebuilt module " + prebuiltDep.Name())
+			}
+			info.overrideModuleUsePrebuilt = info.overrideModuleUsePrebuilt || depInfo.UsePrebuilt
+			info.overrideModulePrebuiltPartitions = append(info.overrideModulePrebuiltPartitions,
+				depInfo.PartitionTag)
+			info.overrideModulePrebuiltNames = append(info.overrideModulePrebuiltNames,
+				ctx.OtherModuleName(prebuiltDep))
+		}
+		SetProvider(ctx, overrideModuleDefaultInfoProvider, info)
 	}
+}
+
+var overrideModuleDefaultInfoProvider = blueprint.NewMutatorProvider[overrideTransitionMutatorInfo]("override_deps")
+
+var OverrideInfoProvider = blueprint.NewMutatorProvider[OverrideInfo]("override_mutate")
+
+type OverrideInfo struct {
+	OverriddenBy string
 }
 
 // Now, goes through all overridable modules, finds all modules overriding them, creates a local
 // variant for each of them, and performs the actual overriding operation by calling override().
 type overrideTransitionMutator struct{}
 
-func (overrideTransitionMutator) Split(ctx BaseModuleContext) []string {
-	if b, ok := ctx.Module().(OverridableModule); ok {
-		overrides := b.getOverrides()
-		if len(overrides) == 0 {
-			return []string{""}
-		}
-		variants := make([]string, len(overrides)+1)
-		// The first variant is for the original, non-overridden, base module.
-		variants[0] = ""
-		for i, o := range overrides {
-			variants[i+1] = o.(Module).Name()
-		}
-		return variants
-	} else if o, ok := ctx.Module().(OverrideModule); ok {
+var _ TransitionMutator[overrideTransitionMutatorInfo] = (*overrideTransitionMutator)(nil)
+
+type overrideTransitionMutatorInfo struct {
+	name                 string
+	overridingProperties []interface{} `blueprint:"allow_configurable_in_provider"`
+
+	overrideModuleUsePrebuilt        bool
+	overrideModulePrebuiltPartitions []string
+	overrideModulePrebuiltNames      []string
+}
+
+var overrideTransitionMutatorEmptyVariation = overrideTransitionMutatorInfo{name: ""}
+
+func (info overrideTransitionMutatorInfo) Variation() string {
+	return info.name
+}
+
+func (overrideTransitionMutator) Split(ctx BaseModuleContext) []overrideTransitionMutatorInfo {
+	if _, ok := ctx.Module().(OverrideModule); ok {
 		// Create a variant of the overriding module with its own name. This matches the above local
 		// variant name rule for overridden modules, and thus allows ReplaceDependencies to match the
 		// two.
-		return []string{o.Name()}
+		info, _ := ModuleProvider(ctx, overrideModuleDefaultInfoProvider)
+		return []overrideTransitionMutatorInfo{info}
 	}
 
-	return []string{""}
+	return []overrideTransitionMutatorInfo{overrideTransitionMutatorEmptyVariation}
 }
 
-func (overrideTransitionMutator) OutgoingTransition(ctx OutgoingTransitionContext, sourceVariation string) string {
-	if o, ok := ctx.Module().(OverrideModule); ok {
+func (overrideTransitionMutator) OutgoingTransition(ctx OutgoingTransitionContext, sourceInfo overrideTransitionMutatorInfo) overrideTransitionMutatorInfo {
+	if _, ok := ctx.Module().(OverrideModule); ok {
 		if ctx.DepTag() == overrideBaseDepTag {
-			return o.Name()
+			return sourceInfo
 		}
 	}
 
 	// Variations are always local and shouldn't affect the variant used for dependencies
-	return ""
+	return overrideTransitionMutatorEmptyVariation
 }
 
-func (overrideTransitionMutator) IncomingTransition(ctx IncomingTransitionContext, incomingVariation string) string {
+func (overrideTransitionMutator) IncomingTransition(ctx IncomingTransitionContext, incomingInfo overrideTransitionMutatorInfo) overrideTransitionMutatorInfo {
 	if _, ok := ctx.Module().(OverridableModule); ok {
-		return incomingVariation
-	} else if o, ok := ctx.Module().(OverrideModule); ok {
+		return incomingInfo
+	} else if _, ok := ctx.Module().(OverrideModule); ok {
 		// To allow dependencies to be added without having to know the variation.
-		return o.Name()
+		info, _ := ModuleProvider(ctx, overrideModuleDefaultInfoProvider)
+		return info
 	}
 
-	return ""
+	return overrideTransitionMutatorEmptyVariation
 }
 
-func (overrideTransitionMutator) Mutate(ctx BottomUpMutatorContext, variation string) {
-}
+func (overrideTransitionMutator) Mutate(ctx BottomUpMutatorContext, info overrideTransitionMutatorInfo) {
+	if info.name != "" {
+		if b, ok := ctx.Module().(OverridableModule); ok {
+			b.override(ctx, b, info)
 
-func overrideApplyMutator(ctx BottomUpMutatorContext) {
-	if o, ok := ctx.Module().(OverrideModule); ok {
-		overridableDeps := ctx.GetDirectDepsWithTag(overrideBaseDepTag)
-		if len(overridableDeps) > 1 {
-			panic(fmt.Errorf("expected a single dependency with overrideBaseDepTag, found %q", overridableDeps))
-		} else if len(overridableDeps) == 1 {
-			b := overridableDeps[0].(OverridableModule)
-			b.override(ctx, b, o)
-
-			checkPrebuiltReplacesOverride(ctx, b)
+			checkPrebuiltReplacesOverride(ctx, b, info)
 		}
+		SetProvider(ctx, OverrideInfoProvider, OverrideInfo{
+			OverriddenBy: info.name,
+		})
 	}
 }
 
-func checkPrebuiltReplacesOverride(ctx BottomUpMutatorContext, b OverridableModule) {
+func (overrideTransitionMutator) TransitionInfoFromVariation(variation string) overrideTransitionMutatorInfo {
+	panic(fmt.Errorf("not implemented"))
+}
+
+func checkPrebuiltReplacesOverride(ctx BottomUpMutatorContext, bm OverridableModule, info overrideTransitionMutatorInfo) {
 	// See if there's a prebuilt module that overrides this override module with prefer flag,
 	// in which case we call HideFromMake on the corresponding variant later.
-	prebuiltDeps := ctx.GetDirectDepsWithTag(PrebuiltDepTag)
-	for _, prebuiltDep := range prebuiltDeps {
-		prebuilt := GetEmbeddedPrebuilt(prebuiltDep)
-		if prebuilt == nil {
-			panic("PrebuiltDepTag leads to a non-prebuilt module " + prebuiltDep.Name())
-		}
-		if prebuilt.UsePrebuilt() {
-			// The overriding module itself, too, is overridden by a prebuilt.
-			// Perform the same check for replacement
-			checkInvariantsForSourceAndPrebuilt(ctx, b, prebuiltDep)
-			// Copy the flag and hide it in make
-			b.ReplacedByPrebuilt()
-		}
+	if info.overrideModuleUsePrebuilt {
+		// The overriding module itself, too, is overridden by a prebuilt.
+		// Perform the same check for replacement
+		checkInvariantsForSourceAndPrebuilt(ctx, bm.PartitionTag(ctx.DeviceConfig()), info.overrideModulePrebuiltPartitions, info.overrideModulePrebuiltNames)
+		// Copy the flag and hide it in make
+		bm.ReplacedByPrebuilt()
 	}
 }
 

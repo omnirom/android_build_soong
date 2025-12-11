@@ -116,4 +116,3 @@ message ReleaseConfigsArtifact {
   // Map of release_config_artifact.directories to release_config_map message.
   map<string, ReleaseConfigMap> release_config_maps_map = 3;
 }
-

@@ -271,7 +271,7 @@ func (rawFilesSingleton) GenerateBuildActions(ctx SingletonContext) {
 		// Checking that the path matches allows changing the structure of the raw directory, for example to increase
 		// the sharding.
 		rawFileInfo, written := rawFileSet.Load(key)
-		if !written || rawFileInfo.relPath != relPath {
+		if !ctx.GetIncrementalAnalysis() && (!written || rawFileInfo.relPath != relPath) {
 			os.Remove(path)
 		}
 		return nil

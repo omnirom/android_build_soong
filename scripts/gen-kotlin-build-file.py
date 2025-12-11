@@ -38,6 +38,8 @@ def parse_args():
                       help='file to which the module.xml contents will be written.')
   parser.add_argument('--classpath', dest='classpath', action='append', default=[],
                       help='file containing classpath to pass to kotlinc.')
+  parser.add_argument('-Xfriend-paths', dest='friend_paths',
+                      help='comma separated list of paths to jars in which this module can access internal visibility symbols.')
   parser.add_argument('--name', dest='name',
                       help='name of the module.')
   parser.add_argument('--out_dir', dest='out_dir',
@@ -69,6 +71,11 @@ def main():
       for entry in NinjaRspFileReader(classpath_rsp_file):
         path = os.path.abspath(entry)
         f.write('    <classpath path="%s"/>\n' % path)
+
+    # Print friend path entries
+    if args.friend_paths is not None:
+      for friend_path in args.friend_paths.split(','):
+        f.write('    <friendDir path="%s"/>\n' % os.path.abspath(friend_path))
 
     # For each rsp file, print source entries
     for rsp_file in args.srcs:

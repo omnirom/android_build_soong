@@ -103,26 +103,26 @@ func TestRuntimeResourceOverlay(t *testing.T) {
 	if expected != signingFlag {
 		t.Errorf("Incorrect signing flags, expected: %q, got: %q", expected, signingFlag)
 	}
-	androidMkEntries := android.AndroidMkEntriesForTest(t, result.TestContext, m.Module())[0]
-	path := androidMkEntries.EntryMap["LOCAL_CERTIFICATE"]
+	info := android.AndroidMkInfoForTest(t, result.TestContext, m.Module())
+	path := info.PrimaryInfo.EntryMap["LOCAL_CERTIFICATE"]
 	expectedPath := []string{"build/make/target/product/security/platform.x509.pem"}
 	if !reflect.DeepEqual(path, expectedPath) {
 		t.Errorf("Unexpected LOCAL_CERTIFICATE value: %v, expected: %v", path, expectedPath)
 	}
 
 	// Check device location.
-	path = androidMkEntries.EntryMap["LOCAL_MODULE_PATH"]
+	path = info.PrimaryInfo.EntryMap["LOCAL_MODULE_PATH"]
 	expectedPath = []string{shared.JoinPath("out/target/product/test_device/product/overlay")}
 	android.AssertStringPathsRelativeToTopEquals(t, "LOCAL_MODULE_PATH", result.Config, expectedPath, path)
 
 	// A themed module has a different device location
 	m = result.ModuleForTests(t, "foo_themed", "android_common")
-	androidMkEntries = android.AndroidMkEntriesForTest(t, result.TestContext, m.Module())[0]
-	path = androidMkEntries.EntryMap["LOCAL_MODULE_PATH"]
+	info = android.AndroidMkInfoForTest(t, result.TestContext, m.Module())
+	path = info.PrimaryInfo.EntryMap["LOCAL_MODULE_PATH"]
 	expectedPath = []string{shared.JoinPath("out/target/product/test_device/product/overlay/faza")}
 	android.AssertStringPathsRelativeToTopEquals(t, "LOCAL_MODULE_PATH", result.Config, expectedPath, path)
 
-	overrides := androidMkEntries.EntryMap["LOCAL_OVERRIDES_PACKAGES"]
+	overrides := info.PrimaryInfo.EntryMap["LOCAL_OVERRIDES_PACKAGES"]
 	expectedOverrides := []string{"foo"}
 	if !reflect.DeepEqual(overrides, expectedOverrides) {
 		t.Errorf("Unexpected LOCAL_OVERRIDES_PACKAGES value: %v, expected: %v", overrides, expectedOverrides)
@@ -166,7 +166,7 @@ func TestRuntimeResourceOverlay_JavaDefaults(t *testing.T) {
 	}
 
 	// Check device location.
-	path := android.AndroidMkEntriesForTest(t, result.TestContext, m.Module())[0].EntryMap["LOCAL_MODULE_PATH"]
+	path := android.AndroidMkInfoForTest(t, result.TestContext, m.Module()).PrimaryInfo.EntryMap["LOCAL_MODULE_PATH"]
 	expectedPath := []string{shared.JoinPath("out/target/product/test_device/product/overlay/default_theme")}
 	android.AssertStringPathsRelativeToTopEquals(t, "LOCAL_MODULE_PATH", result.Config, expectedPath, path)
 
@@ -183,7 +183,7 @@ func TestRuntimeResourceOverlay_JavaDefaults(t *testing.T) {
 	}
 
 	// Check device location.
-	path = android.AndroidMkEntriesForTest(t, result.TestContext, m.Module())[0].EntryMap["LOCAL_MODULE_PATH"]
+	path = android.AndroidMkInfoForTest(t, result.TestContext, m.Module()).PrimaryInfo.EntryMap["LOCAL_MODULE_PATH"]
 	expectedPath = []string{shared.JoinPath("out/target/product/test_device/product/overlay")}
 	android.AssertStringPathsRelativeToTopEquals(t, "LOCAL_MODULE_PATH", result.Config, expectedPath, path)
 }
@@ -355,7 +355,7 @@ func TestRuntimeResourceOverlayFlagsPackages(t *testing.T) {
 	android.AssertStringDoesContain(t,
 		"aapt2 link command expected to pass feature flags arguments",
 		linkInFlags,
-		"--feature-flags @out/soong/.intermediates/bar/intermediate.txt --feature-flags @out/soong/.intermediates/baz/intermediate.txt",
+		"--feature-flags @out/soong/.intermediates/bar/aconfig-flags.txt --feature-flags @out/soong/.intermediates/baz/aconfig-flags.txt",
 	)
 }
 

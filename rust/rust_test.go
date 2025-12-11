@@ -59,12 +59,13 @@ var rustMockedFiles = android.MockFS{
 
 // testRust returns a TestContext in which a basic environment has been setup.
 // This environment contains a few mocked files. See rustMockedFiles for the list of these files.
-func testRust(t *testing.T, bp string) *android.TestContext {
+func testRust(t *testing.T, bp string, preparers ...android.FixturePreparer) *android.TestContext {
 	t.Helper()
 	skipTestIfOsNotSupported(t)
 	result := android.GroupFixturePreparers(
 		prepareForRustTest,
 		rustMockedFiles.AddToFixture(),
+		android.GroupFixturePreparers(preparers...),
 	).
 		RunTestWithBp(t, bp)
 	return result.TestContext
@@ -672,13 +673,6 @@ func TestRustFFIRlibs(t *testing.T) {
 		t.Errorf("dependency from indirect cc staticlib from direct dylib dep found in rust dylib when writing generated Rust staticlib: %#v", librs2_genlib.Args["libFlags"])
 	}
 
-}
-
-func assertString(t *testing.T, got, expected string) {
-	t.Helper()
-	if got != expected {
-		t.Errorf("expected %q got %q", expected, got)
-	}
 }
 
 func TestStdLinkMismatch(t *testing.T) {

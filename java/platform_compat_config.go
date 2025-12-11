@@ -44,8 +44,12 @@ func registerPlatformCompatConfigBuildComponents(ctx android.RegistrationContext
 }
 
 type PlatformCompatConfigInfo struct {
-	CompatConfig android.OutputPath
-	SubDir       string
+	CompatConfig         android.OutputPath
+	SubDir               string
+	CompatConfigMetadata android.Path
+	// Whether to include it in the "merged" XML (merged_compat_config.xml) or not.
+	IncludeInMergedXml bool
+	Prebuilt           bool
 }
 
 var PlatformCompatConfigInfoProvider = blueprint.NewProvider[PlatformCompatConfigInfo]()
@@ -99,14 +103,6 @@ type platformCompatConfigMetadataProvider interface {
 	includeInMergedXml() bool
 }
 
-type PlatformCompatConfigMetadataInfo struct {
-	CompatConfigMetadata android.Path
-	// Whether to include it in the "merged" XML (merged_compat_config.xml) or not.
-	IncludeInMergedXml bool
-}
-
-var PlatformCompatConfigMetadataInfoProvider = blueprint.NewProvider[PlatformCompatConfigMetadataInfo]()
-
 type PlatformCompatConfigIntf interface {
 	android.Module
 
@@ -141,21 +137,21 @@ func (p *platformCompatConfig) GenerateAndroidBuildActions(ctx android.ModuleCon
 	ctx.SetOutputFiles(android.Paths{p.configFile}, "")
 
 	android.SetProvider(ctx, PlatformCompatConfigInfoProvider, PlatformCompatConfigInfo{
-		CompatConfig: p.CompatConfig(),
-		SubDir:       p.SubDir(),
-	})
-
-	android.SetProvider(ctx, PlatformCompatConfigMetadataInfoProvider, PlatformCompatConfigMetadataInfo{
+		CompatConfig:         p.CompatConfig(),
+		SubDir:               p.SubDir(),
 		CompatConfigMetadata: p.compatConfigMetadata(),
 		IncludeInMergedXml:   p.includeInMergedXml(),
+		Prebuilt:             false,
 	})
 }
 
-func (p *platformCompatConfig) AndroidMkEntries() []android.AndroidMkEntries {
-	return []android.AndroidMkEntries{android.AndroidMkEntries{
+func (p *platformCompatConfig) PrepareAndroidMKProviderInfo(config android.Config) *android.AndroidMkProviderInfo {
+	info := &android.AndroidMkProviderInfo{}
+	info.PrimaryInfo = android.AndroidMkInfo{
 		Class:      "ETC",
 		OutputFile: android.OptionalPathForPath(p.configFile),
-	}}
+	}
+	return info
 }
 
 func PlatformCompatConfigFactory() android.Module {
@@ -173,9 +169,9 @@ func (b *compatConfigMemberType) AddDependencies(ctx android.SdkDependencyContex
 	ctx.AddVariationDependencies(nil, dependencyTag, names...)
 }
 
-func (b *compatConfigMemberType) IsInstance(module android.Module) bool {
-	_, ok := module.(*platformCompatConfig)
-	return ok
+func (b *compatConfigMemberType) IsInstance(ctx android.ModuleContext, module android.ModuleProxy) bool {
+	info, ok := android.OtherModuleProvider(ctx, module, PlatformCompatConfigInfoProvider)
+	return ok && !info.Prebuilt
 }
 
 func (b *compatConfigMemberType) AddPrebuiltModule(ctx android.SdkMemberContext, member android.SdkMember) android.BpModule {
@@ -192,9 +188,8 @@ type compatConfigSdkMemberProperties struct {
 	Metadata android.Path
 }
 
-func (b *compatConfigSdkMemberProperties) PopulateFromVariant(ctx android.SdkMemberContext, variant android.Module) {
-	module := variant.(*platformCompatConfig)
-	b.Metadata = module.metadataFile
+func (b *compatConfigSdkMemberProperties) PopulateFromVariant(ctx android.SdkMemberContext, variant android.ModuleProxy) {
+	b.Metadata = android.OtherModuleProviderOrDefault(ctx.SdkModuleContext(), variant, PlatformCompatConfigInfoProvider).CompatConfigMetadata
 }
 
 func (b *compatConfigSdkMemberProperties) AddToPropertySet(ctx android.SdkMemberContext, propertySet android.BpPropertySet) {
@@ -252,9 +247,10 @@ var _ platformCompatConfigMetadataProvider = (*prebuiltCompatConfigModule)(nil)
 func (module *prebuiltCompatConfigModule) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	module.metadataFile = module.prebuilt.SingleSourcePath(ctx)
 
-	android.SetProvider(ctx, PlatformCompatConfigMetadataInfoProvider, PlatformCompatConfigMetadataInfo{
+	android.SetProvider(ctx, PlatformCompatConfigInfoProvider, PlatformCompatConfigInfo{
 		CompatConfigMetadata: module.compatConfigMetadata(),
 		IncludeInMergedXml:   module.includeInMergedXml(),
+		Prebuilt:             true,
 	})
 }
 
@@ -280,7 +276,7 @@ func (p *platformCompatConfigSingleton) GenerateBuildActions(ctx android.Singlet
 		if !android.OtherModulePointerProviderOrDefault(ctx, module, android.CommonModuleInfoProvider).Enabled {
 			return
 		}
-		if c, ok := android.OtherModuleProvider(ctx, module, PlatformCompatConfigMetadataInfoProvider); ok {
+		if c, ok := android.OtherModuleProvider(ctx, module, PlatformCompatConfigInfoProvider); ok {
 			if !android.IsModulePreferredProxy(ctx, module) {
 				return
 			}

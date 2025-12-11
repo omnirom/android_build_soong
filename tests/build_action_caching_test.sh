@@ -15,7 +15,7 @@ function cleanup {
 trap cleanup EXIT
 
 function run_soong_build {
-  USE_RBE=false TARGET_PRODUCT=aosp_arm TARGET_RELEASE=trunk_staging TARGET_BUILD_VARIANT=userdebug build/soong/soong_ui.bash --make-mode "$@" nothing
+  USE_RBE=false TARGET_PRODUCT=aosp_cf_x86_64_only_phone TARGET_RELEASE=trunk_staging TARGET_BUILD_VARIANT=eng build/soong/soong_ui.bash --make-mode "$@" nothing
 }
 
 function run_soong_clean {
@@ -30,23 +30,8 @@ function assert_files_equal {
 
   if ! cmp -s "$1" "$2"; then
     echo "Files are different: $1 $2"
+    diff -u "$1" "$2"
     exit 1
-  fi
-}
-
-function compare_mtimes() {
-  if [ $# -ne 2 ]; then
-    echo "Usage: compare_mtimes file1 file2"
-    exit 1
-  fi
-
-  file1_mtime=$(stat -c '%Y' $1)
-  file2_mtime=$(stat -c '%Y' $2)
-
-  if [ "$file1_mtime" -eq "$file2_mtime" ]; then
-      return 1
-  else
-      return 0
   fi
 }
 
@@ -64,7 +49,7 @@ EOF
   run_soong_build --incremental-build-actions
   local dir_before="${test_dir}/before"
   mkdir -p ${dir_before}
-  cp -pr out/soong/build_aosp_arm_ninja_incremental out/soong/*.mk out/soong/build.aosp_arm*.ninja ${test_dir}/before
+  cp -pr out/soong/*.mk out/soong/build.aosp_cf_x86_64*.ninja ${test_dir}/before
   # add a comment to the bp file, this should force a new analysis but no module
   # should be really impacted, so all the incremental modules should be skipped.
   cat >> ${test_dir}/Android.bp <<'EOF'
@@ -73,9 +58,9 @@ EOF
   run_soong_build --incremental-build-actions
   local dir_after="${test_dir}/after"
   mkdir -p ${dir_after}
-  cp -pr out/soong/build_aosp_arm_ninja_incremental out/soong/*.mk out/soong/build.aosp_arm*.ninja ${test_dir}/after
+  cp -pr out/soong/*.mk out/soong/build.aosp_cf_x86_64*.ninja ${test_dir}/after
 
-  compare_incremental_files $dir_before $dir_after
+  compare_files_parity $dir_before $dir_after
   rm -rf "$test_dir"
   echo "test_build_action_restoring test passed"
 }
@@ -86,104 +71,64 @@ function test_incremental_build_parity() {
   run_soong_build
   local dir_before="${test_dir}/before"
   mkdir -p ${dir_before}
-  cp -pr out/soong/*.mk out/soong/build.aosp_arm*.ninja ${test_dir}/before
+  cp -pr out/soong/*.mk out/soong/build.aosp_cf_x86_64*.ninja ${test_dir}/before
 
   # Now run clean build with incremental enabled
   run_soong_clean
   run_soong_build --incremental-build-actions
   local dir_after="${test_dir}/after"
   mkdir -p ${dir_after}
-  cp -pr out/soong/build_aosp_arm_ninja_incremental out/soong/*.mk out/soong/build.aosp_arm*.ninja ${test_dir}/after
+  cp -pr out/soong/*.mk out/soong/build.aosp_cf_x86_64*.ninja ${test_dir}/after
 
-  compare_files_parity $dir_before $dir_after
+  compare_incremental_files $dir_before $dir_after
   rm -rf "$test_dir"
   echo "test_incremental_build_parity test passed"
-}
-
-function compare_files_parity() {
-  local dir_before=$1; shift
-  local dir_after=$1; shift
-  count=0
-  for file_before in ${dir_before}/*.mk; do
-    file_after="${dir_after}/$(basename "$file_before")"
-    assert_files_equal $file_before $file_after
-    ((count++))
-  done
-  echo "Compared $count mk files"
-
-  combined_before_file="${dir_before}/combined_files.ninja"
-  count=0
-  for file in ${dir_before}/build.aosp_arm.*.ninja; do
-    cat $file >> $combined_before_file
-    ((count++))
-  done
-  echo "Combined $count ninja files from normal build"
-
-  combined_after_file="${dir_after}/combined_files.ninja"
-  count=0
-  for file in ${dir_after}/build.aosp_arm.*.ninja; do
-    cat $file >> $combined_after_file
-    ((count++))
-  done
-  echo "Combined $count ninja files from incremental build"
-
-  combined_incremental_ninjas="${dir_after}/combined_incremental_files.ninja"
-  count=0
-  for file in ${dir_after}/build_aosp_arm_ninja_incremental/*.ninja; do
-    cat $file >> $combined_incremental_ninjas
-    ((count++))
-  done
-  echo "Combined $count incremental ninja files"
-
-  cat $combined_incremental_ninjas >> $combined_after_file
-  sort $combined_after_file -o $combined_after_file
-  sort $combined_before_file -o $combined_before_file
-  assert_files_equal $combined_before_file $combined_after_file
 }
 
 function compare_incremental_files() {
   local dir_before=$1; shift
   local dir_after=$1; shift
   count=0
-  for file_before in ${dir_before}/*.ninja; do
-    file_after="${dir_after}/$(basename "$file_before")"
-    assert_files_equal $file_before $file_after
-    compare_mtimes $file_before $file_after
-    if [ $? -ne 0 ]; then
-      echo "Files have identical mtime: $file_before $file_after"
-      exit 1
-    fi
-    ((count++))
-  done
-  echo "Compared $count ninja files"
-
-  count=0
   for file_before in ${dir_before}/*.mk; do
     file_after="${dir_after}/$(basename "$file_before")"
     assert_files_equal $file_before $file_after
-    compare_mtimes $file_before $file_after
-    # mk files shouldn't be regenerated
-    if [ $? -ne 1 ]; then
-      echo "Files have different mtimes: $file_before $file_after"
-      exit 1
-    fi
     ((count++))
   done
   echo "Compared $count mk files"
 
   count=0
-  for file_before in ${dir_before}/build_aosp_arm_ninja_incremental/*.ninja; do
-    file_after="${dir_after}/build_aosp_arm_ninja_incremental/$(basename "$file_before")"
-    assert_files_equal $file_before $file_after
-    compare_mtimes $file_before $file_after
-    # ninja files of skipped modules shouldn't be regenerated
-    if [ $? -ne 1 ]; then
-      echo "Files have different mtimes: $file_before $file_after"
-      exit 1
+  for file_before in ${dir_before}/*.ninja; do
+    basename=$(basename "$file_before")
+    file_after="${dir_after}/${basename}"
+    # The after file should be a superset of the before one.
+    if [[ "$basename" == "build.aosp_cf_x86_64_only_phone.ninja" ]]; then
+      echo "Performing superset check for $basename..."
+      extra_lines=$(comm -23 <(sort "$file_before") <(sort "$file_after"))
+      if [[ -n "$extra_lines" ]]; then
+        # If there are extra lines, print an error and the differing lines, then exit.
+        echo "ERROR: $file_after is NOT a superset of $file_before."
+        echo "The following lines were in the 'before' file but not the 'after' file:"
+        echo "$extra_lines"
+        exit 1
+      fi
+    else
+      assert_files_equal $file_before $file_after
     fi
     ((count++))
   done
-  echo "Compared $count incremental ninja files"
+  echo "Compared $count ninja files"
+}
+
+function compare_files_parity() {
+  local dir_before=$1; shift
+  local dir_after=$1; shift
+  count=0
+  for file_before in ${dir_before}/*.*; do
+    file_after="${dir_after}/$(basename "$file_before")"
+    assert_files_equal $file_before $file_after
+    ((count++))
+  done
+  echo "Compared $count ninja files"
 }
 
 test_incremental_build_parity

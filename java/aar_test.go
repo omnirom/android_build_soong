@@ -131,7 +131,7 @@ func TestLibraryFlagsPackages(t *testing.T) {
 	android.AssertStringDoesContain(t,
 		"aapt2 link command expected to pass feature flags arguments",
 		linkInFlags,
-		"--feature-flags @out/soong/.intermediates/bar/intermediate.txt --feature-flags @out/soong/.intermediates/baz/intermediate.txt",
+		"--feature-flags @out/soong/.intermediates/bar/aconfig-flags.txt --feature-flags @out/soong/.intermediates/baz/aconfig-flags.txt",
 	)
 }
 
@@ -180,4 +180,30 @@ func TestAndroidLibraryOutputFilesRel(t *testing.T) {
 		"bar.jar", barOutputPaths[0].Rel())
 	android.AssertStringEquals(t, "baz relative output path",
 		"baz.jar", bazOutputPaths[0].Rel())
+}
+
+func TestAndroidLibraryManifests(t *testing.T) {
+	t.Parallel()
+	result := android.GroupFixturePreparers(
+		PrepareForTestWithJavaDefaultModules,
+	).RunTestWithBp(t, `
+		android_library {
+			name: "foo",
+			package_name: "com.android.foo",
+			java_resources: ["foo.txt"],
+		}
+	`)
+
+	foo := result.ModuleForTests(t, "foo", "android_common")
+
+	fooOutputPaths := foo.OutputFiles(result.TestContext, t, "")
+
+	android.AssertPathsRelativeToTopEquals(t, "foo manifest path",
+		[]string{"out/soong/.intermediates/foo/android_common/GeneratedManifest.xml"},
+		foo.OutputFiles(result.TestContext, t, ".gen_xml"))
+	android.AssertPathsRelativeToTopEquals(t, "foo output path",
+		[]string{"out/soong/.intermediates/foo/android_common/withres/foo.jar"}, fooOutputPaths)
+
+	android.AssertStringEquals(t, "foo relative output path",
+		"foo.jar", fooOutputPaths[0].Rel())
 }

@@ -15,6 +15,8 @@
 package release_config_lib
 
 import (
+	"fmt"
+	"path/filepath"
 	"strings"
 
 	rc_proto "android/soong/cmd/release_config/release_config_proto"
@@ -28,12 +30,24 @@ type FlagValue struct {
 	proto rc_proto.FlagValue
 }
 
-func FlagValueFactory(protoPath string) (fv *FlagValue) {
+func FlagValueFactory(protoPath string) (fv *FlagValue, err error) {
 	fv = &FlagValue{path: protoPath}
-	if protoPath != "" {
-		LoadMessage(protoPath, &fv.proto)
+	if protoPath == "" {
+		return fv, nil
 	}
-	return fv
+	LoadMessage(protoPath, &fv.proto)
+
+	if fv.proto.Name == nil {
+		return nil, fmt.Errorf("%s does not set name", protoPath)
+	}
+	name := *fv.proto.Name
+	switch {
+	case name == "RELEASE_ACONFIG_VALUE_SETS":
+		return nil, fmt.Errorf("%s: %s is a reserved build flag", protoPath, name)
+	case fmt.Sprintf("%s.textproto", name) != filepath.Base(protoPath):
+		return nil, fmt.Errorf("%s incorrectly sets value for flag %s", protoPath, name)
+	}
+	return fv, nil
 }
 
 func UnmarshalValue(str string) *rc_proto.Value {

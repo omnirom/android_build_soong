@@ -20,8 +20,6 @@ import (
 	"testing"
 
 	"android/soong/android"
-
-	"github.com/google/blueprint"
 )
 
 func intPtr(v int) *int {
@@ -40,7 +38,7 @@ func TestPrebuiltApis_SystemModulesCreation(t *testing.T) {
 	).RunTest(t)
 
 	sdkSystemModules := []string{}
-	result.VisitAllModules(func(module blueprint.Module) {
+	result.VisitAllModules(func(module android.Module) {
 		name := android.RemoveOptionalPrebuiltPrefix(module.Name())
 		if strings.HasPrefix(name, "sdk_") && strings.HasSuffix(name, "_system_modules") {
 			sdkSystemModules = append(sdkSystemModules, name)

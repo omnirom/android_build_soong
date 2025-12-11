@@ -34,6 +34,8 @@ import (
 	"android/soong/remoteexec"
 )
 
+//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+
 const (
 	objectExtension        = ".o"
 	staticLibraryExtension = ".a"
@@ -43,7 +45,7 @@ var (
 	pctx = android.NewPackageContext("android/soong/cc")
 
 	// Rule to invoke gcc with given command, flags, and dependencies. Outputs a .d depfile.
-	cc = pctx.AndroidRemoteStaticRule("cc", android.RemoteRuleSupports{Goma: true, RBE: true},
+	cc = pctx.AndroidRemoteStaticRule("cc", android.RemoteRuleSupports{RBE: true},
 		blueprint.RuleParams{
 			Depfile:     "${out}.d",
 			Deps:        blueprint.DepsGCC,
@@ -304,8 +306,10 @@ var (
 	sAbiDiff = pctx.RuleFunc("sAbiDiff",
 		func(ctx android.PackageRuleContext) blueprint.RuleParams {
 			commandStr := "($sAbiDiffer ${extraFlags} -lib ${libName} -arch ${arch} -o ${out} -new ${in} -old ${referenceDump})"
-			commandStr += "|| (echo '${errorMessage}'"
-			commandStr += " && (mkdir -p $$DIST_DIR/abidiffs && cp ${out} $$DIST_DIR/abidiffs/)"
+			commandStr += "|| (echo 'First 50 lines of abidiff:'"
+			commandStr += " && head -n 50 ${out}"
+			commandStr += " && echo '${errorMessage}'"
+			commandStr += " && (test -n \"$$DIST_DIR\" && mkdir -p $$DIST_DIR/abidiffs && cp ${out} ${in} $$DIST_DIR/abidiffs/)"
 			commandStr += " && exit 1)"
 			return blueprint.RuleParams{
 				Command:     commandStr,
@@ -345,6 +349,13 @@ var (
 		},
 		"cFlags")
 
+	// Rule to generate the elf mapping textproto file from the symbols file.
+	elfSymbolsToProto = pctx.AndroidStaticRule("elf_symbols_to_proto", blueprint.RuleParams{
+		Command:     `${symbols_map} -elf $in -write_if_changed $out`,
+		Restat:      true,
+		CommandDeps: []string{"${symbols_map}"},
+	})
+
 	// Function pointer for producting staticlibs from rlibs. Corresponds to
 	// rust.TransformRlibstoStaticlib(), initialized in soong-rust (rust/builder.go init())
 	//
@@ -370,6 +381,10 @@ func init() {
 	pctx.StaticVariable("relPwd", PwdPrefix())
 
 	pctx.HostBinToolVariable("SoongZipCmd", "soong_zip")
+
+	pctx.HostBinToolVariable("symbols_map", "symbols_map")
+
+	pctx.HostBinToolVariable("checkElfFileCmd", "check_elf_file")
 }
 
 // builderFlags contains various types of command line flags (and settings) for use in building
@@ -440,13 +455,35 @@ type StripFlags struct {
 }
 
 // Objects is a collection of file paths corresponding to outputs for C++ related build statements.
+// @auto-generate: gob
 type Objects struct {
 	objFiles      android.Paths
 	tidyFiles     android.Paths
 	tidyDepFiles  android.Paths // link dependent .tidy files
 	coverageFiles android.Paths
 	sAbiDumpFiles android.Paths
-	kytheFiles    android.Paths
+	kytheFiles    KytheFilePairs
+}
+
+// @auto-generate: gob
+type KytheFilePair struct {
+	SrcFile  android.Path
+	KzipFile android.Path
+}
+
+type KytheFilePairs []KytheFilePair
+
+// Dedups by srcfile
+func (kf KytheFilePairs) dedup() KytheFilePairs {
+	var ret KytheFilePairs
+	seen := make(map[android.Path]bool)
+	for _, pair := range kf {
+		if _, exists := seen[pair.SrcFile]; !exists {
+			ret = append(ret, pair)
+			seen[pair.SrcFile] = true
+		}
+	}
+	return ret
 }
 
 func (a Objects) Copy() Objects {
@@ -456,7 +493,7 @@ func (a Objects) Copy() Objects {
 		tidyDepFiles:  append(android.Paths{}, a.tidyDepFiles...),
 		coverageFiles: append(android.Paths{}, a.coverageFiles...),
 		sAbiDumpFiles: append(android.Paths{}, a.sAbiDumpFiles...),
-		kytheFiles:    append(android.Paths{}, a.kytheFiles...),
+		kytheFiles:    append(KytheFilePairs{}, a.kytheFiles...),
 	}
 }
 
@@ -469,6 +506,24 @@ func (a Objects) Append(b Objects) Objects {
 		sAbiDumpFiles: append(a.sAbiDumpFiles, b.sAbiDumpFiles...),
 		kytheFiles:    append(a.kytheFiles, b.kytheFiles...),
 	}
+}
+
+func (a Objects) Dedup() Objects {
+	return Objects{
+		objFiles:      android.FirstUniquePaths(a.objFiles),
+		tidyFiles:     android.FirstUniquePaths(a.tidyFiles),
+		tidyDepFiles:  android.FirstUniquePaths(a.tidyDepFiles),
+		coverageFiles: android.FirstUniquePaths(a.coverageFiles),
+		sAbiDumpFiles: android.FirstUniquePaths(a.sAbiDumpFiles),
+		kytheFiles:    a.dedupKytheFiles(a.kytheFiles),
+	}
+}
+
+func (a Objects) dedupKytheFiles(kf KytheFilePairs) KytheFilePairs {
+	if kf == nil {
+		return nil
+	}
+	return kf.dedup()
 }
 
 // Generate rules for compiling multiple .c, .cpp, or .S files to individual .o files
@@ -507,9 +562,19 @@ func transformSourceToObj(ctx android.ModuleContext, subdir string, srcFiles, no
 	if flags.gcovCoverage {
 		coverageFiles = make(android.Paths, 0, len(srcObjFiles))
 	}
-	var kytheFiles android.Paths
-	if flags.emitXrefs && ctx.Module() == ctx.PrimaryModule() {
-		kytheFiles = make(android.Paths, 0, len(srcObjFiles))
+	var kytheFiles KytheFilePairs
+	if flags.emitXrefs {
+		kytheFiles = make(KytheFilePairs, 0, len(srcObjFiles))
+	}
+
+	// flags.localCommonFlags includes all of the include directories, which can too long and push the command
+	// line length over MAX_ARG_STRLEN (128 kB).  Move them to an rsp file when they are over 64 kB.
+	localCommonFlags := flags.localCommonFlags
+	if len(localCommonFlags) > 64*1024 {
+		localCommonFlagsFile := android.PathForModuleOut(ctx, subdir, "flags.txt")
+		android.WriteFileRule(ctx, localCommonFlagsFile, localCommonFlags)
+		localCommonFlags = "@" + localCommonFlagsFile.String()
+		cFlagsDeps = append(cFlagsDeps, localCommonFlagsFile)
 	}
 
 	// Produce fully expanded flags for use by C tools, C compiles, C++ tools, C++ compiles, and asm compiles
@@ -517,7 +582,7 @@ func transformSourceToObj(ctx android.ModuleContext, subdir string, srcFiles, no
 	toolingCflags := flags.globalCommonFlags + " " +
 		flags.globalToolingCFlags + " " +
 		flags.globalConlyFlags + " " +
-		flags.localCommonFlags + " " +
+		localCommonFlags + " " +
 		flags.localToolingCFlags + " " +
 		flags.localConlyFlags + " " +
 		flags.systemIncludeFlags + " " +
@@ -526,7 +591,7 @@ func transformSourceToObj(ctx android.ModuleContext, subdir string, srcFiles, no
 	cflags := flags.globalCommonFlags + " " +
 		flags.globalCFlags + " " +
 		flags.globalConlyFlags + " " +
-		flags.localCommonFlags + " " +
+		localCommonFlags + " " +
 		flags.localCFlags + " " +
 		flags.localConlyFlags + " " +
 		flags.systemIncludeFlags + " " +
@@ -535,7 +600,7 @@ func transformSourceToObj(ctx android.ModuleContext, subdir string, srcFiles, no
 	toolingCppflags := flags.globalCommonFlags + " " +
 		flags.globalToolingCFlags + " " +
 		flags.globalToolingCppFlags + " " +
-		flags.localCommonFlags + " " +
+		localCommonFlags + " " +
 		flags.localToolingCFlags + " " +
 		flags.localToolingCppFlags + " " +
 		flags.systemIncludeFlags + " " +
@@ -544,7 +609,7 @@ func transformSourceToObj(ctx android.ModuleContext, subdir string, srcFiles, no
 	cppflags := flags.globalCommonFlags + " " +
 		flags.globalCFlags + " " +
 		flags.globalCppFlags + " " +
-		flags.localCommonFlags + " " +
+		localCommonFlags + " " +
 		flags.localCFlags + " " +
 		flags.localCppFlags + " " +
 		flags.systemIncludeFlags + " " +
@@ -552,7 +617,7 @@ func transformSourceToObj(ctx android.ModuleContext, subdir string, srcFiles, no
 
 	asflags := flags.globalCommonFlags + " " +
 		flags.globalAsFlags + " " +
-		flags.localCommonFlags + " " +
+		localCommonFlags + " " +
 		flags.localAsFlags + " " +
 		flags.systemIncludeFlags
 
@@ -685,7 +750,7 @@ func transformSourceToObj(ctx android.ModuleContext, subdir string, srcFiles, no
 		})
 
 		// Register post-process build statements (such as for tidy or kythe).
-		if emitXref && ctx.Module() == ctx.PrimaryModule() {
+		if emitXref {
 			kytheFile := android.ObjPathWithExt(ctx, subdir, srcFile, "kzip")
 			ctx.Build(pctx, android.BuildParams{
 				Rule:        kytheExtract,
@@ -698,7 +763,7 @@ func transformSourceToObj(ctx android.ModuleContext, subdir string, srcFiles, no
 					"cFlags": shareFlags("cFlags", moduleFlags),
 				},
 			})
-			kytheFiles = append(kytheFiles, kytheFile)
+			kytheFiles = append(kytheFiles, KytheFilePair{SrcFile: srcFile, KzipFile: kytheFile})
 		}
 
 		//  Even with tidy, some src file could be skipped by noTidySrcsMap.
@@ -708,7 +773,7 @@ func transformSourceToObj(ctx android.ModuleContext, subdir string, srcFiles, no
 			tidyCmd := "${config.ClangBin}/clang-tidy"
 
 			rule := clangTidy
-			if ctx.Config().UseRBE() && ctx.Config().IsEnvTrue("RBE_CLANG_TIDY") {
+			if ctx.Config().UseREWrapper() && ctx.Config().IsEnvTrue("RBE_CLANG_TIDY") {
 				rule = clangTidyRE
 			}
 
@@ -739,7 +804,7 @@ func transformSourceToObj(ctx android.ModuleContext, subdir string, srcFiles, no
 			sAbiDumpFiles = append(sAbiDumpFiles, sAbiDumpFile)
 
 			dumpRule := sAbiDump
-			if ctx.Config().UseRBE() && ctx.Config().IsEnvTrue("RBE_ABI_DUMPER") {
+			if ctx.Config().UseREWrapper() && ctx.Config().IsEnvTrue("RBE_ABI_DUMPER") {
 				dumpRule = sAbiDumpRE
 			}
 			ctx.Build(pctx, android.BuildParams{
@@ -950,7 +1015,7 @@ func transformObjToDynamicBinary(ctx android.ModuleContext,
 		implicitOutputs = append(slices.Clone(implicitOutputs), pdb)
 	}
 
-	if ctx.Config().UseRBE() && ctx.Config().IsEnvTrue("RBE_CXX_LINKS") {
+	if ctx.Config().UseREWrapper() && ctx.Config().IsEnvTrue("RBE_CXX_LINKS") {
 		rule = ldRE
 		args["implicitOutputs"] = strings.Join(implicitOutputs.Strings(), ",")
 		args["implicitInputs"] = strings.Join(deps.Strings(), ",")
@@ -1011,7 +1076,7 @@ func transformDumpToLinkedDump(ctx android.ModuleContext, sAbiDumps android.Path
 		"arch":                ctx.Arch().ArchType.Name,
 		"exportedHeaderFlags": exportedHeaderFlags,
 	}
-	if ctx.Config().UseRBE() && ctx.Config().IsEnvTrue("RBE_ABI_LINKER") {
+	if ctx.Config().UseREWrapper() && ctx.Config().IsEnvTrue("RBE_ABI_LINKER") {
 		rule = sAbiLinkRE
 		rbeImplicits := append(implicits.Strings(), exportedIncludeDirs...)
 		args["implicitInputs"] = strings.Join(rbeImplicits, ",")
@@ -1090,7 +1155,7 @@ func transformObjsToObj(ctx android.ModuleContext, objFiles android.Paths,
 		"ldCmd":   ldCmd,
 		"ldFlags": flags.globalLdFlags + " " + flags.localLdFlags,
 	}
-	if ctx.Config().UseRBE() && ctx.Config().IsEnvTrue("RBE_CXX_LINKS") {
+	if ctx.Config().UseREWrapper() && ctx.Config().IsEnvTrue("RBE_CXX_LINKS") {
 		rule = partialLdRE
 		args["inCommaList"] = strings.Join(objFiles.Strings(), ",")
 		args["implicitInputs"] = strings.Join(deps.Strings(), ",")

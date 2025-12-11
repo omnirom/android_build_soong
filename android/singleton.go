@@ -15,7 +15,9 @@
 package android
 
 import (
+	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/google/blueprint"
@@ -28,19 +30,36 @@ type SingletonContext interface {
 	Config() Config
 	DeviceConfig() DeviceConfig
 
-	ModuleName(module blueprint.Module) string
-	ModuleDir(module blueprint.Module) string
-	ModuleSubDir(module blueprint.Module) string
-	ModuleType(module blueprint.Module) string
-	BlueprintFile(module blueprint.Module) string
+	ModuleName(module ModuleOrProxy) string
+	ModuleDir(module ModuleOrProxy) string
+	ModuleSubDir(module ModuleOrProxy) string
+	ModuleType(module ModuleOrProxy) string
+	BlueprintFile(module ModuleOrProxy) string
 
 	// ModuleVariantsFromName returns the list of module variants named `name` in the same namespace as `referer` enforcing visibility rules.
 	// Allows generating build actions for `referer` based on the metadata for `name` deferred until the singleton context.
 	ModuleVariantsFromName(referer ModuleProxy, name string) []ModuleProxy
 
-	otherModuleProvider(module blueprint.Module, provider blueprint.AnyProviderKey) (any, bool)
+	otherModuleProvider(module ModuleOrProxy, provider blueprint.AnyProviderKey) (any, bool)
 
-	ModuleErrorf(module blueprint.Module, format string, args ...interface{})
+	// setSingletonProvider sets the value for a provider for the current singleton.
+	// It panics if not called during the appropriate GenerateBuildActions pass for
+	// the provider, if the provider is not registered as a singleton provider, if the value
+	// is not of the appropriate type, or if the value has already been set. The value should not
+	// be modified after being passed to setSingletonProvider.
+	//
+	// This method shouldn't be used directly, prefer the type-safe android.SetProvider instead.
+	setSingletonProvider(provider blueprint.AnyProviderKey, value any)
+
+	// otherSingletonProvider returns the value, if any, for the provider for a singleton. If the value for the
+	// provider was not set it returns the zero value of the type of the provider, which means the
+	// return value can always be type-asserted to the type of the provider. The return value should
+	// always be considered read-only. It panics if called before the appropriate
+	// GenerateBuildActions completes for the provider on the singleton, or if the provider is not
+	// registered as a singleton provider.
+	otherSingletonProvider(singleton blueprint.SingletonProxy, provider blueprint.AnyProviderKey) (any, bool)
+
+	ModuleErrorf(module ModuleOrProxy, format string, args ...interface{})
 	Errorf(format string, args ...interface{})
 	Failed() bool
 
@@ -69,25 +88,25 @@ type SingletonContext interface {
 	VisitAllModules(visit func(Module))
 	VisitAllModuleProxies(visit func(proxy ModuleProxy))
 	VisitAllModulesIf(pred func(Module) bool, visit func(Module))
+	VisitAllModulesOrProxies(visit func(ModuleOrProxy))
 
 	VisitDirectDeps(module Module, visit func(Module))
 	VisitDirectDepsIf(module Module, pred func(Module) bool, visit func(Module))
 
-	// Deprecated: use WalkDeps instead to support multiple dependency tags on the same module
-	VisitDepsDepthFirst(module Module, visit func(Module))
-	// Deprecated: use WalkDeps instead to support multiple dependency tags on the same module
-	VisitDepsDepthFirstIf(module Module, pred func(Module) bool,
-		visit func(Module))
+	VisitDirectDepsProxies(module ModuleProxy, visit func(ModuleProxy))
 
 	VisitAllModuleVariants(module Module, visit func(Module))
 
-	VisitAllModuleVariantProxies(module Module, visit func(proxy ModuleProxy))
+	VisitAllModuleVariantProxies(module ModuleProxy, visit func(proxy ModuleProxy))
+
+	VisitAllSingletons(visit func(singleton blueprint.SingletonProxy))
 
 	PrimaryModule(module Module) Module
 
 	PrimaryModuleProxy(module ModuleProxy) ModuleProxy
 
-	IsFinalModule(module Module) bool
+	IsPrimaryModule(module ModuleOrProxy) bool
+	IsFinalModule(module ModuleOrProxy) bool
 
 	AddNinjaFileDeps(deps ...string)
 
@@ -98,7 +117,7 @@ type SingletonContext interface {
 	GlobWithDeps(pattern string, excludes []string) ([]string, error)
 
 	// OtherModulePropertyErrorf reports an error on the line number of the given property of the given module
-	OtherModulePropertyErrorf(module Module, property string, format string, args ...interface{})
+	OtherModulePropertyErrorf(module ModuleOrProxy, property string, format string, args ...interface{})
 
 	// HasMutatorFinished returns true if the given mutator has finished running.
 	// It will panic if given an invalid mutator name.
@@ -113,6 +132,11 @@ type SingletonContext interface {
 	// goal is built.
 	DistForGoalWithFilename(goal string, path Path, filename string)
 
+	// DistForGoalWithFilenameTag creates a rule to copy a Path to the artifacts
+	// directory on the build server with the given filename appended with the
+	// `-FILE_NAME_TAG_PLACEHOLDER` suffix when the specified goal is built.
+	DistForGoalWithFilenameTag(goal string, path Path, filename string)
+
 	// DistForGoals creates a rule to copy one or more Paths to the artifacts
 	// directory on the build server when any of the specified goals are built.
 	DistForGoals(goals []string, paths ...Path)
@@ -121,6 +145,16 @@ type SingletonContext interface {
 	// directory on the build server with the given filename when any of the
 	// specified goals are built.
 	DistForGoalsWithFilename(goals []string, path Path, filename string)
+
+	// OtherModuleDependencyTag returns the dependency tag used to depend on a module, or nil if there is no dependency
+	// on the module.  When called inside a Visit* method with current module being visited, and there are multiple
+	// dependencies on the module being visited, it returns the dependency tag used for the current dependency.
+	OtherModuleDependencyTag(module ModuleOrProxy) blueprint.DependencyTag
+
+	GetIncrementalAnalysis() bool
+
+	// OtherModuleNamespace returns the namespace of the module.
+	OtherModuleNamespace(module ModuleOrProxy) *Namespace
 }
 
 type singletonAdaptor struct {
@@ -131,9 +165,20 @@ type singletonAdaptor struct {
 }
 
 var _ testBuildProvider = (*singletonAdaptor)(nil)
+var _ blueprint.Singleton = (*singletonAdaptor)(nil)
+
+func (s *singletonAdaptor) IncrementalSupported() bool {
+	if im, ok := s.Singleton.(blueprint.Incremental); ok {
+		return im.IncrementalSupported()
+	}
+	return false
+}
 
 func (s *singletonAdaptor) GenerateBuildActions(ctx blueprint.SingletonContext) {
-	sctx := &singletonContextAdaptor{SingletonContext: ctx}
+	sctx := &singletonContextAdaptor{
+		SingletonContext: ctx,
+		phonies:          make(phonyMap),
+	}
 	if sctx.Config().captureBuild {
 		sctx.ruleParams = make(map[blueprint.Rule]blueprint.RuleParams)
 	}
@@ -148,6 +193,10 @@ func (s *singletonAdaptor) GenerateBuildActions(ctx blueprint.SingletonContext) 
 		dists.lock.Lock()
 		defer dists.lock.Unlock()
 		dists.dists = append(dists.dists, sctx.dists...)
+	}
+
+	if len(sctx.phonies) > 0 {
+		SetSingletonProvider(sctx, SingletonPhonyProvider, PhonyInfo{sctx.phonies})
 	}
 }
 
@@ -182,6 +231,7 @@ type singletonContextAdaptor struct {
 	buildParams []BuildParams
 	ruleParams  map[blueprint.Rule]blueprint.RuleParams
 	dists       []dist
+	phonies     phonyMap
 }
 
 func (s *singletonContextAdaptor) blueprintSingletonContext() blueprint.SingletonContext {
@@ -203,8 +253,8 @@ func (s *singletonContextAdaptor) Variable(pctx PackageContext, name, value stri
 func (s *singletonContextAdaptor) Rule(pctx PackageContext, name string, params blueprint.RuleParams, argNames ...string) blueprint.Rule {
 	if s.Config().UseRemoteBuild() {
 		if params.Pool == nil {
-			// When USE_GOMA=true or USE_RBE=true are set and the rule is not supported by goma/RBE, restrict
-			// jobs to the local parallelism value
+			// When USE_REWRAPPER=true is set and the rule is not supported by RBE,
+			// restrict jobs to the local parallelism value
 			params.Pool = localPool
 		} else if params.Pool == remotePool {
 			// remotePool is a fake pool used to identify rule that are supported for remoting. If the rule's
@@ -229,7 +279,7 @@ func (s *singletonContextAdaptor) Build(pctx PackageContext, params BuildParams)
 }
 
 func (s *singletonContextAdaptor) Phony(name string, deps ...Path) {
-	addSingletonPhony(s.Config(), name, deps...)
+	s.phonies[name] = append(s.phonies[name], deps...)
 }
 
 func (s *singletonContextAdaptor) SetOutDir(pctx PackageContext, value string) {
@@ -238,6 +288,10 @@ func (s *singletonContextAdaptor) SetOutDir(pctx PackageContext, value string) {
 
 func (s *singletonContextAdaptor) Eval(pctx PackageContext, ninjaStr string) (string, error) {
 	return s.SingletonContext.Eval(pctx.PackageContext, ninjaStr)
+}
+
+func (s *singletonContextAdaptor) ModuleErrorf(module ModuleOrProxy, fmt string, args ...any) {
+	s.SingletonContext.ModuleErrorf(module, fmt, args...)
 }
 
 // visitAdaptor wraps a visit function that takes an android.Module parameter into
@@ -255,9 +309,7 @@ func visitAdaptor(visit func(Module)) func(blueprint.Module) {
 // a function that takes a blueprint.ModuleProxy parameter.
 func visitProxyAdaptor(visit func(proxy ModuleProxy)) func(proxy blueprint.ModuleProxy) {
 	return func(module blueprint.ModuleProxy) {
-		visit(ModuleProxy{
-			module: module,
-		})
+		visit(ModuleProxy{module})
 	}
 }
 
@@ -274,24 +326,24 @@ func predAdaptor(pred func(Module) bool) func(blueprint.Module) bool {
 	}
 }
 
-func (s *singletonContextAdaptor) ModuleName(module blueprint.Module) string {
-	return s.SingletonContext.ModuleName(getWrappedModule(module))
+func (s *singletonContextAdaptor) ModuleName(module ModuleOrProxy) string {
+	return s.SingletonContext.ModuleName(module)
 }
 
-func (s *singletonContextAdaptor) ModuleDir(module blueprint.Module) string {
-	return s.SingletonContext.ModuleDir(getWrappedModule(module))
+func (s *singletonContextAdaptor) ModuleDir(module ModuleOrProxy) string {
+	return s.SingletonContext.ModuleDir(module)
 }
 
-func (s *singletonContextAdaptor) ModuleSubDir(module blueprint.Module) string {
-	return s.SingletonContext.ModuleSubDir(getWrappedModule(module))
+func (s *singletonContextAdaptor) ModuleSubDir(module ModuleOrProxy) string {
+	return s.SingletonContext.ModuleSubDir(module)
 }
 
-func (s *singletonContextAdaptor) ModuleType(module blueprint.Module) string {
-	return s.SingletonContext.ModuleType(getWrappedModule(module))
+func (s *singletonContextAdaptor) ModuleType(module ModuleOrProxy) string {
+	return s.SingletonContext.ModuleType(module)
 }
 
-func (s *singletonContextAdaptor) BlueprintFile(module blueprint.Module) string {
-	return s.SingletonContext.BlueprintFile(getWrappedModule(module))
+func (s *singletonContextAdaptor) BlueprintFile(module ModuleOrProxy) string {
+	return s.SingletonContext.BlueprintFile(module)
 }
 
 func (s *singletonContextAdaptor) VisitAllModulesBlueprint(visit func(blueprint.Module)) {
@@ -306,6 +358,12 @@ func (s *singletonContextAdaptor) VisitAllModuleProxies(visit func(proxy ModuleP
 	s.SingletonContext.VisitAllModuleProxies(visitProxyAdaptor(visit))
 }
 
+func (s *singletonContextAdaptor) VisitAllModulesOrProxies(visit func(ModuleOrProxy)) {
+	s.SingletonContext.VisitAllModulesOrProxies(func(module blueprint.ModuleOrProxy) {
+		visit(module)
+	})
+}
+
 func (s *singletonContextAdaptor) VisitAllModulesIf(pred func(Module) bool, visit func(Module)) {
 	s.SingletonContext.VisitAllModulesIf(predAdaptor(pred), visitAdaptor(visit))
 }
@@ -318,20 +376,24 @@ func (s *singletonContextAdaptor) VisitDirectDepsIf(module Module, pred func(Mod
 	s.SingletonContext.VisitDirectDepsIf(module, predAdaptor(pred), visitAdaptor(visit))
 }
 
-func (s *singletonContextAdaptor) VisitDepsDepthFirst(module Module, visit func(Module)) {
-	s.SingletonContext.VisitDepsDepthFirst(module, visitAdaptor(visit))
+func (s *singletonContextAdaptor) VisitDirectDepsProxies(module ModuleProxy, visit func(ModuleProxy)) {
+	s.SingletonContext.VisitDirectDepsProxies(module.ModuleProxy, visitProxyAdaptor(visit))
 }
 
-func (s *singletonContextAdaptor) VisitDepsDepthFirstIf(module Module, pred func(Module) bool, visit func(Module)) {
-	s.SingletonContext.VisitDepsDepthFirstIf(module, predAdaptor(pred), visitAdaptor(visit))
+func (s *singletonContextAdaptor) OtherModuleDependencyTag(module ModuleOrProxy) blueprint.DependencyTag {
+	return s.SingletonContext.OtherModuleDependencyTag(module)
 }
 
 func (s *singletonContextAdaptor) VisitAllModuleVariants(module Module, visit func(Module)) {
 	s.SingletonContext.VisitAllModuleVariants(module, visitAdaptor(visit))
 }
 
-func (s *singletonContextAdaptor) VisitAllModuleVariantProxies(module Module, visit func(proxy ModuleProxy)) {
-	s.SingletonContext.VisitAllModuleVariantProxies(getWrappedModule(module), visitProxyAdaptor(visit))
+func (s *singletonContextAdaptor) VisitAllModuleVariantProxies(module ModuleProxy, visit func(proxy ModuleProxy)) {
+	s.SingletonContext.VisitAllModuleVariantProxies(module.ModuleProxy, visitProxyAdaptor(visit))
+}
+
+func (s *singletonContextAdaptor) VisitAllSingletons(visit func(singleton blueprint.SingletonProxy)) {
+	s.SingletonContext.VisitAllSingletons(visit)
 }
 
 func (s *singletonContextAdaptor) PrimaryModule(module Module) Module {
@@ -339,18 +401,22 @@ func (s *singletonContextAdaptor) PrimaryModule(module Module) Module {
 }
 
 func (s *singletonContextAdaptor) PrimaryModuleProxy(module ModuleProxy) ModuleProxy {
-	return ModuleProxy{s.SingletonContext.PrimaryModuleProxy(module.module)}
+	return ModuleProxy{s.SingletonContext.PrimaryModuleProxy(module.ModuleProxy)}
 }
 
-func (s *singletonContextAdaptor) IsFinalModule(module Module) bool {
-	return s.SingletonContext.IsFinalModule(getWrappedModule(module))
+func (s *singletonContextAdaptor) IsPrimaryModule(module ModuleOrProxy) bool {
+	return s.SingletonContext.IsPrimaryModule(module)
+}
+
+func (s *singletonContextAdaptor) IsFinalModule(module ModuleOrProxy) bool {
+	return s.SingletonContext.IsFinalModule(module)
 }
 
 func (s *singletonContextAdaptor) ModuleVariantsFromName(referer ModuleProxy, name string) []ModuleProxy {
 	// get module reference for visibility enforcement
 	qualified := createVisibilityModuleProxyReference(s, s.ModuleName(referer), s.ModuleDir(referer), referer)
 
-	modules := s.SingletonContext.ModuleVariantsFromName(referer.module, name)
+	modules := s.SingletonContext.ModuleVariantsFromName(referer.ModuleProxy, name)
 	result := make([]ModuleProxy, 0, len(modules))
 	for _, module := range modules {
 		// enforce visibility
@@ -371,11 +437,19 @@ func (s *singletonContextAdaptor) ModuleVariantsFromName(referer ModuleProxy, na
 	return result
 }
 
-func (s *singletonContextAdaptor) otherModuleProvider(module blueprint.Module, provider blueprint.AnyProviderKey) (any, bool) {
+func (s *singletonContextAdaptor) otherModuleProvider(module ModuleOrProxy, provider blueprint.AnyProviderKey) (any, bool) {
 	return s.SingletonContext.ModuleProvider(module, provider)
 }
 
-func (s *singletonContextAdaptor) OtherModulePropertyErrorf(module Module, property string, format string, args ...interface{}) {
+func (s *singletonContextAdaptor) setSingletonProvider(provider blueprint.AnyProviderKey, value any) {
+	s.SingletonContext.SetSingletonProvider(provider, value)
+}
+
+func (s *singletonContextAdaptor) otherSingletonProvider(singleton blueprint.SingletonProxy, provider blueprint.AnyProviderKey) (any, bool) {
+	return s.SingletonContext.OtherSingletonProvider(singleton, provider)
+}
+
+func (s *singletonContextAdaptor) OtherModulePropertyErrorf(module ModuleOrProxy, property string, format string, args ...interface{}) {
 	s.blueprintSingletonContext().OtherModulePropertyErrorf(module, property, format, args...)
 }
 
@@ -388,6 +462,15 @@ func (s *singletonContextAdaptor) DistForGoal(goal string, paths ...Path) {
 
 func (s *singletonContextAdaptor) DistForGoalWithFilename(goal string, path Path, filename string) {
 	s.DistForGoalsWithFilename([]string{goal}, path, filename)
+}
+
+func (s *singletonContextAdaptor) DistForGoalWithFilenameTag(goal string, path Path, filename string) {
+	insertBeforeExtension := func(file, insertion string) string {
+		ext := filepath.Ext(file)
+		return strings.TrimSuffix(file, ext) + insertion + ext
+	}
+
+	s.DistForGoalWithFilename(goal, path, insertBeforeExtension(filename, "-FILE_NAME_TAG_PLACEHOLDER"))
 }
 
 func (s *singletonContextAdaptor) DistForGoals(goals []string, paths ...Path) {
@@ -409,4 +492,25 @@ func (s *singletonContextAdaptor) DistForGoalsWithFilename(goals []string, path 
 		goals: slices.Clone(goals),
 		paths: distCopies{{from: path, dest: filename}},
 	})
+}
+
+func (s *singletonContextAdaptor) GetIncrementalAnalysis() bool {
+	return s.SingletonContext.GetIncrementalAnalysis()
+}
+
+func (s *singletonContextAdaptor) OtherModuleNamespace(module ModuleOrProxy) *Namespace {
+	return s.SingletonContext.OtherModuleNamespace(module).(*Namespace)
+}
+
+func SetSingletonProvider[K any](ctx SingletonContext, provider blueprint.ProviderKey[K], value K) {
+	ctx.setSingletonProvider(provider, value)
+}
+
+func OtherSingletonProvider[K any](ctx SingletonContext, singleton blueprint.SingletonProxy, provider blueprint.ProviderKey[K]) (K, bool) {
+	value, ok := ctx.otherSingletonProvider(singleton, provider)
+	if !ok {
+		var k K
+		return k, false
+	}
+	return value.(K), ok
 }

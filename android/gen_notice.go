@@ -71,10 +71,12 @@ func (s *genNoticeBuildRules) GenerateBuildActions(ctx SingletonContext) {
 		}
 		out(ctx, gm.Output, ctx.ModuleName(m),
 			proptools.StringDefault(gm.ArtifactName, defaultName),
-			[]string{
-				filepath.Join(ctx.Config().OutDir(), "target", "product", ctx.Config().DeviceName()) + "/",
-				ctx.Config().OutDir() + "/",
-				ctx.Config().SoongOutDir() + "/",
+			BuildNoticeFromLicenseDataArgs{
+				StripPrefix: []string{
+					filepath.Join(ctx.Config().OutDir(), "target", "product", ctx.Config().DeviceName()) + "/",
+					ctx.Config().OutDir() + "/",
+					ctx.Config().SoongOutDir() + "/",
+				},
 			}, modules...)
 	})
 }
@@ -233,12 +235,5 @@ func missingReferencesRule(ctx BuilderContext, m ModuleProxy, genInfo *GenNotice
 		panic(fmt.Errorf("missing references rule requested with no missing references"))
 	}
 
-	ctx.Build(pctx, BuildParams{
-		Rule:        ErrorRule,
-		Output:      genInfo.Output,
-		Description: "notice for " + proptools.StringDefault(genInfo.ArtifactName, "container"),
-		Args: map[string]string{
-			"error": m.Name() + " references missing module(s): " + strings.Join(genInfo.Missing, ", "),
-		},
-	})
+	ErrorRule(ctx, genInfo.Output, m.Name()+" references missing module(s): "+strings.Join(genInfo.Missing, ", "))
 }

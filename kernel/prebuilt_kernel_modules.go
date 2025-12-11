@@ -47,6 +47,17 @@ type prebuiltKernelModulesProperties struct {
 	// List or filegroup of prebuilt kernel module files. Should have .ko suffix.
 	Srcs []string `android:"path,arch_variant"`
 
+	// List of kernel module filenames that will be loaded via modules.load.
+	// Should have .ko suffix.
+	// If empty, this will default to filenames of Srcs.
+	// If no sources should be loaded, set `Load_by_default` to false instead.
+	Src_filenames_to_load []string `android:"path,arch_variant"`
+
+	// List or filegroup of prebuilt kernel module files for 16k. Should have .ko suffix.
+	// These files will be installed in lib/modules/16k-mode/
+	// These files are ONLY loaded during the Second Boot Stage when the device is in 16k mode.
+	Srcs_16k []string `android:"path,arch_variant"`
+
 	// List of system_dlkm kernel modules that the local kernel modules depend on.
 	// The deps will be assembled into intermediates directory for running depmod
 	// but will not be added to the current module's installed files.
@@ -114,57 +125,90 @@ func (pkm *prebuiltKernelModules) GenerateAndroidBuildActions(ctx android.Module
 	// installed in `vendor_ramdisk/first_stage_ramdisk`.
 	if pkm.InstallInVendorRamdisk() {
 		installDir = android.PathForModuleInPartitionInstall(ctx, "vendor_ramdisk", "lib", "modules")
+	} else if pkm.InstallInVendorKernelRamdisk() {
+		installDir = android.PathForModuleInPartitionInstall(ctx, "vendor_kernel_ramdisk", "lib", "modules")
 	}
 
 	if pkm.KernelVersion() != "" {
 		installDir = installDir.Join(ctx, pkm.KernelVersion())
 	}
 
+	dests := []string{}
 	for _, m := range modules {
-		ctx.InstallFile(installDir, filepath.Base(m.String()), m)
+		installPath := ctx.InstallFile(installDir, filepath.Base(m.String()), m)
+		dests = append(dests, installPath.String())
 	}
-	ctx.InstallFile(installDir, "modules.load", depmodOut.modulesLoad)
-	ctx.InstallFile(installDir, "modules.dep", depmodOut.modulesDep)
-	ctx.InstallFile(installDir, "modules.softdep", depmodOut.modulesSoftdep)
-	ctx.InstallFile(installDir, "modules.alias", depmodOut.modulesAlias)
-	pkm.installBlocklistFile(ctx, installDir)
-	pkm.installOptionsFile(ctx, installDir)
+	installDir16k := installDir.Join(ctx, "16k-mode")
+	for _, m := range android.PathsForModuleSrc(ctx, pkm.properties.Srcs_16k) {
+		installPath := ctx.InstallFile(installDir16k, filepath.Base(m.String()), m)
+		dests = append(dests, installPath.String())
+	}
+	srcs := android.PathsForModuleSrc(ctx, pkm.properties.Srcs).Strings()
+	srcs = append(srcs, android.PathsForModuleSrc(ctx, pkm.properties.Srcs_16k).Strings()...)
+	// Use ANDROID-GEN to identify the source of module.* files which are generated in the build process.
+	// See the use of ANDROID-GEN in build/make/core/Makefile
+	androidGen := "ANDROID-GEN"
+	// Add ANDROID-GEN four time to match the number of "modules.*" files installed below.
+	srcs = append(srcs, androidGen, androidGen, androidGen, androidGen)
+	installPath := ctx.InstallFile(installDir, "modules.load", depmodOut.modulesLoad)
+	dests = append(dests, installPath.String())
+	installPath = ctx.InstallFile(installDir, "modules.dep", depmodOut.modulesDep)
+	dests = append(dests, installPath.String())
+	installPath = ctx.InstallFile(installDir, "modules.softdep", depmodOut.modulesSoftdep)
+	dests = append(dests, installPath.String())
+	installPath = ctx.InstallFile(installDir, "modules.alias", depmodOut.modulesAlias)
+	dests = append(dests, installPath.String())
+
+	pkm.installBlocklistFile(ctx, installDir, &srcs, &dests)
+	pkm.installOptionsFile(ctx, installDir, &srcs, &dests)
 
 	ctx.SetOutputFiles(modules, ".modules")
+
+	android.SetProvider(ctx, android.PrebuiltKernelModulesComplianceMetadataProvider,
+		android.PrebuiltKernelModulesComplianceMetadata{
+			Srcs:  srcs,
+			Dests: dests,
+		})
 }
 
-func (pkm *prebuiltKernelModules) installBlocklistFile(ctx android.ModuleContext, installDir android.InstallPath) {
+func (pkm *prebuiltKernelModules) installBlocklistFile(ctx android.ModuleContext, installDir android.InstallPath, srcs *[]string, dests *[]string) {
 	if pkm.properties.Blocklist_file == nil {
 		return
 	}
 	blocklistOut := android.PathForModuleOut(ctx, "modules.blocklist")
 
+	src := android.PathForModuleSrc(ctx, proptools.String(pkm.properties.Blocklist_file))
+	*srcs = append(*srcs, src.String())
 	ctx.Build(pctx, android.BuildParams{
 		Rule:   processBlocklistFile,
-		Input:  android.PathForModuleSrc(ctx, proptools.String(pkm.properties.Blocklist_file)),
+		Input:  src,
 		Output: blocklistOut,
 	})
-	ctx.InstallFile(installDir, "modules.blocklist", blocklistOut)
+	installPath := ctx.InstallFile(installDir, "modules.blocklist", blocklistOut)
+	*dests = append(*dests, installPath.String())
 }
 
-func (pkm *prebuiltKernelModules) installOptionsFile(ctx android.ModuleContext, installDir android.InstallPath) {
+func (pkm *prebuiltKernelModules) installOptionsFile(ctx android.ModuleContext, installDir android.InstallPath, srcs *[]string, dests *[]string) {
 	if pkm.properties.Options_file == nil {
 		return
 	}
 	optionsOut := android.PathForModuleOut(ctx, "modules.options")
 
+	src := android.PathForModuleSrc(ctx, proptools.String(pkm.properties.Options_file))
+	*srcs = append(*srcs, src.String())
 	ctx.Build(pctx, android.BuildParams{
 		Rule:   processOptionsFile,
-		Input:  android.PathForModuleSrc(ctx, proptools.String(pkm.properties.Options_file)),
+		Input:  src,
 		Output: optionsOut,
 	})
-	ctx.InstallFile(installDir, "modules.options", optionsOut)
+	installPath := ctx.InstallFile(installDir, "modules.options", optionsOut)
+	*dests = append(*dests, installPath.String())
 }
 
 var (
 	pctx = android.NewPackageContext("android/soong/kernel")
 
-	stripRule = pctx.AndroidStaticRule("strip",
+	StripRule = pctx.AndroidStaticRule("strip",
 		blueprint.RuleParams{
 			Command:     "$stripCmd -o $out --strip-debug $in",
 			CommandDeps: []string{"$stripCmd"},
@@ -178,7 +222,7 @@ func stripDebugSymbols(ctx android.ModuleContext, modules android.Paths) android
 	for _, m := range modules {
 		stripped := dir.Join(ctx, filepath.Base(m.String()))
 		ctx.Build(pctx, android.BuildParams{
-			Rule:   stripRule,
+			Rule:   StripRule,
 			Input:  m,
 			Output: stripped,
 			Args: map[string]string{
@@ -247,11 +291,27 @@ func modulesDirForAndroidDlkm(ctx android.ModuleContext, modulesDir android.Outp
 		return modulesDir.Join(ctx, "vendor", "lib", "modules")
 	} else if ctx.InstallInOdmDlkm() {
 		return modulesDir.Join(ctx, "odm", "lib", "modules")
-	} else if ctx.InstallInVendorRamdisk() {
+	} else if ctx.InstallInVendorRamdisk() || ctx.InstallInVendorKernelRamdisk() {
 		return modulesDir.Join(ctx, "lib", "modules")
 	} else {
 		// not an android dlkm module.
 		return modulesDir
+	}
+}
+
+// Validates that each entry in Src_filenames_to_load is present in Srcs
+func (pkm *prebuiltKernelModules) validateSrcFilenamesToLoad(ctx android.ModuleContext) {
+	if len(pkm.properties.Src_filenames_to_load) == 0 {
+		return
+	}
+	filenames := make(map[string]bool)
+	for _, module := range android.PathsForModuleSrc(ctx, pkm.properties.Srcs) {
+		filenames[module.Base()] = true
+	}
+	for _, filenameToLoad := range pkm.properties.Src_filenames_to_load {
+		if _, exists := filenames[filenameToLoad]; !exists {
+			ctx.PropertyErrorf("Src_filenames_to_load", "%s in Src_filenames_to_load not present in Srcs", filenameToLoad)
+		}
 	}
 }
 
@@ -264,17 +324,28 @@ func (pkm *prebuiltKernelModules) runDepmod(ctx android.ModuleContext, modules a
 	builder := android.NewRuleBuilder(pctx, ctx)
 
 	// Copy the module files to a temporary dir
+	moduleNames := map[string]bool{}
 	builder.Command().Text("rm").Flag("-rf").Text(modulesCpDir.String())
 	builder.Command().Text("mkdir").Flag("-p").Text(modulesCpDir.String())
 	for _, m := range modules {
 		builder.Command().Text("cp").Input(m).Text(modulesCpDir.String())
+		moduleNames[m.Base()] = true
 	}
 
 	modulesDirForSystemDlkm := modulesDirForAndroidDlkm(ctx, modulesDir, true)
 	if len(systemModules) > 0 {
+		builder.Command().Text("rm").Flag("-rf").Text(modulesDirForSystemDlkm.String())
 		builder.Command().Text("mkdir").Flag("-p").Text(modulesDirForSystemDlkm.String())
 	}
 	for _, m := range systemModules {
+		// https://source.corp.google.com/h/googleplex-android/platform/build/+/71d79d0a58e112f76ee2c2dfdebd331971145b4c:core/Makefile;l=480-487;bpv=1;bpt=0;drc=567ee7be9833ea96a65e36fb21d4bd783ff74f1c
+		// When there is a duplicate module present in both directories, we want modules in PRIVATE_MODULES to take
+		// precedence. Since depmod does not provide any guarantee about ordering of
+		// dependency resolution, we achieve this by maually removing any duplicate
+		// modules with lower priority.
+		if _, exists := moduleNames[m.Base()]; exists {
+			continue
+		}
 		builder.Command().Text("cp").Input(m).Text(modulesDirForSystemDlkm.String())
 	}
 
@@ -286,8 +357,13 @@ func (pkm *prebuiltKernelModules) runDepmod(ctx android.ModuleContext, modules a
 		builder.Command().Text("touch").Output(modulesLoad)
 	} else {
 		var basenames []string
-		for _, m := range modules {
-			basenames = append(basenames, filepath.Base(m.String()))
+		if len(pkm.properties.Src_filenames_to_load) > 0 {
+			pkm.validateSrcFilenamesToLoad(ctx)
+			basenames = append(basenames, pkm.properties.Src_filenames_to_load...)
+		} else {
+			for _, m := range modules {
+				basenames = append(basenames, filepath.Base(m.String()))
+			}
 		}
 		builder.Command().
 			Text("echo").Flag("\"" + strings.Join(basenames, " ") + "\"").
@@ -312,7 +388,7 @@ func (pkm *prebuiltKernelModules) runDepmod(ctx android.ModuleContext, modules a
 
 	finalModulesDep := modulesDep
 	// Add a leading slash to paths in modules.dep of android dlkm and vendor ramdisk
-	if ctx.InstallInSystemDlkm() || ctx.InstallInVendorDlkm() || ctx.InstallInOdmDlkm() || ctx.InstallInVendorRamdisk() {
+	if ctx.InstallInSystemDlkm() || ctx.InstallInVendorDlkm() || ctx.InstallInOdmDlkm() || ctx.InstallInVendorRamdisk() || ctx.InstallInVendorKernelRamdisk() {
 		finalModulesDep = modulesDep.ReplaceExtension(ctx, "intermediates")
 		ctx.Build(pctx, android.BuildParams{
 			Rule:   addLeadingSlashToPaths,

@@ -37,4 +37,12 @@ enum Workflow {
   // Manually managed outside flags.  These are likely to be found in a
   // different directory than flags with other workflows.
   MANUAL = 3;
+
+  // Manually managed flags that are not inherited. These are likely used to
+  // control release process steps.
+  MANUAL_NO_INHERIT = 4;
+
+  // Manually managed flags for BUILD_VARIANT release configs.  These flags may
+  // only be assigned values if release_config_type == BUILD_VARIANT
+  MANUAL_BUILD_VARIANT = 5;
 }

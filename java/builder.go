@@ -20,6 +20,7 @@ package java
 
 import (
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -33,25 +34,129 @@ import (
 var (
 	pctx = android.NewPackageContext("android/soong/java")
 
+	// Splits jars into a number of jars, with equal files in each output jar.
+	splitSrcJars = pctx.AndroidStaticRule("javac-split-srcJars",
+		blueprint.RuleParams{
+			Command: `${config.SplitZipCmd} -i "$rspFile" -f "*.java" $out`,
+			CommandDeps: []string{
+				"${config.SplitZipCmd}",
+			},
+			Restat:         true,
+			Rspfile:        "$rspFile",
+			RspfileContent: "$in",
+		}, "rspFile",
+	)
+
+	// Unzips java src files from supplied jars into a directory provided.
+	extractSrcJars = pctx.AndroidStaticRule("javac-extract-srcJars",
+		blueprint.RuleParams{
+			Command: `rm -rf "$extractDir" && mkdir -p "$extractDir" && ${config.ZipSyncCmd} -d "$extractDir" -l "$out" -f "*.java" $jars`,
+			CommandDeps: []string{
+				"${config.ZipSyncCmd}",
+			},
+		}, "extractDir", "jars",
+	)
+
+	// Removes all outputs of inc-javac rule
+	javacIncClean = pctx.AndroidStaticRule("javac-inc-partialcompileclean",
+		blueprint.RuleParams{
+			Command: `rm -rf "${srcJarDir}" "${outDir}" "${annoDir}" "${annoSrcJar}" "${builtOut}"`,
+		}, "srcJarDir", "outDir", "annoDir", "annoSrcJar", "builtOut",
+	)
+
+	// Incremental javac rule
+	// The idea of this rule is to make javac incremental, i.e. use the input and
+	// output of previous javac execution to reduce the src lists.
+	// This rule is very similar to the normal javac rule with a few differences:
+	// * Does not unzip srcJars in the rule
+	// * Does not remove the temp directories containing classes/generated sources
+	// * Saves the states of a bunch of input params, when javac executes successfully.
+	// * Runs additional tools on the output to prepare for next iteration
+	javacInc, javacIncRE = pctx.MultiCommandRemoteStaticRules("javac-inc",
+		blueprint.RuleParams{
+			Command: `rm -rf "$annoSrcJar.tmp" "$out.tmp" && ` +
+				`mkdir -p "$annoDir" && ` +
+				`if [ -s $out.rsp ] && [ -s $srcJarList ] ; then ` +
+				`echo >> $out.rsp; fi && ` +
+				`cat $srcJarList >> $out.rsp && ` +
+				`if [ -s $genAnnoSrcJarList ] ; then ` +
+				`echo >> $out.rsp && cat $genAnnoSrcJarList >> $out.rsp; fi && ` +
+				`${config.IncrementalJavacInputCmd} ` +
+				`--srcs $out.rsp --classDir $outDir --deps $javacDeps --javacTarget $out --srcDepsProto $out.proto --localHeaderJars $localHeaderJars --crossModuleJarList $crossModuleJars && ` +
+				`mkdir -p "$outDir" && ` +
+				`(if [ -s $out.inc.rsp ] ; then ` +
+				`${config.SoongJavacWrapper} $javaTemplate${config.JavacCmd} ` +
+				`${config.JavacHeapFlags} ${config.JavacVmFlags} ${config.CommonJdkFlags} ` +
+				`$processorpath $processor $javacFlags $bootClasspath $classpath ` +
+				`-source $javaVersion -target $javaVersion ` +
+				`-d $outDir -s $annoDir @$out.inc.rsp ; fi ) && ` +
+				`cat $out.rem.rsp | xargs rm -f && ` +
+				`$annoSrcJarTemplate${config.SoongZipCmd} -jar -o $annoSrcJar.tmp -C $annoDir -D $annoDir && ` +
+				`$zipTemplate${config.SoongZipCmd} -jar -o $out.tmp -C $outDir -D $outDir && ` +
+				`if ! cmp -s "$out.tmp" "$out"; then mv "$out.tmp" "$out"; fi && ` +
+				`if ! cmp -s "$annoSrcJar.tmp" "$annoSrcJar"; then mv "$annoSrcJar.tmp" "$annoSrcJar"; fi && ` +
+				`if [ -f "$out.input.pc_state.new" ]; then mv "$out.input.pc_state.new" "$out.input.pc_state" && ` +
+				`rm -rf $out.input.pc_state.new; fi && ` +
+				`if [ -f "$out.deps.pc_state.new" ]; then mv "$out.deps.pc_state.new" "$out.deps.pc_state" && ` +
+				`rm -rf $out.deps.pc_state.new; fi && ` +
+				`if [ -f "$out.headers.pc_state.new" ]; then mv "$out.headers.pc_state.new" "$out.headers.pc_state" && ` +
+				`rm -rf $out.headers.pc_state.new; fi && ` +
+				`if [ -f "$out.crossModuleDeps.pc_state.new" ]; then mv "$out.crossModuleDeps.pc_state.new" "$out.crossModuleDeps.pc_state" && ` +
+				`rm -rf $out.crossModuleDeps.pc_state.new; fi && ` +
+				`if [ -f $out.rsp ] && [ -f $out ]; then ` +
+				`${config.DependencyMapperJavacCmd} --src-path $out.rsp --jar-path $out --dependency-map-path $out.proto --cross-module-jar-list $crossModuleJars; fi`,
+			CommandDeps: []string{
+				"${config.DependencyMapperJavacCmd}",
+				"${config.IncrementalJavacInputCmd}",
+				"${config.JavacCmd}",
+				"${config.ZipSyncCmd}",
+			},
+			CommandOrderOnly: []string{"${config.SoongJavacWrapper}"},
+			Restat:           true,
+			Rspfile:          "$out.rsp",
+			RspfileContent:   "$in",
+		}, map[string]*remoteexec.REParams{
+			"$javaTemplate": &remoteexec.REParams{
+				Labels:       map[string]string{"type": "compile", "lang": "java", "compiler": "javac"},
+				ExecStrategy: "${config.REJavacExecStrategy}",
+				Platform:     map[string]string{remoteexec.PoolKey: "${config.REJavaPool}"},
+			},
+			"$zipTemplate": &remoteexec.REParams{
+				Labels:       map[string]string{"type": "tool", "name": "soong_zip"},
+				Inputs:       []string{"${config.SoongZipCmd}", "$outDir"},
+				OutputFiles:  []string{"$out.tmp"},
+				ExecStrategy: "${config.REJavacExecStrategy}",
+				Platform:     map[string]string{remoteexec.PoolKey: "${config.REJavaPool}"},
+			},
+			"$annoSrcJarTemplate": &remoteexec.REParams{
+				Labels:       map[string]string{"type": "tool", "name": "soong_zip"},
+				Inputs:       []string{"${config.SoongZipCmd}", "$annoDir"},
+				OutputFiles:  []string{"$annoSrcJar.tmp"},
+				ExecStrategy: "${config.REJavacExecStrategy}",
+				Platform:     map[string]string{remoteexec.PoolKey: "${config.REJavaPool}"},
+			},
+		}, []string{"javacFlags", "bootClasspath", "classpath", "processorpath", "processor", "srcJarList", "genAnnoSrcJarList",
+			"outDir", "annoDir", "annoSrcJar", "javaVersion", "javacDeps", "localHeaderJars", "crossModuleJars"}, nil)
+
 	// Compiling java is not conducive to proper dependency tracking.  The path-matches-class-name
 	// requirement leads to unpredictable generated source file names, and a single .java file
 	// will get compiled into multiple .class files if it contains inner classes.  To work around
 	// this, all java rules write into separate directories and then are combined into a .jar file
 	// (if the rule produces .class files) or a .srcjar file (if the rule produces .java files).
 	// .srcjar files are unzipped into a temporary directory when compiled with javac.
-	// TODO(b/143658984): goma can't handle the --system argument to javac.
 	javac, javacRE = pctx.MultiCommandRemoteStaticRules("javac",
 		blueprint.RuleParams{
 			Command: `rm -rf "$outDir" "$annoDir" "$annoSrcJar.tmp" "$srcJarDir" "$out.tmp" && ` +
 				`mkdir -p "$outDir" "$annoDir" "$srcJarDir" && ` +
 				`${config.ZipSyncCmd} -d $srcJarDir -l $srcJarDir/list -f "*.java" $srcJars && ` +
-				`(if [ -s $srcJarDir/list ] || [ -s $out.rsp ] ; then ` +
+				`${config.ZipSyncCmd} -d $annoDir -l $annoDir/list -f "*.java" $genAnnoSrcJars && ` +
+				`(if [ -s $srcJarDir/list ] || [ -s $out.rsp ] || [ -s $annoDir/list ]; then ` +
 				`${config.FindInputDeltaCmd} --template '' --target "$out" --inputs_file "$out.rsp" && ` +
 				`${config.SoongJavacWrapper} $javaTemplate${config.JavacCmd} ` +
 				`${config.JavacHeapFlags} ${config.JavacVmFlags} ${config.CommonJdkFlags} ` +
 				`$processorpath $processor $javacFlags $bootClasspath $classpath ` +
 				`-source $javaVersion -target $javaVersion ` +
-				`-d $outDir -s $annoDir @$out.rsp @$srcJarDir/list ; fi ) && ` +
+				`-d $outDir -s $annoDir @$out.rsp @$srcJarDir/list @$annoDir/list ; fi ) && ` +
 				`$annoSrcJarTemplate${config.SoongZipCmd} -jar -o $annoSrcJar.tmp -C $annoDir -D $annoDir && ` +
 				`$zipTemplate${config.SoongZipCmd} -jar -o $out.tmp -C $outDir -D $outDir && ` +
 				`if ! cmp -s "$out.tmp" "$out"; then mv "$out.tmp" "$out"; fi && ` +
@@ -89,7 +194,7 @@ var (
 				Platform:     map[string]string{remoteexec.PoolKey: "${config.REJavaPool}"},
 			},
 		}, []string{"javacFlags", "bootClasspath", "classpath", "processorpath", "processor", "srcJars", "srcJarDir",
-			"outDir", "annoDir", "annoSrcJar", "javaVersion"}, nil)
+			"outDir", "annoDir", "annoSrcJar", "genAnnoSrcJars", "javaVersion"}, nil)
 
 	_ = pctx.VariableFunc("kytheCorpus",
 		func(ctx android.PackageVarContext) string { return ctx.Config().XrefCorpusName() })
@@ -312,10 +417,12 @@ var (
 		blueprint.RuleParams{
 			Command: `${aconfig} dump-cache --dedup --format=protobuf ` +
 				`--out ${out} ` +
-				`${flags_path} ` +
+				`@$out.rsp ` +
 				`${filter_args} `,
-			CommandDeps: []string{"${aconfig}"},
-			Description: "aconfig_bool",
+			CommandDeps:    []string{"${aconfig}"},
+			Description:    "aconfig_bool",
+			Rspfile:        "$out.rsp",
+			RspfileContent: "${flags_path}",
 		}, "flags_path", "filter_args")
 
 	generateMetalavaRevertAnnotationsRule = pctx.AndroidStaticRule("generateMetalavaRevertAnnotationsRule",
@@ -374,9 +481,14 @@ type javaBuilderFlags struct {
 	errorProneExtraJavacFlags string
 	errorProneProcessorPath   classpath
 
-	kotlincFlags     string
-	kotlincClasspath classpath
-	kotlincDeps      android.Paths
+	kotlincFlags                string
+	kotlincPluginFlags          string
+	composePluginFlag           string
+	composeEmbeddablePluginFlag string
+	kotlincClasspath            classpath
+	kotlincDeps                 android.Paths
+	kotlincFriendPathsArg       string
+	kSnapshotFiles              map[string]android.Path
 
 	proto android.ProtoFlags
 }
@@ -387,16 +499,34 @@ func DefaultJavaBuilderFlags() javaBuilderFlags {
 	}
 }
 
+func TransformJavaToClassesInc(ctx android.ModuleContext, outputFile android.WritablePath,
+	srcFiles, srcJars, headerJars, crossModuleHeaderJars android.Paths, annoSrcJar android.WritablePath, flags javaBuilderFlags, deps android.Paths, genAnnoSrcJars android.Paths) {
+
+	// Compile java sources into .class files
+	desc := "javac-inc"
+	transformJavaToClassesInc(ctx, outputFile, srcFiles, srcJars, headerJars, crossModuleHeaderJars, annoSrcJar, flags, deps, "javac", desc, genAnnoSrcJars)
+}
+
 func TransformJavaToClasses(ctx android.ModuleContext, outputFile android.WritablePath, shardIdx int,
-	srcFiles, srcJars android.Paths, annoSrcJar android.WritablePath, flags javaBuilderFlags, deps android.Paths) {
+	srcFiles, srcJars android.Paths, annoSrcJar android.WritablePath, flags javaBuilderFlags, deps android.Paths, genAnnoSrcJars android.Paths) {
 
 	// Compile java sources into .class files
 	desc := "javac"
 	if shardIdx >= 0 {
 		desc += strconv.Itoa(shardIdx)
 	}
+	transformJavaToClasses(ctx, outputFile, shardIdx, srcFiles, srcJars, annoSrcJar, false, flags, deps, "javac", desc, genAnnoSrcJars)
+}
+func GenerateJavaAnnotations(ctx android.ModuleContext, outputFile android.WritablePath, shardIdx int,
+	srcFiles, srcJars android.Paths, annoSrcJar android.WritablePath, flags javaBuilderFlags, deps android.Paths) {
 
-	transformJavaToClasses(ctx, outputFile, shardIdx, srcFiles, srcJars, annoSrcJar, flags, deps, "javac", desc)
+	// Generate src files from Java Annotations.
+	desc := "javac-apt"
+	if shardIdx >= 0 {
+		desc += strconv.Itoa(shardIdx)
+	}
+
+	transformJavaToClasses(ctx, outputFile, shardIdx, srcFiles, srcJars, annoSrcJar, true, flags, deps, "javac-apt", desc, nil)
 }
 
 // Emits the rule to generate Xref input file (.kzip file) for the given set of source files and source jars
@@ -532,7 +662,7 @@ func TransformJavaToHeaderClasses(ctx android.ModuleContext, outputFile android.
 		"outputFlags":  "--output " + outputFile.String() + ".tmp",
 		"outputs":      outputFile.String(),
 	}
-	if ctx.Config().UseRBE() && ctx.Config().IsEnvTrue("RBE_TURBINE") {
+	if ctx.Config().UseREWrapper() && ctx.Config().IsEnvTrue("RBE_TURBINE") {
 		rule = turbineRE
 		args["rbeInputs"] = strings.Join(rbeInputs.Strings(), ",")
 		args["rbeOutputs"] = outputFile.String() + ".tmp"
@@ -571,7 +701,7 @@ func TurbineApt(ctx android.ModuleContext, outputSrcJar, outputResJar android.Wr
 		"outputFlags":  outputFlags,
 		"outputs":      strings.Join(outputs.Strings(), " "),
 	}
-	if ctx.Config().UseRBE() && ctx.Config().IsEnvTrue("RBE_TURBINE") {
+	if ctx.Config().UseREWrapper() && ctx.Config().IsEnvTrue("RBE_TURBINE") {
 		rule = turbineRE
 		args["rbeInputs"] = strings.Join(rbeInputs.Strings(), ",")
 		args["rbeOutputs"] = outputSrcJar.String() + ".tmp," + outputResJar.String() + ".tmp"
@@ -588,6 +718,170 @@ func TurbineApt(ctx android.ModuleContext, outputSrcJar, outputResJar android.Wr
 	})
 }
 
+// Similar to transformJavaToClasses, with additional tweaks to make java
+// compilation work incrementally (i.e. work with a smaller subset of src java files
+// rather than the full set)
+func transformJavaToClassesInc(ctx android.ModuleContext, outputFile android.WritablePath,
+	srcFiles, srcJars, shardingHeaderJars, crossModuleHeaderJars android.Paths, annoSrcJar android.WritablePath,
+	flags javaBuilderFlags, deps android.Paths, intermediatesDir, desc string, genAnnoSrcJars android.Paths) {
+
+	javacClasspath := flags.classpath
+
+	var bootClasspath string
+	if flags.javaVersion.usesJavaModules() {
+		var systemModuleDeps android.Paths
+		bootClasspath, systemModuleDeps = flags.systemModules.FormJavaSystemModulesPath(ctx.Device())
+		deps = append(deps, systemModuleDeps...)
+		javacClasspath = append(flags.java9Classpath, javacClasspath...)
+	} else {
+		deps = append(deps, flags.bootClasspath...)
+		if len(flags.bootClasspath) == 0 && ctx.Device() {
+			// explicitly specify -bootclasspath "" if the bootclasspath is empty to
+			// ensure java does not fall back to the default bootclasspath.
+			bootClasspath = `-bootclasspath ""`
+		} else {
+			bootClasspath = flags.bootClasspath.FormJavaClassPath("-bootclasspath")
+		}
+	}
+
+	deps = append(deps, flags.processorPath...)
+	deps = append(deps, javacClasspath...)
+
+	// Exclude some headers from deps.
+	// Headers will become deps for the jar.crossmoduledeps.rsp, which in turn will be a dep
+	// for the final compiled jar.
+	// These headers must be excluded because, currently, changes in deps causes a full javac
+	// recompilation. If changes to deps ever becomes incremental, this removal can be
+	// revisisted.
+	if crossModuleHeaderJars != nil {
+		deps = slices.DeleteFunc(deps, func(dep android.Path) bool {
+			return slices.Contains(crossModuleHeaderJars, dep)
+		})
+	}
+
+	// The file containing dependencies of the current module
+	// Any change in them may warrant changes in the incremental compilation
+	// source set.
+	javacDeps := outputFile.ReplaceExtension(ctx, "jar.deps.rsp")
+	android.WriteFileRule(ctx, javacDeps, strings.Join(deps.Strings(), "\n"))
+	deps = append(deps, javacDeps)
+
+	// Add localHeader Jars in classpath, they are required for incremental compilation.
+	// These are conspicuously not added to javacDeps file, as a change in them
+	// does not warrant full re-compilation.
+	javacClasspath = append(classpath(slices.Clone(shardingHeaderJars)), javacClasspath...)
+	deps = append(deps, shardingHeaderJars...)
+	shardingHeaderRsp := outputFile.ReplaceExtension(ctx, "jar.headers.rsp")
+	android.WriteFileRule(ctx, shardingHeaderRsp, strings.Join(shardingHeaderJars.Strings(), "\n"))
+	deps = append(deps, shardingHeaderRsp)
+
+	crossModuleDepsRsp := outputFile.ReplaceExtension(ctx, "jar.crossmoduledeps.rsp")
+	if crossModuleHeaderJars != nil {
+		android.WriteFileRule(ctx, crossModuleDepsRsp, strings.Join(crossModuleHeaderJars.Strings(), "\n"))
+		deps = append(deps, crossModuleDepsRsp)
+	}
+
+	// Doing this now, so that they are not added to javacDeps file
+	deps = append(deps, srcJars...)
+
+	classpathArg := javacClasspath.FormJavaClassPath("-classpath")
+
+	// Keep the command line under the MAX_ARG_STRLEN limit by putting the classpath argument into an rsp file
+	// if it is too long.
+	const classpathLimit = 64 * 1024
+	if len(classpathArg) > classpathLimit {
+		classpathRspFile := outputFile.ReplaceExtension(ctx, "classpath")
+		android.WriteFileRule(ctx, classpathRspFile, classpathArg)
+		deps = append(deps, classpathRspFile)
+		classpathArg = "@" + classpathRspFile.String()
+	}
+
+	processor := "-proc:none"
+	if len(flags.processors) > 0 {
+		processor = "-processor " + strings.Join(flags.processors, ",")
+	}
+
+	srcJarDir := "srcjars"
+	outDir := "classes"
+	annoDir := "anno"
+	srcJarList := android.PathForModuleOut(ctx, intermediatesDir, srcJarDir, "list")
+	deps = append(deps, srcJarList)
+
+	// Extract srcJars as a separate action, so that it's not re-executed every time
+	// inc-javac is run, if srcJars were themselves not re-generated.
+	ctx.Build(pctx, android.BuildParams{
+		Rule:        extractSrcJars,
+		Description: "javacExtractSrcJars",
+		Inputs:      srcJars,
+		Output:      srcJarList,
+		Args: map[string]string{
+			"extractDir": android.PathForModuleOut(ctx, intermediatesDir, srcJarDir).String(),
+			"jars":       strings.Join(srcJars.Strings(), " "),
+		},
+	})
+
+	// Extract annoSrcJars as a separate action, so that it's not re-executed every time
+	// inc-javac is run, if annoSrcJars were themselves not re-generated.
+	genAnnoSrcJarList := android.PathForModuleOut(ctx, intermediatesDir, annoDir, "list")
+	deps = append(deps, genAnnoSrcJarList)
+	ctx.Build(pctx, android.BuildParams{
+		Rule:        extractSrcJars,
+		Description: "javacExtractAnnoSrcJar",
+		Inputs:      genAnnoSrcJars,
+		Output:      genAnnoSrcJarList,
+		Args: map[string]string{
+			"extractDir": android.PathForModuleOut(ctx, intermediatesDir, annoDir).String(),
+			"jars":       strings.Join(genAnnoSrcJars.Strings(), " "),
+		},
+	})
+
+	rule := javacInc
+	ctx.Build(pctx, android.BuildParams{
+		Rule:           rule,
+		Description:    desc,
+		Output:         outputFile,
+		ImplicitOutput: annoSrcJar,
+		Inputs:         srcFiles,
+		Implicits:      deps,
+		Args: map[string]string{
+			"javacFlags":        flags.javacFlags,
+			"bootClasspath":     bootClasspath,
+			"classpath":         classpathArg,
+			"processorpath":     flags.processorPath.FormJavaClassPath("-processorpath"),
+			"processor":         processor,
+			"srcJarList":        srcJarList.String(),
+			"genAnnoSrcJarList": genAnnoSrcJarList.String(),
+			"outDir":            android.PathForModuleOut(ctx, intermediatesDir, outDir).String(),
+			"annoDir":           android.PathForModuleOut(ctx, intermediatesDir, annoDir).String(),
+			"annoSrcJar":        annoSrcJar.String(),
+			"javaVersion":       flags.javaVersion.String(),
+			"javacDeps":         javacDeps.String(),
+			"localHeaderJars":   shardingHeaderRsp.String(),
+			"crossModuleJars":   crossModuleDepsRsp.String(),
+		},
+	})
+
+	// The Phony Clean rule allows javac to move from incremental to full, without
+	// re-analysis by removing all the outputs of javac, triggering all rules
+	// that generate them.
+	cleanPhonyPath := android.PathForModuleOut(ctx, "dex", outputFile.String()+"-partialcompileclean").OutputPath
+	// Generate the rule for partial compile clean.
+	ctx.Build(pctx, android.BuildParams{
+		Rule:        javacIncClean,
+		Description: "javacIncClean",
+		Output:      cleanPhonyPath,
+		Args: map[string]string{
+			"srcJarDir":  android.PathForModuleOut(ctx, intermediatesDir, srcJarDir).String(),
+			"outDir":     android.PathForModuleOut(ctx, intermediatesDir, outDir).String(),
+			"annoDir":    android.PathForModuleOut(ctx, intermediatesDir, annoDir).String(),
+			"annoSrcJar": annoSrcJar.String(),
+			"builtOut":   outputFile.String(),
+		},
+		PhonyOutput: true,
+	})
+	ctx.Phony("partialcompileclean", cleanPhonyPath)
+}
+
 // transformJavaToClasses takes source files and converts them to a jar containing .class files.
 // srcFiles is a list of paths to sources, srcJars is a list of paths to jar files that contain
 // sources.  flags contains various command line flags to be passed to the compiler.
@@ -597,10 +891,13 @@ func TurbineApt(ctx android.ModuleContext, outputSrcJar, outputResJar android.Wr
 // be printed at build time.  The stem argument provides the file name of the output jar, and
 // suffix will be appended to various intermediate files and directories to avoid collisions when
 // this function is called twice in the same module directory.
+//
+// This method can also be used to only process Annotations, without completely
+// compiling java sources.
 func transformJavaToClasses(ctx android.ModuleContext, outputFile android.WritablePath,
-	shardIdx int, srcFiles, srcJars android.Paths, annoSrcJar android.WritablePath,
+	shardIdx int, srcFiles, srcJars android.Paths, annoSrcJar android.WritablePath, onlyGenerateAnnotations bool,
 	flags javaBuilderFlags, deps android.Paths,
-	intermediatesDir, desc string) {
+	intermediatesDir, desc string, genAnnoSrcJars android.Paths) {
 
 	deps = append(deps, srcJars...)
 
@@ -629,7 +926,7 @@ func transformJavaToClasses(ctx android.ModuleContext, outputFile android.Writab
 	// if it is too long.
 	const classpathLimit = 64 * 1024
 	if len(classpathArg) > classpathLimit {
-		classpathRspFile := outputFile.ReplaceExtension(ctx, "classpath")
+		classpathRspFile := outputFile.AddExtension(ctx, "classpath")
 		android.WriteFileRule(ctx, classpathRspFile, classpathArg)
 		deps = append(deps, classpathRspFile)
 		classpathArg = "@" + classpathRspFile.String()
@@ -637,10 +934,15 @@ func transformJavaToClasses(ctx android.ModuleContext, outputFile android.Writab
 
 	deps = append(deps, javacClasspath...)
 	deps = append(deps, flags.processorPath...)
+	deps = append(deps, genAnnoSrcJars...)
 
 	processor := "-proc:none"
 	if len(flags.processors) > 0 {
-		processor = "-processor " + strings.Join(flags.processors, ",")
+		if onlyGenerateAnnotations {
+			processor = "-proc:only -processor " + strings.Join(flags.processors, ",")
+		} else {
+			processor = "-processor " + strings.Join(flags.processors, ",")
+		}
 	}
 
 	srcJarDir := "srcjars"
@@ -653,7 +955,7 @@ func transformJavaToClasses(ctx android.ModuleContext, outputFile android.Writab
 		annoDir = filepath.Join(shardDir, annoDir)
 	}
 	rule := javac
-	if ctx.Config().UseRBE() && ctx.Config().IsEnvTrue("RBE_JAVAC") {
+	if ctx.Config().UseREWrapper() && ctx.Config().IsEnvTrue("RBE_JAVAC") {
 		rule = javacRE
 	}
 	ctx.Build(pctx, android.BuildParams{
@@ -664,17 +966,18 @@ func transformJavaToClasses(ctx android.ModuleContext, outputFile android.Writab
 		Inputs:         srcFiles,
 		Implicits:      deps,
 		Args: map[string]string{
-			"javacFlags":    flags.javacFlags,
-			"bootClasspath": bootClasspath,
-			"classpath":     classpathArg,
-			"processorpath": flags.processorPath.FormJavaClassPath("-processorpath"),
-			"processor":     processor,
-			"srcJars":       strings.Join(srcJars.Strings(), " "),
-			"srcJarDir":     android.PathForModuleOut(ctx, intermediatesDir, srcJarDir).String(),
-			"outDir":        android.PathForModuleOut(ctx, intermediatesDir, outDir).String(),
-			"annoDir":       android.PathForModuleOut(ctx, intermediatesDir, annoDir).String(),
-			"annoSrcJar":    annoSrcJar.String(),
-			"javaVersion":   flags.javaVersion.String(),
+			"javacFlags":     flags.javacFlags,
+			"bootClasspath":  bootClasspath,
+			"classpath":      classpathArg,
+			"processorpath":  flags.processorPath.FormJavaClassPath("-processorpath"),
+			"processor":      processor,
+			"srcJars":        strings.Join(srcJars.Strings(), " "),
+			"srcJarDir":      android.PathForModuleOut(ctx, intermediatesDir, srcJarDir).String(),
+			"outDir":         android.PathForModuleOut(ctx, intermediatesDir, outDir).String(),
+			"annoDir":        android.PathForModuleOut(ctx, intermediatesDir, annoDir).String(),
+			"annoSrcJar":     annoSrcJar.String(),
+			"genAnnoSrcJars": strings.Join(genAnnoSrcJars.Strings(), " "),
+			"javaVersion":    flags.javaVersion.String(),
 		},
 	})
 }
@@ -683,7 +986,7 @@ func TransformResourcesToJar(ctx android.ModuleContext, outputFile android.Writa
 	jarArgs []string, deps android.Paths) {
 
 	rule := jar
-	if ctx.Config().UseRBE() && ctx.Config().IsEnvTrue("RBE_JAR") {
+	if ctx.Config().UseREWrapper() && ctx.Config().IsEnvTrue("RBE_JAR") {
 		rule = jarRE
 	}
 	ctx.Build(pctx, android.BuildParams{
@@ -852,14 +1155,14 @@ func TransformJetifier(ctx android.ModuleContext, outputFile android.WritablePat
 }
 
 func TransformRavenizer(ctx android.ModuleContext, outputFile android.WritablePath,
-	inputFile android.Path, ravenizerArgs string) {
+	inputFile android.Path, ravenizerArgs []string) {
 	ctx.Build(pctx, android.BuildParams{
 		Rule:        ravenizer,
 		Description: "ravenizer",
 		Output:      outputFile,
 		Input:       inputFile,
 		Args: map[string]string{
-			"ravenizerArgs": ravenizerArgs,
+			"ravenizerArgs": strings.Join(ravenizerArgs, " "),
 		},
 	})
 }
@@ -918,6 +1221,10 @@ func (x *classpath) FormRepeatedClassPath(optName string) []string {
 	}
 
 	return flags
+}
+
+func (x *classpath) FirstUniquePaths() classpath {
+	return classpath(android.FirstUniquePaths(x.Paths()))
 }
 
 // Convert a classpath to an android.Paths

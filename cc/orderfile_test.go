@@ -207,11 +207,11 @@ func TestOrderfileProfilePropagateStaticDeps(t *testing.T) {
 	}
 
 	// Check dependency edge from orderfile-enabled module to orderfile variant static libraries
-	if !hasDirectDep(result, libTest.Module(), libFooOfVariant.Module()) {
+	if !android.HasDirectDep(result, libTest.Module(), libFooOfVariant.Module()) {
 		t.Errorf("libTest missing dependency on orderfile variant of libFoo")
 	}
 
-	if !hasDirectDep(result, libFooOfVariant.Module(), libBarOfVariant.Module()) {
+	if !android.HasDirectDep(result, libFooOfVariant.Module(), libBarOfVariant.Module()) {
 		t.Errorf("libTest missing dependency on orderfile variant of libBar")
 	}
 
@@ -230,11 +230,11 @@ func TestOrderfileProfilePropagateStaticDeps(t *testing.T) {
 	}
 
 	// Check no dependency edge from orderfile-enabled module to non-orderfile variant static libraries
-	if hasDirectDep(result, libTest.Module(), libFoo.Module()) {
+	if android.HasDirectDep(result, libTest.Module(), libFoo.Module()) {
 		t.Errorf("libTest has dependency on non-orderfile variant of libFoo")
 	}
 
-	if !hasDirectDep(result, libFoo.Module(), libBar.Module()) {
+	if !android.HasDirectDep(result, libFoo.Module(), libBar.Module()) {
 		t.Errorf("libTest has dependency on non-orderfile variant of libBar")
 	}
 }
@@ -285,11 +285,11 @@ func TestOrderfileLoadPropagateStaticDeps(t *testing.T) {
 	libBar := result.ModuleForTests(t, "libBar", "android_arm64_armv8-a_static")
 
 	// Check dependency edge from orderfile-enabled module to non-orderfile variant static libraries
-	if !hasDirectDep(result, libTest.Module(), libFoo.Module()) {
+	if !android.HasDirectDep(result, libTest.Module(), libFoo.Module()) {
 		t.Errorf("libTest missing dependency on non-orderfile variant of libFoo")
 	}
 
-	if !hasDirectDep(result, libFoo.Module(), libBar.Module()) {
+	if !android.HasDirectDep(result, libFoo.Module(), libBar.Module()) {
 		t.Errorf("libTest missing dependency on non-orderfile variant of libBar")
 	}
 
@@ -365,11 +365,11 @@ func TestOrderfileProfilePropagateSharedDeps(t *testing.T) {
 	}
 
 	// Check dependency edge from orderfile-enabled module to non-orderfile variant static libraries
-	if !hasDirectDep(result, libTest.Module(), libFoo.Module()) {
+	if !android.HasDirectDep(result, libTest.Module(), libFoo.Module()) {
 		t.Errorf("libTest missing dependency on non-orderfile variant of libFoo")
 	}
 
-	if !hasDirectDep(result, libFoo.Module(), libBar.Module()) {
+	if !android.HasDirectDep(result, libFoo.Module(), libBar.Module()) {
 		t.Errorf("libTest missing dependency on non-orderfile variant of libBar")
 	}
 
@@ -445,11 +445,11 @@ func TestOrderfileProfileStaticLibrary(t *testing.T) {
 	}
 
 	// Check dependency edge from orderfile-enabled module to non-orderfile variant libraries
-	if !hasDirectDep(result, libTest.Module(), libFoo.Module()) {
+	if !android.HasDirectDep(result, libTest.Module(), libFoo.Module()) {
 		t.Errorf("libTest missing dependency on non-orderfile variant of libFoo")
 	}
 
-	if !hasDirectDep(result, libFoo.Module(), libBar.Module()) {
+	if !android.HasDirectDep(result, libFoo.Module(), libBar.Module()) {
 		t.Errorf("libTest missing dependency on non-orderfile variant of libBar")
 	}
 

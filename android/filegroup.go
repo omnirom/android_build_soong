@@ -18,7 +18,6 @@ import (
 	"maps"
 	"strings"
 
-	"github.com/google/blueprint"
 	"github.com/google/blueprint/proptools"
 )
 
@@ -53,7 +52,7 @@ type fileGroupProperties struct {
 	// of the path to use.  For example, when a filegroup is used as data in a cc_test rule,
 	// the base path is stripped off the path and the remaining path is used as the
 	// installation directory.
-	Path *string
+	Path proptools.Configurable[string] `android:"replace_instead_of_append"`
 
 	// Create a make variable with the specified name that contains the list of files in the
 	// filegroup, relative to the root of the source tree.
@@ -80,36 +79,20 @@ func FileGroupFactory() Module {
 	return module
 }
 
-var _ blueprint.JSONActionSupplier = (*fileGroup)(nil)
-
-func (fg *fileGroup) JSONActions() []blueprint.JSONAction {
-	ins := make([]string, 0, len(fg.srcs))
-	outs := make([]string, 0, len(fg.srcs))
-	for _, p := range fg.srcs {
-		ins = append(ins, p.String())
-		outs = append(outs, p.Rel())
-	}
-	return []blueprint.JSONAction{
-		blueprint.JSONAction{
-			Inputs:  ins,
-			Outputs: outs,
-		},
-	}
-}
-
 func (fg *fileGroup) GenerateAndroidBuildActions(ctx ModuleContext) {
 	srcs := PathsForModuleSrcExcludes(ctx, fg.properties.Srcs.GetOrDefault(ctx, nil), fg.properties.Exclude_srcs.GetOrDefault(ctx, nil))
 	srcs = append(srcs, PathsForModuleSrc(ctx, fg.properties.Device_first_srcs.GetOrDefault(ctx, nil))...)
 	srcs = append(srcs, PathsForModuleSrc(ctx, fg.properties.Device_common_srcs.GetOrDefault(ctx, nil))...)
-	if fg.properties.Path != nil {
-		srcs = PathsWithModuleSrcSubDir(ctx, srcs, String(fg.properties.Path))
+	path := fg.properties.Path.GetOrDefault(ctx, "")
+	if path != "" {
+		srcs = PathsWithModuleSrcSubDir(ctx, srcs, path)
 	}
 
 	var aconfigDeclarations []string
 	var intermediateCacheOutputPaths Paths
 	var srcjars Paths
 	modeInfos := make(map[string]ModeInfo)
-	ctx.VisitDirectDeps(func(module Module) {
+	ctx.VisitDirectDepsProxy(func(module ModuleProxy) {
 		if dep, ok := OtherModuleProvider(ctx, module, CodegenInfoProvider); ok {
 			aconfigDeclarations = append(aconfigDeclarations, dep.AconfigDeclarations...)
 			intermediateCacheOutputPaths = append(intermediateCacheOutputPaths, dep.IntermediateCacheOutputPaths...)

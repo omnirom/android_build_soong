@@ -153,6 +153,13 @@ type IncomingTransitionContext interface {
 	// mutator is running.  This should be used sparingly, all uses will have to be removed in order
 	// to support creating variants on demand.
 	IsAddingDependency() bool
+
+	// HasMutatorFinished returns true if the given mutator has finished running.
+	// It will panic if given an invalid mutator name.
+	HasMutatorFinished(mutatorName string) bool
+
+	// OtherModulePropertyErrorf reports an error at the line number of a property in the given module definition.
+	OtherModulePropertyErrorf(module ModuleOrProxy, property string, fmt string, args ...interface{})
 }
 
 type OutgoingTransitionContext interface {
@@ -190,8 +197,10 @@ func (a *androidTransitionMutatorAdapter) Split(ctx blueprint.BaseModuleContext)
 		panic("TransitionMutator not allowed in FinalDepsMutators")
 	}
 	m := ctx.Module().(Module)
-	moduleContext := m.base().baseModuleContextFactory(ctx)
-	return a.mutator.Split(&moduleContext)
+	moduleContext := baseModuleContextPool.Get()
+	defer baseModuleContextPool.Put(moduleContext)
+	*moduleContext = m.base().baseModuleContextFactory(ctx)
+	return a.mutator.Split(moduleContext)
 }
 
 func (a *androidTransitionMutatorAdapter) OutgoingTransition(bpctx blueprint.OutgoingTransitionContext,
@@ -227,6 +236,9 @@ func (a *androidTransitionMutatorAdapter) Mutate(ctx blueprint.BottomUpMutatorCo
 		base := am.base()
 		base.commonProperties.DebugMutators = append(base.commonProperties.DebugMutators, a.name)
 		base.commonProperties.DebugVariations = append(base.commonProperties.DebugVariations, variation)
+	}
+	if config := ctx.Config().(Config); config.captureBuild {
+		config.modulesForTests.Insert(ctx.ModuleName(), am)
 	}
 
 	mctx := bottomUpMutatorContextFactory(ctx, am, a.finalPhase)
@@ -378,6 +390,14 @@ func (c *incomingTransitionContextImpl) PropertyErrorf(property, fmt string, arg
 	c.bp.PropertyErrorf(property, fmt, args)
 }
 
+func (c *incomingTransitionContextImpl) HasMutatorFinished(mutatorName string) bool {
+	return c.bp.HasMutatorFinished(mutatorName)
+}
+
+func (c *incomingTransitionContextImpl) OtherModulePropertyErrorf(module ModuleOrProxy, property string, fmt string, args ...interface{}) {
+	c.bp.OtherModulePropertyErrorf(module, property, fmt, args...)
+}
+
 // outgoingTransitionContextImpl wraps a blueprint.OutgoingTransitionContext to convert it to an
 // OutgoingTransitionContext.
 type outgoingTransitionContextImpl struct {
@@ -407,4 +427,12 @@ func (c *outgoingTransitionContextImpl) DeviceConfig() DeviceConfig {
 
 func (c *outgoingTransitionContextImpl) provider(provider blueprint.AnyProviderKey) (any, bool) {
 	return c.bp.Provider(provider)
+}
+
+// UsesUnbundledVariantDepTag is an interface that dependency tags can implement to indicate they
+// want the variant of the module that would be used for unbundled builds. This is used by
+// unbundled_builder. Historically, make did not know/care about individual variants, so when
+// you listed apps in TARGET_BUILD_APPS, make would build whatever variant was available.
+type UsesUnbundledVariantDepTag interface {
+	UsesUnbundledVariant()
 }

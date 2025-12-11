@@ -23,6 +23,8 @@ blueprint_go_binary {
         "source_tree_size.go",
     ],
     deps: [
+        "golang-protobuf-proto",
+        "golang-protobuf-reflect-protoreflect",
         "golang-protobuf-runtime-protoimpl",
     ],
 }

@@ -17,7 +17,6 @@ package build
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -46,8 +45,8 @@ func runNinjaForBuild(ctx Context, config Config) {
 // environment variables. It's important to restrict the environment Ninja runs
 // for hermeticity reasons, and to avoid spurious rebuilds.
 func runNinja(ctx Context, config Config, ninjaArgs []string) {
-	ctx.BeginTrace(metrics.PrimaryNinja, "ninja")
-	defer ctx.EndTrace()
+	e := ctx.BeginTrace(metrics.PrimaryNinja, "ninja")
+	defer e.End()
 
 	// Sets up the FIFO status updater that reads the Ninja protobuf output, and
 	// translates it to the soong_ui status output, displaying real-time
@@ -119,7 +118,7 @@ func runNinja(ctx Context, config Config, ninjaArgs []string) {
 		}
 	}
 
-	cmd := Command(ctx, config, "ninja", executable, args...)
+	cmd := Command(ctx, config, e, "ninja", executable, args...)
 
 	// Set up the nsjail sandbox Ninja runs in.
 	cmd.Sandbox = ninjaSandbox
@@ -256,6 +255,9 @@ func runNinja(ctx Context, config Config, ninjaArgs []string) {
 
 			// Directory for ExecutionMetrics
 			"SOONG_METRICS_AGGREGATION_DIR",
+
+			// CIPD proxy
+			"CIPD_PROXY_URL",
 		}, config.BuildBrokenNinjaUsesEnvVars()...)...)
 	}
 
@@ -317,7 +319,7 @@ func runNinja(ctx Context, config Config, ninjaArgs []string) {
 	}()
 
 	ctx.ExecutionMetrics.Start()
-	defer ctx.ExecutionMetrics.Finish(ctx)
+	defer ctx.ExecutionMetrics.Finish(ExecutionMetricsFinishAdaptor{ctx})
 	ctx.Status.Status("Starting ninja...")
 	cmd.RunAndStreamOrFatal()
 }
@@ -349,54 +351,11 @@ func (c *ninjaStucknessChecker) check(ctx Context, config Config) {
 		// ps second
 		commandText := fmt.Sprintf("pstree -palT %v || ps -ef", os.Getpid())
 
-		cmd := Command(ctx, config, "dump process tree", "bash", "-c", commandText)
+		cmd := Command(ctx, config, nil, "dump process tree", "bash", "-c", commandText)
 		output := cmd.CombinedOutputOrFatal()
 		ctx.Verbose(string(output))
 
 		ctx.Verbosef("done\n")
 	}
 	c.prevModTime = newModTime
-}
-
-// Constructs and runs the Ninja command line to get the inputs of a goal.
-// For n2 and siso, this will always run ninja, because they don't have the
-// `-t inputs` command.  This command will use the inputs command's -d option,
-// to use the dep file iff ninja was the executor. For other executors, the
-// results will be wrong.
-func runNinjaInputs(ctx Context, config Config, goal string) ([]string, error) {
-	var executable string
-	switch config.ninjaCommand {
-	case NINJA_N2, NINJA_SISO:
-		executable = config.PrebuiltBuildTool("ninja")
-	default:
-		executable = config.NinjaBin()
-	}
-
-	args := []string{
-		"-f",
-		config.CombinedNinjaFile(),
-		"-t",
-		"inputs",
-	}
-	// Add deps file arg for ninja
-	// TODO: Update as inputs command is implemented
-	if config.ninjaCommand == NINJA_NINJA && !config.UseABFS() {
-		args = append(args, "-d")
-	}
-	args = append(args, goal)
-
-	// This is just ninja -t inputs, so we won't bother running it in the sandbox,
-	// so use exec.Command, not soong_ui's command.
-	cmd := exec.Command(executable, args...)
-
-	cmd.Stdin = os.Stdin
-	cmd.Stderr = os.Stderr
-
-	out, err := cmd.Output()
-	if err != nil {
-		fmt.Printf("Error getting goal inputs for %s: %s\n", goal, err)
-		return nil, err
-	}
-
-	return strings.Split(strings.TrimSpace(string(out)), "\n"), nil
 }

@@ -25,6 +25,8 @@ bootstrap_go_package {
         "soong-ui-status-ninja_frontend",
         "soong-ui-status-build_error_proto",
         "soong-ui-status-build_progress_proto",
+        "soong-ui-metrics",
+        "soong-ui-metrics_proto",
     ],
     srcs: [
         "critical_path.go",

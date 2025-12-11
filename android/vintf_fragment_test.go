@@ -29,8 +29,8 @@ func TestVintfManifestBuildAction(t *testing.T) {
 
 	testResult := PrepareForTestWithAndroidBuildComponents.RunTestWithBp(t, bp)
 
-	vintfFragmentBuild := testResult.TestContext.ModuleForTests(t, "test_vintf_fragment", "android_common").Rule("assemble_vintf")
-	if !strings.Contains(vintfFragmentBuild.RuleParams.Command, "assemble_vintf") {
+	vintfFragmentBuild := testResult.TestContext.ModuleForTests(t, "test_vintf_fragment", "android_common").Rule("AssembleVintfRule")
+	if !strings.Contains(vintfFragmentBuild.Input.String(), "test_vintf_file") {
 		t.Error("Vintf_manifest build command does not process with assemble_vintf : " + vintfFragmentBuild.RuleParams.Command)
 	}
 }

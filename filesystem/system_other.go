@@ -15,14 +15,16 @@
 package filesystem
 
 import (
-	"android/soong/android"
 	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
+	"android/soong/android"
+
 	"github.com/google/blueprint"
+	"github.com/google/blueprint/depset"
 	"github.com/google/blueprint/proptools"
 )
 
@@ -93,7 +95,7 @@ func (m *systemOtherImage) GenerateAndroidBuildActions(ctx android.ModuleContext
 	}
 
 	output := android.PathForModuleOut(ctx, "system_other.img")
-	stagingDir := android.PathForModuleOut(ctx, "staging_dir")
+	stagingDir := android.PathForModuleOut(ctx, "system_other").OutputPath
 	stagingDirTimestamp := android.PathForModuleOut(ctx, "staging_dir.timestamp")
 
 	builder := android.NewRuleBuilder(pctx, ctx)
@@ -120,11 +122,27 @@ func (m *systemOtherImage) GenerateAndroidBuildActions(ctx android.ModuleContext
 	// TOOD: CopySpecsToDir only exists on PackagingBase, but doesn't use any fields from it. Clean this up.
 	(&android.PackagingBase{}).CopySpecsToDir(ctx, builder, specs, stagingDir)
 
-	fullInstallPaths := []string{}
+	fullInstallPaths := []FullInstallPathInfo{}
+	for _, mod := range android.SortedKeys(specs) {
+		spec := specs[mod]
+		fullInstallPaths = append(fullInstallPaths, FullInstallPathInfo{
+			FullInstallPath:     spec.FullInstallPath(),
+			RequiresFullInstall: spec.RequiresFullInstall(),
+			SourcePath:          spec.SrcPath(),
+			SymlinkTarget:       spec.SymlinkTarget(),
+		})
+	}
+
+	platformGenerated := []string{}
 	if len(m.properties.Preinstall_dexpreopt_files_from) > 0 {
-		builder.Command().Textf("touch %s", filepath.Join(stagingDir.String(), "system-other-odex-marker"))
+		builtPath := android.PathForModuleOut(ctx, "system_other", "system-other-odex-marker")
+		builder.Command().Textf("touch").Output(builtPath)
 		installPath := android.PathForModuleInPartitionInstall(ctx, "system_other", "system-other-odex-marker")
-		fullInstallPaths = append(fullInstallPaths, installPath.String())
+		fullInstallPaths = append(fullInstallPaths, FullInstallPathInfo{
+			FullInstallPath: installPath,
+			SourcePath:      builtPath,
+		})
+		platformGenerated = append(platformGenerated, installPath.String())
 	}
 	builder.Command().Textf("touch").Output(stagingDirTimestamp)
 	builder.Build("assemble_filesystem_staging_dir", "Assemble filesystem staging dir")
@@ -160,29 +178,18 @@ func (m *systemOtherImage) GenerateAndroidBuildActions(ctx android.ModuleContext
 
 	builder.Build("build_system_other", "build system other")
 
-	// Create a hermetic system_other.img with pinned timestamps
-	builder = android.NewRuleBuilder(pctx, ctx)
-	outputHermetic := android.PathForModuleOut(ctx, "for_target_files", "system_other.img")
-	outputHermeticPropFile := m.propFileForHermeticImg(ctx, builder, propFile)
-	builder.Command().
-		Textf("PATH=%s:$PATH", strings.Join(pathToolDirs, ":")).
-		BuiltTool("build_image").
-		Text(stagingDir.String()). // input directory
-		Input(outputHermeticPropFile).
-		Implicits(systemInfo.BuildImagePropFileDeps).
-		Implicit(fec).
-		Implicit(stagingDirTimestamp).
-		Output(outputHermetic).
-		Text(stagingDir.String())
-
-	builder.Build("build_system_other_hermetic", "build system other")
-
 	fsInfo := FilesystemInfo{
 		Output:              output,
-		OutputHermetic:      outputHermetic,
 		RootDir:             stagingDir,
+		ModuleName:          ctx.ModuleName(),
 		FilesystemConfig:    m.generateFilesystemConfig(ctx, stagingDir, stagingDirTimestamp),
 		PropFileForMiscInfo: m.buildPropFileForMiscInfo(ctx),
+		InstalledFilesDepSet: depset.New(
+			depset.POSTORDER,
+			[]InstalledFilesStruct{buildInstalledFiles(ctx, "system-other", stagingDir, output)},
+			nil,
+		),
+		FullInstallPaths: fullInstallPaths,
 	}
 
 	android.SetProvider(ctx, FilesystemProvider, fsInfo)
@@ -192,7 +199,12 @@ func (m *systemOtherImage) GenerateAndroidBuildActions(ctx android.ModuleContext
 
 	// Dump compliance metadata
 	complianceMetadataInfo := ctx.ComplianceMetadataInfo()
-	complianceMetadataInfo.SetFilesContained(fullInstallPaths)
+	filesContained := make([]string, 0, len(fullInstallPaths))
+	for _, file := range fullInstallPaths {
+		filesContained = append(filesContained, file.FullInstallPath.String())
+	}
+	complianceMetadataInfo.SetFilesContained(filesContained)
+	complianceMetadataInfo.SetPlatformGeneratedFiles(platformGenerated)
 }
 
 func (s *systemOtherImage) generateFilesystemConfig(ctx android.ModuleContext, stagingDir, stagingDirTimestamp android.Path) android.Path {
@@ -207,13 +219,6 @@ func (s *systemOtherImage) generateFilesystemConfig(ctx android.ModuleContext, s
 		},
 	})
 	return out
-}
-
-func (f *systemOtherImage) propFileForHermeticImg(ctx android.ModuleContext, builder *android.RuleBuilder, inputPropFile android.Path) android.Path {
-	propFilePinnedTimestamp := android.PathForModuleOut(ctx, "for_target_files", "prop")
-	builder.Command().Textf("cat").Input(inputPropFile).Flag(">").Output(propFilePinnedTimestamp).
-		Textf(" && echo use_fixed_timestamp=true >> %s", propFilePinnedTimestamp)
-	return propFilePinnedTimestamp
 }
 
 func (f *systemOtherImage) buildPropFileForMiscInfo(ctx android.ModuleContext) android.Path {

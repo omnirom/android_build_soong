@@ -164,7 +164,7 @@ func TestDataLibsRelativeInstallPath(t *testing.T) {
 		}
  `
 
-	ctx := testRust(t, bp)
+	ctx := testRust(t, bp, android.PrepareForTestWithAndroidMk)
 	testingModule := ctx.ModuleForTests(t, "main_test", "android_arm64_armv8-a")
 	module := testingModule.Module()
 	testBinary := module.(*Module).compiler.(*testDecorator)
@@ -181,17 +181,17 @@ func TestDataLibsRelativeInstallPath(t *testing.T) {
 	if !strings.HasSuffix(outputPath, "/main_test") {
 		t.Errorf("expected test output file to be 'main_test', but was '%s'", outputPath)
 	}
-	entries := android.AndroidMkEntriesForTest(t, ctx, module)[0]
-	if !strings.HasSuffix(entries.EntryMap["LOCAL_TEST_DATA"][0], ":test_lib.so:lib64/foo/bar/baz") {
+	info := android.AndroidMkInfoForTest(t, ctx, module)
+	if !strings.HasSuffix(info.PrimaryInfo.EntryMap["LOCAL_TEST_DATA"][0], ":test_lib.so:lib64/foo/bar/baz") {
 		t.Errorf("expected LOCAL_TEST_DATA to end with `:test_lib.so:lib64/foo/bar/baz`,"+
-			" but was '%s'", entries.EntryMap["LOCAL_TEST_DATA"][0])
+			" but was '%s'", info.PrimaryInfo.EntryMap["LOCAL_TEST_DATA"][0])
 	}
-	if !strings.HasSuffix(entries.EntryMap["LOCAL_TEST_DATA"][1], ":librust_test_lib.so:lib64/foo/bar/baz") {
+	if !strings.HasSuffix(info.PrimaryInfo.EntryMap["LOCAL_TEST_DATA"][1], ":librust_test_lib.so:lib64/foo/bar/baz") {
 		t.Errorf("expected LOCAL_TEST_DATA to end with `:librust_test_lib.so:lib64/foo/bar/baz`,"+
-			" but was '%s'", entries.EntryMap["LOCAL_TEST_DATA"][1])
+			" but was '%s'", info.PrimaryInfo.EntryMap["LOCAL_TEST_DATA"][1])
 	}
-	if !strings.HasSuffix(entries.EntryMap["LOCAL_TEST_DATA"][2], ":rusty:foo/bar/baz") {
+	if !strings.HasSuffix(info.PrimaryInfo.EntryMap["LOCAL_TEST_DATA"][2], ":rusty:foo/bar/baz") {
 		t.Errorf("expected LOCAL_TEST_DATA to end with `:rusty:foo/bar/baz`,"+
-			" but was '%s'", entries.EntryMap["LOCAL_TEST_DATA"][2])
+			" but was '%s'", info.PrimaryInfo.EntryMap["LOCAL_TEST_DATA"][2])
 	}
 }

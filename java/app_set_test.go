@@ -25,7 +25,7 @@ import (
 
 func TestAndroidAppSet(t *testing.T) {
 	t.Parallel()
-	result := PrepareForTestWithJavaDefaultModules.RunTestWithBp(t, `
+	result := prepareForJavaAndroidMkTest.RunTestWithBp(t, `
 		android_app_set {
 			name: "foo",
 			set: "prebuilts/apks/app.apks",
@@ -54,8 +54,8 @@ func TestAndroidAppSet(t *testing.T) {
 		},
 		params.ImplicitOutputs.Paths())
 
-	mkEntries := android.AndroidMkEntriesForTest(t, result.TestContext, module.Module())[0]
-	actualInstallFile := mkEntries.EntryMap["LOCAL_APK_SET_INSTALL_FILE"]
+	mkInfo := android.AndroidMkInfoForTest(t, result.TestContext, module.Module())
+	actualInstallFile := mkInfo.PrimaryInfo.EntryMap["LOCAL_APK_SET_INSTALL_FILE"]
 	expectedInstallFile := []string{
 		strings.Replace(params.ImplicitOutputs[0].String(), android.TestOutSoongDir, result.Config.SoongOutDir(), 1),
 	}

@@ -30,9 +30,8 @@ func init() {
 type fuzzDecorator struct {
 	*binaryDecorator
 
-	fuzzPackagedModule  fuzz.FuzzPackagedModule
-	sharedLibraries     android.RuleBuilderInstalls
-	installedSharedDeps []string
+	fuzzPackagedModule fuzz.FuzzPackagedModule
+	sharedLibraries    cc.InstallPairs
 }
 
 var _ compiler = (*fuzzDecorator)(nil)
@@ -55,9 +54,9 @@ func NewRustFuzz(hod android.HostOrDeviceSupported) (*Module, *fuzzDecorator) {
 	}
 
 	// Change the defaults for the binaryDecorator's baseCompiler
-	fuzz.binaryDecorator.baseCompiler.dir = "fuzz"
-	fuzz.binaryDecorator.baseCompiler.dir64 = "fuzz"
-	fuzz.binaryDecorator.baseCompiler.location = InstallInData
+	fuzz.dir = "fuzz"
+	fuzz.dir64 = "fuzz"
+	fuzz.location = InstallInData
 	module.sanitize.SetSanitizer(cc.Fuzzer, true)
 
 	// The fuzzer runtime is not present for darwin or bionic host modules, so disable rust_fuzz modules for these.
@@ -109,7 +108,7 @@ func (fuzzer *fuzzDecorator) compilerDeps(ctx DepsContext, deps Deps) Deps {
 	return deps
 }
 
-func (fuzzer *fuzzDecorator) compilerProps() []interface{} {
+func (fuzzer *fuzzDecorator) compilerProps() []any {
 	return append(fuzzer.binaryDecorator.compilerProps(),
 		&fuzzer.fuzzPackagedModule.FuzzProperties)
 }
@@ -121,8 +120,8 @@ func (fuzzer *fuzzDecorator) compile(ctx ModuleContext, flags Flags, deps PathDe
 	return out
 }
 
-func (fuzzer *fuzzDecorator) stdLinkage(device bool) RustLinkage {
-	return RlibLinkage
+func (fuzzer *fuzzDecorator) stdLinkage(device bool) StdLinkage {
+	return RlibStd
 }
 
 func (fuzzer *fuzzDecorator) autoDep(ctx android.BottomUpMutatorContext) autoDep {
@@ -132,23 +131,14 @@ func (fuzzer *fuzzDecorator) autoDep(ctx android.BottomUpMutatorContext) autoDep
 func (fuzz *fuzzDecorator) install(ctx ModuleContext) {
 	fuzz.fuzzPackagedModule = cc.PackageFuzzModule(ctx, fuzz.fuzzPackagedModule)
 
-	installBase := "fuzz"
-
 	// Grab the list of required shared libraries.
 	fuzz.sharedLibraries, _ = cc.CollectAllSharedDependencies(ctx)
 
-	for _, ruleBuilderInstall := range fuzz.sharedLibraries {
-		install := ruleBuilderInstall.To
-
-		fuzz.installedSharedDeps = append(fuzz.installedSharedDeps,
-			cc.SharedLibraryInstallLocation(
-				install, ctx.Host(), ctx.InstallInVendor(), installBase, ctx.Arch().ArchType.String()))
-
-		// Also add the dependency on the shared library symbols dir.
-		if !ctx.Host() {
-			fuzz.installedSharedDeps = append(fuzz.installedSharedDeps,
-				cc.SharedLibrarySymbolsInstallLocation(install, ctx.InstallInVendor(), installBase, ctx.Arch().ArchType.String()))
-		}
+	for _, sharedLib := range fuzz.sharedLibraries {
+		fuzz.installDeps = append(
+			fuzz.installDeps,
+			sharedLib.Dst,
+		)
 	}
 
 	var fuzzData []android.DataPath
@@ -168,12 +158,12 @@ func (fuzz *fuzzDecorator) install(ctx ModuleContext) {
 		fuzzData = append(fuzzData, android.DataPath{SrcPath: d, WithoutRel: true})
 	}
 
-	fuzz.binaryDecorator.baseCompiler.dir = filepath.Join(
+	fuzz.dir = filepath.Join(
 		"fuzz", ctx.Target().Arch.ArchType.String(), ctx.ModuleName())
-	fuzz.binaryDecorator.baseCompiler.dir64 = filepath.Join(
+	fuzz.dir64 = filepath.Join(
 		"fuzz", ctx.Target().Arch.ArchType.String(), ctx.ModuleName())
-	fuzz.binaryDecorator.baseCompiler.installTestData(ctx, fuzzData)
+	fuzz.installTestData(ctx, fuzzData)
 
-	fuzz.binaryDecorator.baseCompiler.install(ctx)
+	fuzz.baseCompiler.install(ctx)
 
 }

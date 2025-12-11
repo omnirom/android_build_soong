@@ -15,12 +15,13 @@
 package cc
 
 import (
-	"android/soong/android"
 	"strings"
+
+	"android/soong/android"
 )
 
 func init() {
-	android.InitRegistrationContext.RegisterSingletonType("cc_misc_disted_files", ccMiscDistedFilesSingletonFactory)
+	android.InitRegistrationContext.RegisterParallelSingletonType("cc_misc_disted_files", ccMiscDistedFilesSingletonFactory)
 }
 
 func ccMiscDistedFilesSingletonFactory() android.Singleton {
@@ -36,7 +37,7 @@ func (s *ccMiscDistedFilesSingleton) GenerateBuildActions(ctx android.SingletonC
 	var warningsAllowed []string
 	var usingWnoErrors []string
 	var missingProfiles []string
-	ctx.VisitAllModules(func(module android.Module) {
+	ctx.VisitAllModuleProxies(func(module android.ModuleProxy) {
 		if v, ok := android.OtherModuleProvider(ctx, module, CcMakeVarsInfoProvider); ok {
 			warningsAllowed = android.AppendIfNotZero(warningsAllowed, v.WarningsAllowed)
 			usingWnoErrors = android.AppendIfNotZero(usingWnoErrors, v.UsingWnoError)

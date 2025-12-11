@@ -19,7 +19,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/google/blueprint"
+	"github.com/google/blueprint/bootstrap"
 )
 
 func init() {
@@ -59,6 +59,7 @@ var allowedPluginsByName = map[string]bool{
 	"soong-java-config-error_prone":          true,
 	"soong-libchrome":                        true,
 	"soong-llvm":                             true,
+	"soong-noto-fonts":                       true,
 	"soong-robolectric":                      true,
 	"soong-rust-prebuilts":                   true,
 	"soong-selinux":                          true,
@@ -68,14 +69,11 @@ var allowedPluginsByName = map[string]bool{
 	"treble_report_module":                   true,
 	"vintf-compatibility-matrix-soong-rules": true,
 	"xsdc-soong-rules":                       true,
+	"xtensa":                                 true,
 }
 
 var internalPluginsPaths = []string{
 	"vendor/google/build/soong/internal_plugins.json",
-}
-
-type pluginProvider interface {
-	IsPluginFor(string) bool
 }
 
 func maybeAddInternalPluginsToAllowlist(ctx SingletonContext) {
@@ -105,34 +103,35 @@ func (p *pluginSingleton) GenerateBuildActions(ctx SingletonContext) {
 	maybeAddInternalPluginsToAllowlist(ctx)
 
 	disallowedPlugins := map[string]bool{}
-	ctx.VisitAllModulesBlueprint(func(module blueprint.Module) {
-		if ctx.ModuleType(module) != "bootstrap_go_package" {
+	ctx.VisitAllModuleProxies(func(module ModuleProxy) {
+		if ctx.ModuleName(module) != "soong_build" {
 			return
 		}
 
-		p, ok := module.(pluginProvider)
-		if !ok || !p.IsPluginFor("soong_build") {
-			return
-		}
+		ctx.VisitDirectDepsProxies(module, func(module ModuleProxy) {
+			if ctx.OtherModuleDependencyTag(module) != bootstrap.PluginDepTag {
+				return
+			}
 
-		name := ctx.ModuleName(module)
-		if _, ok := allowedPluginsByName[name]; ok {
-			return
-		}
+			name := ctx.ModuleName(module)
+			if _, ok := allowedPluginsByName[name]; ok {
+				return
+			}
 
-		dir := ctx.ModuleDir(module)
+			dir := ctx.ModuleDir(module)
 
-		// allow use of plugins within Soong to not allowlist everything
-		if strings.HasPrefix(dir, "build/soong") {
-			return
-		}
+			// allow use of plugins within Soong to not allowlist everything
+			if strings.HasPrefix(dir, "build/soong") {
+				return
+			}
 
-		// allow third party users outside of external to create new plugins, i.e. non-google paths
-		// under vendor or hardware
-		if !strings.HasPrefix(dir, "external/") && IsThirdPartyPath(dir) {
-			return
-		}
-		disallowedPlugins[name] = true
+			// allow third party users outside of external to create new plugins, i.e. non-google paths
+			// under vendor or hardware
+			if !strings.HasPrefix(dir, "external/") && IsThirdPartyPath(dir) {
+				return
+			}
+			disallowedPlugins[name] = true
+		})
 	})
 	if len(disallowedPlugins) > 0 {
 		ctx.Errorf("New plugins are not supported; however %q were found. Please reach out to the build team or use BUILD_BROKEN_PLUGIN_VALIDATION (see Changes.md for more info).", SortedKeys(disallowedPlugins))

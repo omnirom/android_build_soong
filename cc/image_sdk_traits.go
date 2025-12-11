@@ -16,6 +16,8 @@ package cc
 
 import "android/soong/android"
 
+//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+
 // This file contains support for the image variant sdk traits.
 
 func init() {
@@ -23,6 +25,7 @@ func init() {
 	android.RegisterSdkMemberTrait(recoveryImageRequiredSdkTrait)
 }
 
+// @auto-generate: gob
 type imageSdkTraitStruct struct {
 	android.SdkMemberTraitBase
 }

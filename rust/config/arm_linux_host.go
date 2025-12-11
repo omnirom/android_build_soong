@@ -56,7 +56,7 @@ func (t *toolchainLinuxArm64) Name() string {
 
 func (t *toolchainLinuxArm64) ToolchainLinkFlags() string {
 	// Prepend the lld flags from cc_config so we stay in sync with cc
-	return "${cc_config.LinuxLldflags} ${cc_config.LinuxArm64Lldflags} " +
+	return "${cc_config.LinuxLdflags} ${cc_config.LinuxArm64Ldflags} " +
 		"${config.LinuxToolchainLinkFlags} ${config.LinuxToolchainArm64LinkFlags}"
 }
 
@@ -113,7 +113,7 @@ func (toolchainLinuxArm64) LibclangRuntimeLibraryArch() string {
 
 func (t *toolchainLinuxArm) ToolchainLinkFlags() string {
 	// Prepend the lld flags from cc_config so we stay in sync with cc
-	return "${cc_config.LinuxLldflags} ${cc_config.LinuxArmLldflags} " +
+	return "${cc_config.LinuxLdflags} ${cc_config.LinuxArmLdflags} " +
 		"${config.LinuxToolchainLinkFlags} ${config.LinuxToolchainArmLinkFlags}"
 }
 

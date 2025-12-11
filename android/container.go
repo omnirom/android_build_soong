@@ -23,6 +23,8 @@ import (
 	"github.com/google/blueprint"
 )
 
+//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+
 // ----------------------------------------------------------------------------
 // Start of the definitions of exception functions and the lookup table.
 //
@@ -177,7 +179,9 @@ var ctsContainerBoundaryFunc containerBoundaryFunc = func(mctx ModuleContext) bo
 		val := reflect.ValueOf(prop).Elem()
 		if val.Kind() == reflect.Struct {
 			testSuites := val.FieldByName("Test_suites")
-			if testSuites.IsValid() && testSuites.Kind() == reflect.Slice && slices.Contains(testSuites.Interface().([]string), "cts") {
+			if testSuites.IsValid() && testSuites.Kind() == reflect.Slice && slices.ContainsFunc(testSuites.Interface().([]string), func(s string) bool {
+				return s == "cts" || strings.HasPrefix(s, "mts")
+			}) {
 				return true
 			}
 		}
@@ -185,6 +189,7 @@ var ctsContainerBoundaryFunc containerBoundaryFunc = func(mctx ModuleContext) bo
 	return false
 }
 
+// @auto-generate: gob
 type unstableInfo struct {
 	// Determines if the module contains the private APIs of the platform.
 	ContainsPlatformPrivateApis bool
@@ -299,7 +304,7 @@ var (
 		restricted: []restriction{
 			{
 				dependency: UnstableContainer,
-				errorMessage: "CTS module should not depend on the modules that contain the " +
+				errorMessage: "CTS/MTS module should not depend on the modules that contain the " +
 					"platform implementation details, including \"framework\". Depending on these " +
 					"modules may lead to disclosure of implementation details and regression " +
 					"due to API changes across platform versions. Try depending on the stubs instead " +
@@ -448,7 +453,7 @@ func generateContainerInfo(ctx ModuleContext) ContainersInfo {
 	}
 }
 
-func getContainerModuleInfo(ctx ModuleContext, module Module) (ContainersInfo, bool) {
+func getContainerModuleInfo(ctx ModuleContext, module ModuleOrProxy) (ContainersInfo, bool) {
 	if EqualModules(ctx.Module(), module) {
 		return ctx.getContainersInfo(), true
 	}

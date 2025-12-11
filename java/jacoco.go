@@ -19,6 +19,7 @@ package java
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/google/blueprint"
@@ -27,6 +28,10 @@ import (
 	"android/soong/android"
 	"android/soong/java/config"
 )
+
+func init() {
+	android.InitRegistrationContext.RegisterParallelSingletonType("device_tests_jacoco_zip", deviceTestsJacocoZipSingletonFactory)
+}
 
 var (
 	jacoco = pctx.AndroidStaticRule("jacoco", blueprint.RuleParams{
@@ -166,4 +171,81 @@ func jacocoFilterToSpec(filter string) (string, error) {
 	}
 
 	return spec, nil
+}
+
+type JacocoInfo struct {
+	ReportClassesFile android.Path
+	Class             string
+	ModuleName        string
+}
+
+var ApexJacocoInfoProvider = blueprint.NewProvider[[]JacocoInfo]()
+
+type BuildJacocoZipContext interface {
+	android.BuilderContext
+	android.OtherModuleProviderContext
+}
+
+func BuildJacocoZip(ctx BuildJacocoZipContext, modules []android.ModuleProxy, outputFile android.WritablePath) {
+	jacocoZipBuilder := android.NewRuleBuilder(pctx, ctx)
+	jacocoZipCmd := jacocoZipBuilder.Command().BuiltTool("soong_zip").
+		FlagWithOutput("-o ", outputFile).
+		Flag("-L 0")
+	for _, m := range modules {
+		if javaInfo, ok := android.OtherModuleProvider(ctx, m, JavaInfoProvider); ok && javaInfo.JacocoInfo.ReportClassesFile != nil {
+			jacoco := javaInfo.JacocoInfo
+			jacocoZipCmd.FlagWithArg("-e ", fmt.Sprintf("out/target/common/obj/%s/%s_intermediates/jacoco-report-classes.jar", jacoco.Class, jacoco.ModuleName)).
+				FlagWithInput("-f ", jacoco.ReportClassesFile)
+		} else if info, ok := android.OtherModuleProvider(ctx, m, ApexJacocoInfoProvider); ok {
+			for _, jacoco := range info {
+				jacocoZipCmd.FlagWithArg("-e ", fmt.Sprintf("out/target/common/obj/%s/%s_intermediates/jacoco-report-classes.jar", jacoco.Class, jacoco.ModuleName)).
+					FlagWithInput("-f ", jacoco.ReportClassesFile)
+			}
+		}
+	}
+
+	jacocoZipBuilder.Build("jacoco_report_classes_zip_"+outputFile.String(), "Building jacoco report zip")
+}
+
+func BuildJacocoZipWithPotentialDeviceTests(ctx android.ModuleContext, modules []android.ModuleProxy, outputFile android.WritablePath) {
+	if !ctx.Config().IsEnvTrue("JACOCO_PACKAGING_INCLUDE_DEVICE_TESTS") {
+		BuildJacocoZip(ctx, modules, outputFile)
+		return
+	}
+
+	jacocoZipWithoutDeviceTests := android.PathForModuleOut(ctx, "temp-jacoco-report-classes-all-without-device-tests.jar")
+	BuildJacocoZip(ctx, modules, jacocoZipWithoutDeviceTests)
+	ctx.Build(pctx, android.BuildParams{
+		Rule:   android.MergeZips,
+		Output: outputFile,
+		Inputs: []android.Path{
+			jacocoZipWithoutDeviceTests,
+			DeviceTestsJacocoReportZip(ctx),
+		},
+	})
+}
+
+func deviceTestsJacocoZipSingletonFactory() android.Singleton {
+	return &deviceTestsJacocoZipSingleton{}
+}
+
+type deviceTestsJacocoZipSingleton struct{}
+
+// GenerateBuildActions implements android.Singleton.
+func (d *deviceTestsJacocoZipSingleton) GenerateBuildActions(ctx android.SingletonContext) {
+	var deviceTestModules []android.ModuleProxy
+	ctx.VisitAllModuleProxies(func(m android.ModuleProxy) {
+		if tsm, ok := android.OtherModuleProvider(ctx, m, android.TestSuiteInfoProvider); ok {
+			if slices.Contains(tsm.TestSuites, "device-tests") {
+				deviceTestModules = append(deviceTestModules, m)
+			}
+		}
+	})
+
+	jacocoZip := DeviceTestsJacocoReportZip(ctx)
+	BuildJacocoZip(ctx, deviceTestModules, jacocoZip)
+}
+
+func DeviceTestsJacocoReportZip(ctx android.PathContext) android.WritablePath {
+	return android.PathForOutput(ctx, "device_tests_jacoco_report_classes_all.jar")
 }

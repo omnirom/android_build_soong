@@ -8,6 +8,7 @@ bootstrap_go_package {
     deps: [
         "blueprint",
         "blueprint-pathtools",
+        "blueprint-proptools",
         "sbox_proto",
         "soong",
         "soong-android",
@@ -35,12 +36,13 @@ all_aconfig_declarations {
     name: "all_aconfig_declarations",
     visibility: [
         "//vendor:__subpackages__", // for vendor extensions
+        "//frameworks/base/ravenwood",
     ],
     api_signature_files: [
-        ":frameworks-base-api-current.txt",
-        ":frameworks-base-api-system-current.txt",
-        ":frameworks-base-api-system-server-current.txt",
-        ":frameworks-base-api-module-lib-current.txt",
+        ":frameworks-base-api-checked-in-current.txt",
+        ":frameworks-base-api-system-checked-in-current.txt",
+        ":frameworks-base-api-system-server-checked-in-current.txt",
+        ":frameworks-base-api-module-lib-checked-in-current.txt",
     ],
     finalized_flags_file: ":latest-finalized-flags",
 }

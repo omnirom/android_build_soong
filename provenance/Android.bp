@@ -25,6 +25,7 @@ bootstrap_go_package {
         "provenance_singleton.go",
     ],
     deps: [
+        "blueprint",
         "soong-android",
     ],
     testSrcs: [

@@ -20,6 +20,8 @@ import (
 	"github.com/google/blueprint/proptools"
 )
 
+//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+
 // This file contains support for using apex modules within an sdk.
 
 func init() {
@@ -36,6 +38,7 @@ func init() {
 	})
 }
 
+// @auto-generate: gob
 type apexSdkMemberType struct {
 	android.SdkMemberTypeBase
 }
@@ -44,8 +47,8 @@ func (mt *apexSdkMemberType) AddDependencies(ctx android.SdkDependencyContext, d
 	ctx.AddVariationDependencies(nil, dependencyTag, names...)
 }
 
-func (mt *apexSdkMemberType) IsInstance(module android.Module) bool {
-	_, ok := module.(*apexBundle)
+func (mt *apexSdkMemberType) IsInstance(ctx android.ModuleContext, module android.ModuleProxy) bool {
+	_, ok := android.OtherModuleProvider(ctx, module, android.ApexBundleTypeInfoProvider)
 	return ok
 }
 

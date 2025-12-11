@@ -417,7 +417,7 @@ func TestLicenses(t *testing.T) {
 
 func checkEffectivePackage(t *testing.T, result *TestResult, effectivePackage map[string]string) {
 	actualPackage := make(map[string]string)
-	result.Context.Context.VisitAllModules(func(m blueprint.Module) {
+	result.VisitAllModules(func(m Module) {
 		if _, ok := m.(*licenseModule); ok {
 			return
 		}
@@ -427,12 +427,7 @@ func checkEffectivePackage(t *testing.T, result *TestResult, effectivePackage ma
 		if _, ok := m.(*packageModule); ok {
 			return
 		}
-		module, ok := m.(Module)
-		if !ok {
-			t.Errorf("%q not a module", m.Name())
-			return
-		}
-		base := module.base()
+		base := m.base()
 		if base == nil {
 			return
 		}
@@ -457,7 +452,7 @@ func checkEffectivePackage(t *testing.T, result *TestResult, effectivePackage ma
 
 func checkEffectiveNotices(t *testing.T, result *TestResult, effectiveNotices map[string][]string) {
 	actualNotices := make(map[string][]string)
-	result.Context.Context.VisitAllModules(func(m blueprint.Module) {
+	result.VisitAllModules(func(m Module) {
 		if _, ok := m.(*licenseModule); ok {
 			return
 		}
@@ -467,12 +462,7 @@ func checkEffectiveNotices(t *testing.T, result *TestResult, effectiveNotices ma
 		if _, ok := m.(*packageModule); ok {
 			return
 		}
-		module, ok := m.(Module)
-		if !ok {
-			t.Errorf("%q not a module", m.Name())
-			return
-		}
-		base := module.base()
+		base := m.base()
 		if base == nil {
 			return
 		}
@@ -492,7 +482,7 @@ func checkEffectiveNotices(t *testing.T, result *TestResult, effectiveNotices ma
 
 func checkEffectiveKinds(t *testing.T, result *TestResult, effectiveKinds map[string][]string) {
 	actualKinds := make(map[string][]string)
-	result.Context.Context.VisitAllModules(func(m blueprint.Module) {
+	result.VisitAllModules(func(m Module) {
 		if _, ok := m.(*licenseModule); ok {
 			return
 		}
@@ -502,12 +492,7 @@ func checkEffectiveKinds(t *testing.T, result *TestResult, effectiveKinds map[st
 		if _, ok := m.(*packageModule); ok {
 			return
 		}
-		module, ok := m.(Module)
-		if !ok {
-			t.Errorf("%q not a module", m.Name())
-			return
-		}
-		base := module.base()
+		base := m.base()
 		if base == nil {
 			return
 		}
@@ -527,7 +512,7 @@ func checkEffectiveKinds(t *testing.T, result *TestResult, effectiveKinds map[st
 
 func checkEffectiveConditions(t *testing.T, result *TestResult, effectiveConditions map[string][]string) {
 	actualConditions := make(map[string][]string)
-	result.Context.Context.VisitAllModules(func(m blueprint.Module) {
+	result.VisitAllModules(func(m Module) {
 		if _, ok := m.(*licenseModule); ok {
 			return
 		}
@@ -537,12 +522,7 @@ func checkEffectiveConditions(t *testing.T, result *TestResult, effectiveConditi
 		if _, ok := m.(*packageModule); ok {
 			return
 		}
-		module, ok := m.(Module)
-		if !ok {
-			t.Errorf("%q not a module", m.Name())
-			return
-		}
-		base := module.base()
+		base := m.base()
 		if base == nil {
 			return
 		}

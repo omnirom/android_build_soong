@@ -274,12 +274,6 @@ func (test *testDecorator) moduleInfoJSON(ctx android.ModuleContext, moduleInfoJ
 	}
 }
 
-func (test *testDecorator) testSuiteInfo(ctx ModuleContext) {
-	android.SetProvider(ctx, android.TestSuiteInfoProvider, android.TestSuiteInfo{
-		TestSuites: test.InstallerProperties.Test_suites,
-	})
-}
-
 func NewTestInstaller() *baseInstaller {
 	return NewBaseInstaller("nativetest", "nativetest64", InstallInData)
 }
@@ -321,8 +315,11 @@ func (test *testBinary) linkerFlags(ctx ModuleContext, flags Flags) Flags {
 }
 
 func (test *testBinary) moduleInfoJSON(ctx ModuleContext, moduleInfoJSON *android.ModuleInfoJSON) {
-	if ctx.Host() && Bool(test.Properties.Test_options.Unit_test) {
-		moduleInfoJSON.CompatibilitySuites = append(moduleInfoJSON.CompatibilitySuites, "host-unit-tests")
+	if Bool(test.Properties.Test_options.Unit_test) {
+		moduleInfoJSON.IsUnitTest = "true"
+		if ctx.Host() {
+			moduleInfoJSON.CompatibilitySuites = append(moduleInfoJSON.CompatibilitySuites, "host-unit-tests")
+		}
 	}
 	moduleInfoJSON.TestOptionsTags = append(moduleInfoJSON.TestOptionsTags, test.Properties.Test_options.Tags...)
 	moduleInfoJSON.TestMainlineModules = append(moduleInfoJSON.TestMainlineModules, test.Properties.Test_mainline_modules...)
@@ -346,10 +343,6 @@ func (test *testBinary) moduleInfoJSON(ctx ModuleContext, moduleInfoJSON *androi
 	test.testDecorator.moduleInfoJSON(ctx, moduleInfoJSON)
 	moduleInfoJSON.Class = []string{"NATIVE_TESTS"}
 
-}
-
-func (test *testBinary) testSuiteInfo(ctx ModuleContext) {
-	test.testDecorator.testSuiteInfo(ctx)
 }
 
 func (test *testBinary) installerProps() []interface{} {
@@ -422,44 +415,37 @@ func (test *testBinary) install(ctx ModuleContext, file android.Path) {
 		test.Properties.Test_options.Unit_test = proptools.BoolPtr(true)
 	}
 
-	if !ctx.Config().KatiEnabled() { // TODO(spandandas): Remove the special case for kati
-		// Install the test config in testcases/ directory for atest.
-		c, ok := ctx.Module().(*Module)
-		if !ok {
-			ctx.ModuleErrorf("Not a cc_test module")
-		}
-		// Install configs in the root of $PRODUCT_OUT/testcases/$module
-		testCases := android.PathForModuleInPartitionInstall(ctx, "testcases", ctx.ModuleName()+c.SubName())
-		if ctx.PrimaryArch() {
-			if test.testConfig != nil {
-				ctx.InstallFile(testCases, ctx.ModuleName()+".config", test.testConfig)
-			}
-			dynamicConfig := android.ExistentPathForSource(ctx, ctx.ModuleDir(), "DynamicConfig.xml")
-			if dynamicConfig.Valid() {
-				ctx.InstallFile(testCases, ctx.ModuleName()+".dynamic", dynamicConfig.Path())
-			}
-			for _, extraTestConfig := range test.extraTestConfigs {
-				ctx.InstallFile(testCases, extraTestConfig.Base(), extraTestConfig)
-			}
-		}
-		// Install tests and data in arch specific subdir $PRODUCT_OUT/testcases/$module/$arch
-		testCases = testCases.Join(ctx, ctx.Target().Arch.ArchType.String())
-		ctx.InstallTestData(testCases, test.data)
-		ctx.InstallFile(testCases, file.Base(), file)
+	// Install the test config in testcases/ directory for atest.
+	c, ok := ctx.Module().(*Module)
+	if !ok {
+		ctx.ModuleErrorf("Not a cc_test module")
 	}
+
+	ctx.SetTestSuiteInfo(android.TestSuiteInfo{
+		NameSuffix:           c.SubName(),
+		TestSuites:           test.InstallerProperties.Test_suites,
+		MainFile:             file,
+		MainFileStem:         file.Base(),
+		ConfigFile:           test.testConfig,
+		ExtraConfigs:         test.extraTestConfigs,
+		Data:                 test.data,
+		NeedsArchFolder:      true,
+		PerTestcaseDirectory: Bool(test.Properties.Per_testcase_directory),
+		IsUnitTest:           Bool(test.Properties.Test_options.Unit_test),
+	})
 
 	test.binaryDecorator.baseInstaller.installTestData(ctx, test.data)
 	test.binaryDecorator.baseInstaller.install(ctx, file)
 	if Bool(test.Properties.Standalone_test) {
 		packagingSpecsBuilder := depset.NewBuilder[android.PackagingSpec](depset.TOPOLOGICAL)
 
-		ctx.VisitDirectDeps(func(dep android.Module) {
+		ctx.VisitDirectDepsProxy(func(dep android.ModuleProxy) {
 			deps := android.OtherModuleProviderOrDefault(ctx, dep, android.InstallFilesProvider)
 			packagingSpecsBuilder.Transitive(deps.TransitivePackagingSpecs)
 		})
 
 		for _, standaloneTestDep := range packagingSpecsBuilder.Build().ToList() {
-			if standaloneTestDep.ToGob().SrcPath == nil {
+			if standaloneTestDep.SrcPath() == nil {
 				continue
 			}
 			if standaloneTestDep.SkipInstall() {
@@ -588,8 +574,24 @@ func (test *testLibrary) moduleInfoJSON(ctx ModuleContext, moduleInfoJSON *andro
 	test.testDecorator.moduleInfoJSON(ctx, moduleInfoJSON)
 }
 
-func (test *testLibrary) testSuiteInfo(ctx ModuleContext) {
-	test.testDecorator.testSuiteInfo(ctx)
+func (test *testLibrary) install(ctx ModuleContext, file android.Path) {
+	test.libraryDecorator.install(ctx, file)
+
+	c, ok := ctx.Module().(*Module)
+	if !ok {
+		ctx.ModuleErrorf("Expected a cc module")
+	}
+	// host tests are not installed to testcases/ as per:
+	// https://cs.android.com/android/platform/superproject/main/+/main:build/make/core/base_rules.mk;l=251;drc=45efec6797cbf812df34dac9d05e43a9fe7217e0
+	if test.shared() {
+		ctx.SetTestSuiteInfo(android.TestSuiteInfo{
+			NameSuffix:      c.SubName(),
+			TestSuites:      test.InstallerProperties.Test_suites,
+			NeedsArchFolder: true,
+			MainFile:        file,
+			MainFileStem:    file.Base(),
+		})
+	}
 }
 
 func (test *testLibrary) installerProps() []interface{} {
@@ -684,6 +686,21 @@ func (benchmark *benchmarkDecorator) install(ctx ModuleContext, file android.Pat
 	benchmark.binaryDecorator.baseInstaller.dir64 = filepath.Join("benchmarktest64", ctx.ModuleName())
 	benchmark.binaryDecorator.baseInstaller.installTestData(ctx, benchmark.data)
 	benchmark.binaryDecorator.baseInstaller.install(ctx, file)
+
+	c, ok := ctx.Module().(*Module)
+	if !ok {
+		ctx.ModuleErrorf("Not a cc module")
+	}
+
+	ctx.SetTestSuiteInfo(android.TestSuiteInfo{
+		NameSuffix:      c.SubName(),
+		TestSuites:      benchmark.Properties.Test_suites,
+		MainFile:        file,
+		MainFileStem:    file.Base(),
+		ConfigFile:      benchmark.testConfig,
+		Data:            benchmark.data,
+		NeedsArchFolder: true,
+	})
 }
 
 func (benchmark *benchmarkDecorator) moduleInfoJSON(ctx ModuleContext, moduleInfoJSON *android.ModuleInfoJSON) {
@@ -707,12 +724,6 @@ func (benchmark *benchmarkDecorator) moduleInfoJSON(ctx ModuleContext, moduleInf
 		}
 		moduleInfoJSON.TestConfig = []string{benchmark.testConfig.String()}
 	}
-}
-
-func (benchmark *benchmarkDecorator) testSuiteInfo(ctx ModuleContext) {
-	android.SetProvider(ctx, android.TestSuiteInfoProvider, android.TestSuiteInfo{
-		TestSuites: benchmark.Properties.Test_suites,
-	})
 }
 
 func NewBenchmark(hod android.HostOrDeviceSupported) *Module {

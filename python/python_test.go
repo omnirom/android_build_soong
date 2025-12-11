@@ -23,8 +23,6 @@ import (
 
 	"android/soong/android"
 	"android/soong/cc"
-
-	"github.com/google/blueprint"
 )
 
 type pyModule struct {
@@ -37,7 +35,7 @@ type pyModule struct {
 
 var (
 	buildNamePrefix          = "soong_python_test"
-	moduleVariantErrTemplate = `%s: module %q variant "[a-zA-Z0-9_]*": `
+	moduleVariantErrTemplate = `%s: module %q variant "[a-zA-Z0-9_\-]*": `
 	pkgPathErrTemplate       = moduleVariantErrTemplate +
 		"pkg_path: %q must be a relative path contained in par file."
 	badIdentifierErrTemplate = moduleVariantErrTemplate +
@@ -46,9 +44,11 @@ var (
 		"found two files to be placed at the same location within zip %q." +
 		" First file: in module %s at path %q." +
 		" Second file: in module %s at path %q."
-	badSrcFileExtErr  = moduleVariantErrTemplate + `srcs: found non \(.py\|.proto\) file: %q!`
-	badDataFileExtErr = moduleVariantErrTemplate + `data: found \(.py\) file: %q!`
-	bpFile            = "Android.bp"
+	badSrcFileExtErr     = moduleVariantErrTemplate + `srcs: found non \(.py\|.proto\) file: %q!`
+	badDataFileExtErr    = moduleVariantErrTemplate + `data: found \(.py\) file: %q!`
+	sharedLibErrTemplate = moduleVariantErrTemplate +
+		"shared_libs: shared_libs is not supported for device builds"
+	bpFile = "Android.bp"
 
 	data = []struct {
 		desc      string
@@ -206,6 +206,27 @@ var (
 					"lib1", "dir/c/file1.py"),
 			},
 		},
+		{
+			desc: "device module with shared libs",
+			mockFiles: map[string][]byte{
+				filepath.Join("dir", bpFile): []byte(
+					`python_library {
+						name: "lib1",
+						srcs: [
+							"file1.py",
+						],
+						shared_libs: [
+							"clib1",
+						],
+					}`,
+				),
+				"dir/file1.py": nil,
+			},
+			errors: []string{
+				fmt.Sprintf(sharedLibErrTemplate,
+					"dir/Android.bp:6:18", "lib1"),
+			},
+		},
 	}
 )
 
@@ -268,7 +289,7 @@ func TestTestOnlyProvider(t *testing.T) {
 	// marked as test-only are marked as test-only.
 
 	actualTestOnly := []string{}
-	ctx.VisitAllModules(func(m blueprint.Module) {
+	ctx.VisitAllModules(func(m android.Module) {
 		if provider, ok := android.OtherModuleProvider(ctx.TestContext.OtherModuleProviderAdaptor(), m, android.TestOnlyProviderKey); ok {
 			if provider.TestOnly {
 				actualTestOnly = append(actualTestOnly, m.Name())
@@ -310,6 +331,68 @@ func TestInvalidTestOnlyTargets(t *testing.T) {
 			t.Errorf("ERR: %s bad bp: %s", ctx.Errs[0], bp)
 		}
 	}
+}
+
+func TestSharedLib(t *testing.T) {
+	ctx := android.GroupFixturePreparers(
+		android.PrepareForTestWithDefaults,
+		android.PrepareForTestWithArchMutator,
+		android.PrepareForTestWithAllowMissingDependencies,
+		cc.PrepareForTestWithCcDefaultModules,
+		PrepareForTestWithPythonBuildComponents,
+	).RunTestWithBp(
+		t,
+		`python_library_host {
+			name: "py-lib-host",
+			srcs: ["py-lib-host.py"],
+			shared_libs: ["clib-host"],
+		}
+
+		cc_library_shared {
+			name: "clib-host",
+			host_supported: true,
+			shared_libs: ["clib-host-2"],
+		}
+
+		cc_library_shared {
+			name: "clib-host-2",
+			host_supported: true,
+		}`,
+	)
+	if len(ctx.Errs) > 0 {
+		t.Errorf("Expected got: %s, want: 0 errs", ctx.Errs)
+	}
+
+	mod, modOk := ctx.ModuleForTests(t, "py-lib-host", ctx.Config.BuildOSTarget.String()).Module().(*PythonLibraryModule)
+	if !modOk {
+		t.Fatalf("py-lib-host is not Python library!")
+	}
+	// ensure the shared lib is included in the data path mappings
+	dataPathMappings := mod.getDataPathMappings()
+	if len(dataPathMappings) != 1 {
+		t.Fatalf("expected 1 data file, got: %d", len(dataPathMappings))
+	}
+	android.AssertStringMatches(
+		t,
+		"data path included shared lib",
+		dataPathMappings[0].dest,
+		"clib-host(.so|.dylib)",
+	)
+	// ensure any dependencies of the shared lib are included in the bundle shared
+	// libs
+	android.AssertStringMatches(
+		t,
+		"shared libs",
+		mod.getBundleSharedLibs()[0].String(),
+		"clib-host-2(.so|.dylib)$",
+	)
+	android.AssertStringMatches(
+		t,
+		"shared libs",
+		mod.getBundleSharedLibs()[1].String(),
+		"libc\\+\\+(.so|.dylib)$",
+	)
+
 }
 
 func expectModule(t *testing.T, ctx *android.TestContext, name, variant, expectedSrcsZip string, expectedPyRunfiles []string) {

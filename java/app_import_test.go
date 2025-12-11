@@ -365,7 +365,7 @@ func TestAndroidAppImport_DpiVariants(t *testing.T) {
 
 func TestAndroidAppImport_Filename(t *testing.T) {
 	t.Parallel()
-	ctx, _ := testJava(t, `
+	bp := `
 		android_app_import {
 			name: "foo",
 			apk: "prebuilts/apk/app.apk",
@@ -393,7 +393,7 @@ func TestAndroidAppImport_Filename(t *testing.T) {
 			filename: "bar_sample.apk",
 			compress_apk: true,
 		}
-		`)
+		`
 
 	testCases := []struct {
 		name                 string
@@ -432,28 +432,37 @@ func TestAndroidAppImport_Filename(t *testing.T) {
 		},
 	}
 
-	for _, test := range testCases {
-		variant := ctx.ModuleForTests(t, test.name, "android_common")
-		if variant.MaybeOutput(test.expected).Rule == nil {
-			t.Errorf("can't find output named %q - all outputs: %v", test.expected, variant.AllOutputs())
-		}
+	t.Run("soong_only", func(t *testing.T) {
+		ctx := prepareForJavaTest.RunTestWithBp(t, bp)
+		for _, test := range testCases {
+			variant := ctx.ModuleForTests(t, test.name, "android_common")
+			if variant.MaybeOutput(test.expected).Rule == nil {
+				t.Errorf("can't find output named %q - all outputs: %v", test.expected, variant.AllOutputs())
+			}
 
-		a := variant.Module().(*AndroidAppImport)
-		expectedValues := []string{test.expected}
-		entries := android.AndroidMkEntriesForTest(t, ctx, a)[0]
-		actualValues := entries.EntryMap["LOCAL_INSTALLED_MODULE_STEM"]
-		if !reflect.DeepEqual(actualValues, expectedValues) {
-			t.Errorf("Incorrect LOCAL_INSTALLED_MODULE_STEM value '%s', expected '%s'",
-				actualValues, expectedValues)
+			rule := variant.Rule("genProvenanceMetaData")
+			android.AssertStringEquals(t, "Invalid input", test.expectedArtifactPath, rule.Inputs[0].String())
+			android.AssertStringEquals(t, "Invalid output", test.expectedMetaDataPath, rule.Output.String())
+			android.AssertStringEquals(t, "Invalid args", test.name, rule.Args["module_name"])
+			android.AssertStringEquals(t, "Invalid args", test.onDevice, rule.Args["install_path"])
 		}
-		android.AssertStringEquals(t, "unexpected LOCAL_SOONG_MODULE_TYPE", "android_app_import", entries.EntryMap["LOCAL_SOONG_MODULE_TYPE"][0])
+	})
+	t.Run("androidmk", func(t *testing.T) {
+		ctx := prepareForJavaAndroidMkTest.RunTestWithBp(t, bp)
+		for _, test := range testCases {
+			variant := ctx.ModuleForTests(t, test.name, "android_common")
+			expectedValues := []string{test.expected}
+			info := android.AndroidMkInfoForTest(t, ctx.TestContext, variant.Module())
+			actualValues := info.PrimaryInfo.EntryMap["LOCAL_INSTALLED_MODULE_STEM"]
+			if !reflect.DeepEqual(actualValues, expectedValues) {
+				t.Errorf("Incorrect LOCAL_INSTALLED_MODULE_STEM value '%s', expected '%s'",
+					actualValues, expectedValues)
+			}
+			android.AssertStringEquals(t, "unexpected LOCAL_SOONG_MODULE_TYPE", "android_app_import",
+				info.PrimaryInfo.EntryMap["LOCAL_SOONG_MODULE_TYPE"][0])
+		}
+	})
 
-		rule := variant.Rule("genProvenanceMetaData")
-		android.AssertStringEquals(t, "Invalid input", test.expectedArtifactPath, rule.Inputs[0].String())
-		android.AssertStringEquals(t, "Invalid output", test.expectedMetaDataPath, rule.Output.String())
-		android.AssertStringEquals(t, "Invalid args", test.name, rule.Args["module_name"])
-		android.AssertStringEquals(t, "Invalid args", test.onDevice, rule.Args["install_path"])
-	}
 }
 
 func TestAndroidAppImport_ArchVariants(t *testing.T) {
@@ -790,7 +799,7 @@ func TestAndroidAppImport_ExtractApk(t *testing.T) {
 }
 func TestAndroidTestImport(t *testing.T) {
 	t.Parallel()
-	ctx, _ := testJava(t, `
+	ctx := prepareForJavaAndroidMkTest.RunTestWithBp(t, `
 		android_test_import {
 			name: "foo",
 			apk: "prebuilts/apk/app.apk",
@@ -804,14 +813,14 @@ func TestAndroidTestImport(t *testing.T) {
 	test := ctx.ModuleForTests(t, "foo", "android_common").Module().(*AndroidTestImport)
 
 	// Check android mks.
-	entries := android.AndroidMkEntriesForTest(t, ctx, test)[0]
+	info := android.AndroidMkInfoForTest(t, ctx.TestContext, test)
 	expected := []string{"tests"}
-	actual := entries.EntryMap["LOCAL_MODULE_TAGS"]
+	actual := info.PrimaryInfo.EntryMap["LOCAL_MODULE_TAGS"]
 	if !reflect.DeepEqual(expected, actual) {
 		t.Errorf("Unexpected module tags - expected: %q, actual: %q", expected, actual)
 	}
 	expected = []string{"testdata/data:testdata/data"}
-	actual = entries.EntryMap["LOCAL_COMPATIBILITY_SUPPORT_FILES"]
+	actual = info.PrimaryInfo.EntryMap["LOCAL_COMPATIBILITY_SUPPORT_FILES"]
 	if !reflect.DeepEqual(expected, actual) {
 		t.Errorf("Unexpected test data - expected: %q, actual: %q", expected, actual)
 	}
@@ -1049,7 +1058,7 @@ func TestAppImportMissingCertificateAllowMissingDependencies(t *testing.T) {
 
 	foo := result.ModuleForTests(t, "foo", "android_common")
 	fooApk := foo.Output("signed/foo.apk")
-	if fooApk.Rule != android.ErrorRule {
+	if !android.IsErrorRule(fooApk.Rule) {
 		t.Fatalf("expected ErrorRule for foo.apk, got %s", fooApk.Rule.String())
 	}
 	android.AssertStringDoesContain(t, "expected error rule message", fooApk.Args["error"], "missing dependencies: missing_certificate\n")

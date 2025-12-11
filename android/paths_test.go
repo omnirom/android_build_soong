@@ -1469,12 +1469,12 @@ func TestPathForModuleSrc(t *testing.T) {
 			bp: `
 			test {
 				name: "foo",
-				src: "//other:b",
-				srcs: ["//other:c"],
+				src: "//other:d",
+				srcs: ["//other:e"],
 			}`,
 			errorHandler: FixtureExpectsAllErrorsToMatchAPattern([]string{
-				`"foo" depends on undefined module "//other:b"`,
-				`"foo" depends on undefined module "//other:c"`,
+				`"foo" depends on undefined module "//other:d"`,
+				`"foo" depends on undefined module "//other:e"`,
 			}),
 		},
 		{
@@ -1537,7 +1537,7 @@ func TestPathsForModuleSrc_AllowMissingDependencies(t *testing.T) {
 
 	AssertArrayString(t, "foo missing deps", []string{"a", "b", "c"}, foo.missingDeps)
 	AssertArrayString(t, "foo srcs", []string{}, foo.srcs)
-	AssertStringEquals(t, "foo src", "", foo.src)
+	AssertStringEquals(t, "foo src", "Missing_PathForModuleSrc_file", foo.src)
 
 	bar := result.ModuleForTests(t, "bar", "").Module().(*pathForModuleSrcTestModule)
 

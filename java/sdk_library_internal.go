@@ -20,7 +20,9 @@ import (
 	"strings"
 
 	"android/soong/android"
+	"android/soong/dexpreopt"
 	"android/soong/etc"
+	"android/soong/java/config"
 
 	"github.com/google/blueprint/proptools"
 )
@@ -168,6 +170,7 @@ func (module *SdkLibrary) createImplLibrary(mctx android.DefaultableHookContext)
 		&module.dexpreoptProperties,
 		&module.linter.properties,
 		&module.overridableProperties,
+		&module.usesLibrary.usesLibraryProperties,
 		&props,
 		module.sdkComponentPropertiesForChildLibrary(),
 	}
@@ -196,7 +199,7 @@ func (module *SdkLibrary) createDroidstubs(mctx android.DefaultableHookContext, 
 		Name                             *string
 		Enabled                          proptools.Configurable[bool]
 		Visibility                       []string
-		Srcs                             []string
+		Srcs                             proptools.Configurable[[]string]
 		Installable                      *bool
 		Sdk_version                      *string
 		Api_surface                      *string
@@ -238,8 +241,8 @@ func (module *SdkLibrary) createDroidstubs(mctx android.DefaultableHookContext, 
 	props.Name = proptools.StringPtr(name)
 	props.Enabled = module.EnabledProperty()
 	props.Visibility = childModuleVisibility(module.sdkLibraryProperties.Stubs_source_visibility)
-	props.Srcs = append(props.Srcs, module.properties.Srcs...)
-	props.Srcs = append(props.Srcs, module.sdkLibraryProperties.Api_srcs...)
+	props.Srcs = module.properties.Srcs.Clone()
+	props.Srcs.AppendSimpleValue(module.sdkLibraryProperties.Api_srcs)
 	props.Sdk_version = module.deviceProperties.Sdk_version
 	props.Api_surface = module.getApiSurfaceForScope(apiScope)
 	props.System_modules = module.deviceProperties.System_modules
@@ -300,33 +303,42 @@ func (module *SdkLibrary) createDroidstubs(mctx android.DefaultableHookContext, 
 	props.Check_api.Current.Api_file = proptools.StringPtr(currentApiFileName)
 	props.Check_api.Current.Removed_api_file = proptools.StringPtr(removedApiFileName)
 
-	if module.compareAgainstLatestApi(apiScope) {
-		// check against the latest released API
-		latestApiFilegroupName := proptools.StringPtr(module.latestApiFilegroupName(apiScope))
-		props.Previous_api = latestApiFilegroupName
-		props.Check_api.Last_released.Api_file = latestApiFilegroupName
-		props.Check_api.Last_released.Removed_api_file = proptools.StringPtr(
-			module.latestRemovedApiFilegroupName(apiScope))
-		props.Check_api.Last_released.Baseline_file = proptools.StringPtr(
-			module.latestIncompatibilitiesFilegroupName(apiScope))
+	// Although a latest API is always provided it may not be a suitable one for
+	// comparing against, e.g. because the API surface does not require backwards
+	// compatibility or the latest API is a fake that is added simply to satisfy
+	// Metalava's requirement to provide one when working with flagged APIs.
+	compareAgainstLatestApi := module.compareAgainstLatestApi(apiScope)
 
-		if proptools.Bool(module.sdkLibraryProperties.Api_lint.Enabled) {
-			// Enable api lint.
-			props.Check_api.Api_lint.Enabled = proptools.BoolPtr(true)
-			props.Check_api.Api_lint.New_since = latestApiFilegroupName
+	// check against the latest released API
+	latestApiFilegroupName := proptools.StringPtr(module.latestApiFilegroupName(apiScope))
+	props.Previous_api = latestApiFilegroupName
 
-			// If it exists then pass a lint-baseline.txt through to droidstubs.
-			baselinePath := path.Join(apiDir, apiScope.apiFilePrefix+"lint-baseline.txt")
-			baselinePathRelativeToRoot := path.Join(mctx.ModuleDir(), baselinePath)
-			paths, err := mctx.GlobWithDeps(baselinePathRelativeToRoot, nil)
-			if err != nil {
-				mctx.ModuleErrorf("error checking for presence of %s: %s", baselinePathRelativeToRoot, err)
-			}
-			if len(paths) == 1 {
-				props.Check_api.Api_lint.Baseline_file = proptools.StringPtr(baselinePath)
-			} else if len(paths) != 0 {
-				mctx.ModuleErrorf("error checking for presence of %s: expected one path, found: %v", baselinePathRelativeToRoot, paths)
-			}
+	// Only perform compatibility checks if latest API is suitable.
+	props.Check_api.Last_released.Enabled = proptools.BoolPtr(compareAgainstLatestApi)
+
+	props.Check_api.Last_released.Api_file = latestApiFilegroupName
+	props.Check_api.Last_released.Removed_api_file = proptools.StringPtr(
+		module.latestRemovedApiFilegroupName(apiScope))
+	props.Check_api.Last_released.Baseline_file = proptools.StringPtr(
+		module.latestIncompatibilitiesFilegroupName(apiScope))
+
+	// Only perform the API lint check if the latest API is suitable.
+	if proptools.Bool(module.sdkLibraryProperties.Api_lint.Enabled) && compareAgainstLatestApi {
+		// Enable api lint.
+		props.Check_api.Api_lint.Enabled = proptools.BoolPtr(true)
+		props.Check_api.Api_lint.New_since = latestApiFilegroupName
+
+		// If it exists then pass a lint-baseline.txt through to droidstubs.
+		baselinePath := path.Join(apiDir, apiScope.apiFilePrefix+"lint-baseline.txt")
+		baselinePathRelativeToRoot := path.Join(mctx.ModuleDir(), baselinePath)
+		paths, err := mctx.GlobWithDeps(baselinePathRelativeToRoot, nil)
+		if err != nil {
+			mctx.ModuleErrorf("error checking for presence of %s: %s", baselinePathRelativeToRoot, err)
+		}
+		if len(paths) == 1 {
+			props.Check_api.Api_lint.Baseline_file = proptools.StringPtr(baselinePath)
+		} else if len(paths) != 0 {
+			mctx.ModuleErrorf("error checking for presence of %s: expected one path, found: %v", baselinePathRelativeToRoot, paths)
 		}
 	}
 
@@ -459,7 +471,7 @@ func (module *SdkLibrary) createApiLibrary(mctx android.DefaultableHookContext, 
 
 	// Api surfaces are not independent of each other, but have subset relationships,
 	// and so does the api files. To generate from-text stubs for api surfaces other than public,
-	// all subset api domains' api_contriubtions must be added as well.
+	// all subset api domains' api_contributions must be added as well.
 	scope := apiScope
 	for scope != nil {
 		apiContributions = append(apiContributions, module.droidstubsModuleName(scope)+".api.contribution")
@@ -491,11 +503,9 @@ func (module *SdkLibrary) createApiLibrary(mctx android.DefaultableHookContext, 
 		props.Sdk_version = module.deviceProperties.Sdk_version
 	}
 
-	if module.compareAgainstLatestApi(apiScope) {
-		// check against the latest released API
-		latestApiFilegroupName := proptools.StringPtr(module.latestApiFilegroupName(apiScope))
-		props.Previous_api = latestApiFilegroupName
-	}
+	// check against the latest released API
+	latestApiFilegroupName := proptools.StringPtr(module.latestApiFilegroupName(apiScope))
+	props.Previous_api = latestApiFilegroupName
 
 	mctx.CreateModule(ApiLibraryFactory, &props, module.sdkComponentPropertiesForChildLibrary())
 }
@@ -581,7 +591,9 @@ func (module *SdkLibrary) createXmlFile(mctx android.DefaultableHookContext) {
 		Min_device_sdk            *string
 		Max_device_sdk            *string
 		Sdk_library_min_api_level *string
-		Uses_libs_dependencies    proptools.Configurable[[]string]
+		Uses_libs                 proptools.Configurable[[]string]
+		Libs                      []string
+		Impl_only_libs            []string
 	}{
 		Name:                      proptools.StringPtr(module.xmlPermissionsModuleName()),
 		Enabled:                   module.EnabledProperty(),
@@ -592,7 +604,9 @@ func (module *SdkLibrary) createXmlFile(mctx android.DefaultableHookContext) {
 		Min_device_sdk:            module.commonSdkLibraryProperties.Min_device_sdk,
 		Max_device_sdk:            module.commonSdkLibraryProperties.Max_device_sdk,
 		Sdk_library_min_api_level: &moduleMinApiLevelStr,
-		Uses_libs_dependencies:    module.usesLibraryProperties.Uses_libs.Clone(),
+		Uses_libs:                 module.usesLibraryProperties.Uses_libs.Clone(),
+		Libs:                      android.RemoveListFromList(module.properties.Libs, config.FrameworkLibraries),
+		Impl_only_libs:            module.sdkLibraryProperties.Impl_only_libs,
 	}
 
 	mctx.CreateModule(sdkLibraryXmlFactory, &props)
@@ -715,7 +729,7 @@ type sdkLibraryXml struct {
 	outputFilePath android.OutputPath
 	installDirPath android.InstallPath
 
-	hideApexVariantFromMake bool
+	usesLibrary
 }
 
 type sdkLibraryXmlProperties struct {
@@ -754,10 +768,11 @@ type sdkLibraryXmlProperties struct {
 	// This value comes from the ApiLevel of the MinSdkVersion property.
 	Sdk_library_min_api_level *string
 
-	// Uses-libs dependencies that the shared library requires to work correctly.
-	//
-	// This will add dependency="foo:bar" to the <library> section.
-	Uses_libs_dependencies proptools.Configurable[[]string]
+	// List of java libraries that will be in the classpath.
+	Libs []string `android:"arch_variant"`
+
+	// List of Java libraries that will be in the classpath when building the implementation lib.
+	Impl_only_libs []string `android:"arch_variant"`
 }
 
 // java_sdk_library_xml builds the permission xml file for a java_sdk_library.
@@ -765,7 +780,7 @@ type sdkLibraryXmlProperties struct {
 func sdkLibraryXmlFactory() android.Module {
 	module := &sdkLibraryXml{}
 
-	module.AddProperties(&module.properties)
+	module.AddProperties(&module.properties, &module.usesLibrary.usesLibraryProperties)
 
 	android.InitApexModule(module)
 	android.InitAndroidArchModule(module, android.DeviceSupported, android.MultilibCommon)
@@ -801,7 +816,10 @@ func (module *sdkLibraryXml) ApexAvailableFor() []string {
 }
 
 func (module *sdkLibraryXml) DepsMutator(ctx android.BottomUpMutatorContext) {
-	// do nothing
+	module.usesLibrary.deps(ctx, false)
+	libDeps := ctx.AddVariationDependencies(nil, usesLibStagingTag, module.properties.Libs...)
+	libDeps = append(libDeps, ctx.AddVariationDependencies(nil, usesLibStagingTag, module.properties.Impl_only_libs...)...)
+	module.usesLibrary.depsFromLibs(ctx, libDeps)
 }
 
 var _ android.ApexModule = (*sdkLibraryXml)(nil)
@@ -865,8 +883,13 @@ func formattedOptionalAttribute(attrName string, value *string) string {
 	return fmt.Sprintf("        %s=\"%s\"\n", attrName, *value)
 }
 
-func formattedDependenciesAttribute(dependencies []string) string {
-	if dependencies == nil {
+func (module *sdkLibraryXml) formattedDependenciesAttribute(ctx android.ModuleContext) string {
+	classLoaderContexts := module.usesLibrary.classLoaderContextForUsesLibDeps(ctx)
+	dependencies := make([]string, 0, len(classLoaderContexts[dexpreopt.AnySdkVersion]))
+	for _, dep := range classLoaderContexts[dexpreopt.AnySdkVersion] {
+		dependencies = append(dependencies, dep.Name)
+	}
+	if len(dependencies) == 0 {
 		return ""
 	}
 	return fmt.Sprintf("        dependency=\"%s\"\n", strings.Join(dependencies, ":"))
@@ -881,7 +904,7 @@ func (module *sdkLibraryXml) permissionsContents(ctx android.ModuleContext) stri
 	implicitUntilAttr := formattedOptionalSdkLevelAttribute(ctx, "on-bootclasspath-before", module.properties.On_bootclasspath_before)
 	minSdkAttr := formattedOptionalSdkLevelAttribute(ctx, "min-device-sdk", module.properties.Min_device_sdk)
 	maxSdkAttr := formattedOptionalSdkLevelAttribute(ctx, "max-device-sdk", module.properties.Max_device_sdk)
-	dependenciesAttr := formattedDependenciesAttribute(module.properties.Uses_libs_dependencies.GetOrDefault(ctx, nil))
+	dependenciesAttr := module.formattedDependenciesAttribute(ctx)
 	// <library> is understood in all android versions whereas <apex-library> is only understood from API T (and ignored before that).
 	// similarly, min_device_sdk is only understood from T. So if a library is using that, we need to use the apex-library to make sure this library is not loaded before T
 	var libraryTag string
@@ -923,7 +946,9 @@ func (module *sdkLibraryXml) permissionsContents(ctx android.ModuleContext) stri
 
 func (module *sdkLibraryXml) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	apexInfo, _ := android.ModuleProvider(ctx, android.ApexInfoProvider)
-	module.hideApexVariantFromMake = !apexInfo.IsForPlatform()
+	if !apexInfo.IsForPlatform() {
+		module.HideFromMake()
+	}
 
 	libName := proptools.String(module.properties.Lib_name)
 	module.selfValidate(ctx)
@@ -940,24 +965,17 @@ func (module *sdkLibraryXml) GenerateAndroidBuildActions(ctx android.ModuleConte
 	etc.SetCommonPrebuiltEtcInfo(ctx, module)
 }
 
-func (module *sdkLibraryXml) AndroidMkEntries() []android.AndroidMkEntries {
-	if module.hideApexVariantFromMake {
-		return []android.AndroidMkEntries{{
-			Disabled: true,
-		}}
-	}
-
-	return []android.AndroidMkEntries{{
+func (module *sdkLibraryXml) PrepareAndroidMKProviderInfo(config android.Config) *android.AndroidMkProviderInfo {
+	info := &android.AndroidMkProviderInfo{}
+	info.PrimaryInfo = android.AndroidMkInfo{
 		Class:      "ETC",
 		OutputFile: android.OptionalPathForPath(module.outputFilePath),
-		ExtraEntries: []android.AndroidMkExtraEntriesFunc{
-			func(ctx android.AndroidMkExtraEntriesContext, entries *android.AndroidMkEntries) {
-				entries.SetString("LOCAL_MODULE_TAGS", "optional")
-				entries.SetString("LOCAL_MODULE_PATH", module.installDirPath.String())
-				entries.SetString("LOCAL_INSTALLED_MODULE_STEM", module.outputFilePath.Base())
-			},
-		},
-	}}
+	}
+	info.PrimaryInfo.SetString("LOCAL_MODULE_TAGS", "optional")
+	info.PrimaryInfo.SetString("LOCAL_MODULE_PATH", module.installDirPath.String())
+	info.PrimaryInfo.SetString("LOCAL_INSTALLED_MODULE_STEM", module.outputFilePath.Base())
+
+	return info
 }
 
 func (module *sdkLibraryXml) selfValidate(ctx android.ModuleContext) {

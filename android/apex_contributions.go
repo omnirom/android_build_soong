@@ -29,6 +29,14 @@ func RegisterApexContributionsBuildComponents(ctx RegistrationContext) {
 	ctx.RegisterModuleType("all_apex_contributions", allApexContributionsFactory)
 }
 
+type apexContributionsInfo struct {
+	Name      string
+	Contents  []string
+	ApiDomain string
+}
+
+var apexContributionsInfoProvider = blueprint.NewMutatorProvider[apexContributionsInfo]("prebuilt_select")
+
 type apexContributions struct {
 	ModuleBase
 	DefaultableModuleBase
@@ -44,12 +52,12 @@ type contributionProps struct {
 	Contents []string
 }
 
-func (m *apexContributions) ApiDomain() string {
-	return proptools.String(m.properties.Api_domain)
-}
-
-func (m *apexContributions) Contents() []string {
-	return m.properties.Contents
+func (m *apexContributions) setApexContributionsInfoProvider(ctx BottomUpMutatorContext) {
+	SetProvider(ctx, apexContributionsInfoProvider, apexContributionsInfo{
+		Name:      m.Name(),
+		Contents:  m.properties.Contents,
+		ApiDomain: proptools.String(m.properties.Api_domain),
+	})
 }
 
 // apex_contributions contains a list of module names (source or
@@ -106,18 +114,18 @@ var (
 
 // Set PrebuiltSelectionInfoProvider in post deps phase
 func (a *allApexContributions) SetPrebuiltSelectionInfoProvider(ctx BottomUpMutatorContext) {
-	addContentsToProvider := func(p *PrebuiltSelectionInfoMap, m *apexContributions) {
-		for _, content := range m.Contents() {
+	addContentsToProvider := func(p *PrebuiltSelectionInfoMap, m apexContributionsInfo) {
+		for _, content := range m.Contents {
 			// Verify that the module listed in contents exists in the tree
 			// Remove the prebuilt_ prefix to account for partner worksapces where the source module does not
 			// exist, and PrebuiltRenameMutator renames `prebuilt_foo` to `foo`
 			if !ctx.OtherModuleExists(content) && !ctx.OtherModuleExists(RemoveOptionalPrebuiltPrefix(content)) && !ctx.Config().AllowMissingDependencies() {
-				ctx.ModuleErrorf("%s listed in apex_contributions %s does not exist\n", content, m.Name())
+				ctx.ModuleErrorf("%s listed in apex_contributions %s does not exist\n", content, m.Name)
 			}
 			pi := &PrebuiltSelectionInfo{
 				selectedModuleName: content,
-				metadataModuleName: m.Name(),
-				apiDomain:          m.ApiDomain(),
+				metadataModuleName: m.Name,
+				apiDomain:          m.ApiDomain,
 			}
 			p.Add(ctx, pi)
 		}
@@ -134,7 +142,7 @@ func (a *allApexContributions) SetPrebuiltSelectionInfoProvider(ctx BottomUpMuta
 			if child == nil {
 				continue
 			}
-			if m, ok := child.(*apexContributions); ok {
+			if m, ok := OtherModuleProvider(ctx, child, apexContributionsInfoProvider); ok {
 				addContentsToProvider(&p, m)
 			} else {
 				ctx.ModuleErrorf("%s is not an apex_contributions module\n", child.Name())

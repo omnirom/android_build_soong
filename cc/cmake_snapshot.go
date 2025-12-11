@@ -503,6 +503,10 @@ func (m *CmakeSnapshot) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	zipRule.Build(m.zipPath.String(), "archiving "+ctx.ModuleName())
 
 	ctx.SetOutputFiles(android.Paths{m.zipPath}, "")
+
+	moduleInfoJSON := ctx.ModuleInfoJSON()
+	moduleInfoJSON.Class = []string{"DATA"}
+	moduleInfoJSON.SystemSharedLibs = []string{"none"}
 }
 
 func (m *CmakeSnapshot) AndroidMkEntries() []android.AndroidMkEntries {

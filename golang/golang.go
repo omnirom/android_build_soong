@@ -38,10 +38,17 @@ func RegisterGoModuleTypes(ctx android.RegistrationContext) {
 	ctx.RegisterModuleType("blueprint_go_binary", goBinaryModuleFactory)
 }
 
+// wrapGoPackage is used to increase the depth of the blueprint.ModuleBase struct embedded in bootstrap.GoPackage
+// so that the Go selector rules will choose the blueprint.ModuleBase in android.ModuleBase instead of throwing
+// an ambiguous method error.
+type wrapGoPackage struct {
+	bootstrap.GoPackage
+}
+
 // A GoPackage is a module for building Go packages.
 type GoPackage struct {
 	android.ModuleBase
-	bootstrap.GoPackage
+	wrapGoPackage
 }
 
 func goPackageModuleFactory() android.Module {
@@ -63,10 +70,17 @@ func (g *GoPackage) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	g.GoPackage.GenerateBuildActions(ctx.BlueprintModuleContext())
 }
 
+// wrapGoBinary is used to increase the depth of the blueprint.ModuleBase struct embedded in bootstrap.GoBinary
+// so that the Go selector rules will choose the blueprint.ModuleBase in android.ModuleBase instead of throwing
+// an ambiguous method error.
+type wrapGoBinary struct {
+	bootstrap.GoBinary
+}
+
 // A GoBinary is a module for building executable binaries from Go sources.
 type GoBinary struct {
 	android.ModuleBase
-	bootstrap.GoBinary
+	wrapGoBinary
 
 	outputFile android.Path
 }
@@ -114,7 +128,7 @@ func (g *GoBinary) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 
 func usedByBootstrap(name string) bool {
 	switch name {
-	case "loadplugins", "soong_build":
+	case "gob_gen", "loadplugins", "soong_build":
 		return true
 	default:
 		return false

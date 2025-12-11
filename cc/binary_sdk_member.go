@@ -15,6 +15,7 @@
 package cc
 
 import (
+	"fmt"
 	"path/filepath"
 
 	"android/soong/android"
@@ -22,6 +23,8 @@ import (
 	"github.com/google/blueprint"
 	"github.com/google/blueprint/proptools"
 )
+
+//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
 
 func init() {
 	android.RegisterSdkMemberType(ccBinarySdkMemberType)
@@ -34,6 +37,7 @@ var ccBinarySdkMemberType = &binarySdkMemberType{
 	},
 }
 
+// @auto-generate: gob
 type binarySdkMemberType struct {
 	android.SdkMemberTypeBase
 }
@@ -52,11 +56,11 @@ func (mt *binarySdkMemberType) AddDependencies(ctx android.SdkDependencyContext,
 	}
 }
 
-func (mt *binarySdkMemberType) IsInstance(module android.Module) bool {
+func (mt *binarySdkMemberType) IsInstance(ctx android.ModuleContext, module android.ModuleProxy) bool {
 	// Check the module to see if it can be used with this module type.
-	if m, ok := module.(*Module); ok {
-		for _, allowableMemberType := range m.sdkMemberTypes {
-			if allowableMemberType == mt {
+	if m, ok := android.OtherModuleProvider(ctx, module, CcInfoProvider); ok {
+		for _, allowableMemberType := range m.SdkMemberTypes {
+			if allowableMemberType.SdkPropertyName() == mt.SdkPropertyName() {
 				return true
 			}
 		}
@@ -68,10 +72,13 @@ func (mt *binarySdkMemberType) IsInstance(module android.Module) bool {
 func (mt *binarySdkMemberType) AddPrebuiltModule(ctx android.SdkMemberContext, member android.SdkMember) android.BpModule {
 	pbm := ctx.SnapshotBuilder().AddPrebuiltModule(member, "cc_prebuilt_binary")
 
-	ccModule := member.Variants()[0].(*Module)
+	info, ok := android.OtherModuleProvider(ctx.SdkModuleContext(), member.Variants()[0], CcInfoProvider)
+	if !ok {
+		panic(fmt.Errorf("not a cc module: %s", member.Variants()[0]))
+	}
 
-	if stl := ccModule.stl.Properties.Stl; stl != nil {
-		pbm.AddProperty("stl", proptools.String(stl))
+	if info.StlInfo != nil && info.StlInfo.Stl != nil {
+		pbm.AddProperty("stl", proptools.String(info.StlInfo.Stl))
 	}
 
 	return pbm
@@ -120,19 +127,49 @@ type nativeBinaryInfoProperties struct {
 	Nocrt            bool
 }
 
-func (p *nativeBinaryInfoProperties) PopulateFromVariant(ctx android.SdkMemberContext, variant android.Module) {
-	ccModule := variant.(*Module)
+func setSharedAndSystemLibs(specifiedDeps *specifiedDeps, sharedLibs []string, systemLibs []string) {
+	specifiedDeps.sharedLibs = append(specifiedDeps.sharedLibs, sharedLibs...)
+	// Must distinguish nil and [] in system_shared_libs - ensure that [] in
+	// either input list doesn't come out as nil.
+	if specifiedDeps.systemSharedLibs == nil {
+		specifiedDeps.systemSharedLibs = systemLibs
+	} else {
+		specifiedDeps.systemSharedLibs = append(specifiedDeps.systemSharedLibs, systemLibs...)
+	}
+}
 
-	p.archType = ccModule.Target().Arch.ArchType.String()
-	p.outputFile = getRequiredMemberOutputFile(ctx, ccModule)
+func setLinkerSpecifiedDeps(linker *LinkerInfo, specifiedDeps *specifiedDeps) {
+	if linker.ObjectLinkerInfo != nil {
+		setSharedAndSystemLibs(specifiedDeps, linker.ObjectLinkerInfo.SharedLibs, linker.ObjectLinkerInfo.SystemSharedLibs)
+		return
+	}
 
-	binaryLinker := ccModule.linker.(*binaryDecorator)
-	p.StaticExecutable = binaryLinker.static()
-	p.Nocrt = Bool(binaryLinker.baseLinker.Properties.Nocrt)
+	setSharedAndSystemLibs(specifiedDeps, linker.SharedLibs, linker.SystemSharedLibs)
 
-	if ccModule.linker != nil {
+	if linker.LibraryDecoratorInfo != nil {
+		setSharedAndSystemLibs(specifiedDeps, linker.LibraryDecoratorInfo.SharedLibs, linker.LibraryDecoratorInfo.SystemSharedLibs)
+		specifiedDeps.sharedLibs = android.FirstUniqueStrings(specifiedDeps.sharedLibs)
+		if len(specifiedDeps.systemSharedLibs) > 0 {
+			// Skip this if systemSharedLibs is either nil or [], to ensure they are
+			// retained.
+			specifiedDeps.systemSharedLibs = android.FirstUniqueStrings(specifiedDeps.systemSharedLibs)
+		}
+	}
+}
+
+func (p *nativeBinaryInfoProperties) PopulateFromVariant(ctx android.SdkMemberContext, variant android.ModuleProxy) {
+	commonInfo := android.OtherModulePointerProviderOrDefault(ctx.SdkModuleContext(), variant, android.CommonModuleInfoProvider)
+	ccInfo := android.OtherModulePointerProviderOrDefault(ctx.SdkModuleContext(), variant, CcInfoProvider)
+	p.archType = commonInfo.Target.Arch.ArchType.String()
+	p.outputFile = getRequiredMemberOutputFile(ctx, variant)
+
+	if ccInfo.LinkerInfo != nil {
+		binaryLinker := ccInfo.LinkerInfo.BinaryDecoratorInfo
+		p.StaticExecutable = binaryLinker.StaticExecutable
+		p.Nocrt = binaryLinker.Nocrt
+
 		specifiedDeps := specifiedDeps{}
-		specifiedDeps = ccModule.linker.linkerSpecifiedDeps(ctx.SdkModuleContext(), ccModule, specifiedDeps)
+		setLinkerSpecifiedDeps(ccInfo.LinkerInfo, &specifiedDeps)
 
 		p.SharedLibs = specifiedDeps.sharedLibs
 		p.SystemSharedLibs = specifiedDeps.systemSharedLibs

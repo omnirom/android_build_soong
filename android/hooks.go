@@ -96,6 +96,12 @@ func (l *loadHookContext) AppendProperties(props ...interface{}) {
 	l.appendPrependHelper(props, proptools.AppendMatchingProperties)
 }
 
+func (l *loadHookContext) Config() Config {
+	// LoadHookContext cannot be generic, but must read all configuration values
+	// because it is called before loading module properties.
+	return l.earlyModuleContext.EarlyModuleContext.Config().(Config)
+}
+
 func (l *loadHookContext) PrependProperties(props ...interface{}) {
 	l.appendPrependHelper(props, proptools.PrependMatchingProperties)
 }
@@ -243,6 +249,26 @@ func (x *hooks) runInstallHooks(ctx ModuleContext, srcPath Path, path InstallPat
 	}
 }
 
+// AddPostGenerateAndroidBuildActionsHook adds a hook that runs immediately after
+// the module's GenerateAndroidBuildActions method is called, allowing modules
+// to inject custom logic when sharing that method.
+func AddPostGenerateAndroidBuildActionsHook(m blueprint.Module, hook func(ctx ModuleContext)) {
+	h := &m.(Module).base().hooks
+	h.postGenerateAndroidBuildActions = append(h.postGenerateAndroidBuildActions, hook)
+}
+
+func (x *hooks) runPostGenerateAndroidBuildActionsHooks(ctx ModuleContext) {
+	if len(x.postGenerateAndroidBuildActions) > 0 {
+		for _, x := range x.postGenerateAndroidBuildActions {
+			x(ctx)
+			if ctx.Failed() {
+				return
+			}
+		}
+	}
+}
+
 type hooks struct {
-	install []func(InstallHookContext)
+	install                         []func(InstallHookContext)
+	postGenerateAndroidBuildActions []func(ModuleContext)
 }

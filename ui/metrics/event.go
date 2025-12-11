@@ -40,8 +40,8 @@ var _now = func() time.Time {
 	return time.Now()
 }
 
-// event holds the performance metrics data of a single build event.
-type event struct {
+// Event holds the performance metrics data of a single build event.
+type Event struct {
 	// The event name (mostly used for grouping a set of events)
 	name string
 
@@ -58,20 +58,23 @@ type event struct {
 
 	// The list of process resource information that was executed.
 	procResInfo []*soong_metrics_proto.ProcessResourceInfo
+
+	m *Metrics
 }
 
 // newEvent returns an event with start populated with the now time.
-func newEvent(name, desc string) *event {
-	return &event{
+func newEvent(m *Metrics, name, desc string) *Event {
+	return &Event{
 		name:  name,
 		desc:  desc,
 		start: _now(),
+		m:     m,
 	}
 }
 
-func (e event) perfInfo() soong_metrics_proto.PerfInfo {
+func (e *Event) perfInfo() *soong_metrics_proto.PerfInfo {
 	realTime := uint64(_now().Sub(e.start).Nanoseconds())
-	perfInfo := soong_metrics_proto.PerfInfo{
+	perfInfo := &soong_metrics_proto.PerfInfo{
 		Description:           proto.String(e.desc),
 		Name:                  proto.String(e.name),
 		StartTime:             proto.Uint64(uint64(e.start.UnixNano())),
@@ -85,54 +88,22 @@ func (e event) perfInfo() soong_metrics_proto.PerfInfo {
 	return perfInfo
 }
 
-// EventTracer is an array of events that provides functionality to trace a
-// block of code on time and performance. The End call expects the Begin is
-// invoked, otherwise panic is raised.
-type EventTracer []*event
-
-// empty returns true if there are no pending events.
-func (t *EventTracer) empty() bool {
-	return len(*t) == 0
+// End performs post calculations such as duration of the event, aggregates
+// the collected performance information into PerfInfo protobuf message and
+// adds it to the metrics.
+func (e *Event) End() {
+	e.m.SetTimeMetrics(e.perfInfo())
 }
 
-// lastIndex returns the index of the last element of events.
-func (t *EventTracer) lastIndex() int {
-	return len(*t) - 1
-}
-
-// peek returns the active build event.
-func (t *EventTracer) peek() *event {
-	if t.empty() {
-		return nil
-	}
-	return (*t)[t.lastIndex()]
-}
-
-// push adds the active build event in the stack.
-func (t *EventTracer) push(e *event) {
-	*t = append(*t, e)
-}
-
-// pop removes the active event from the stack since the event has completed.
-// A panic is raised if there are no pending events.
-func (t *EventTracer) pop() *event {
-	if t.empty() {
-		panic("Internal error: No pending events")
-	}
-	e := (*t)[t.lastIndex()]
-	*t = (*t)[:t.lastIndex()]
-	return e
+func (e *Event) SetFatalOrPanicMessage(str string) {
+	e.errorMsg = &str
+	e.nonZeroExitCode = true
 }
 
 // AddProcResInfo adds information on an executed process such as max resident
 // set memory and the number of voluntary context switches.
-func (t *EventTracer) AddProcResInfo(name string, state *os.ProcessState) {
-	if t.empty() {
-		return
-	}
-
+func (e *Event) AddProcResInfo(name string, state *os.ProcessState) {
 	rusage := state.SysUsage().(*syscall.Rusage)
-	e := t.peek()
 	e.procResInfo = append(e.procResInfo, &soong_metrics_proto.ProcessResourceInfo{
 		Name:             proto.String(name),
 		UserTimeMicros:   proto.Uint64(uint64(state.UserTime().Microseconds())),
@@ -145,15 +116,4 @@ func (t *EventTracer) AddProcResInfo(name string, state *os.ProcessState) {
 		VoluntaryContextSwitches:   proto.Uint64(uint64(rusage.Nvcsw)),
 		InvoluntaryContextSwitches: proto.Uint64(uint64(rusage.Nivcsw)),
 	})
-}
-
-// Begin starts tracing the event.
-func (t *EventTracer) Begin(name, desc string) {
-	t.push(newEvent(name, desc))
-}
-
-// End performs post calculations such as duration of the event, aggregates
-// the collected performance information into PerfInfo protobuf message.
-func (t *EventTracer) End() soong_metrics_proto.PerfInfo {
-	return t.pop().perfInfo()
 }

@@ -34,6 +34,8 @@ type Toolchain interface {
 	Supported() bool
 
 	Bionic() bool
+	Musl() bool
+	Glibc() bool
 
 	LibclangRuntimeLibraryArch() string
 }
@@ -59,6 +61,14 @@ func (toolchainBase) Is64Bit() bool {
 
 func (toolchainBase) Bionic() bool {
 	return true
+}
+
+func (toolchainBase) Musl() bool {
+	return false
+}
+
+func (toolchainBase) Glibc() bool {
+	return false
 }
 
 type toolchain64Bit struct {

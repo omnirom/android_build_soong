@@ -33,7 +33,6 @@ import (
 	"time"
 
 	"android/soong/cmd/sbox/sbox_proto"
-	"android/soong/makedeps"
 	"android/soong/response"
 
 	"google.golang.org/protobuf/encoding/prototext"
@@ -48,7 +47,6 @@ var (
 )
 
 const (
-	depFilePlaceholder    = "__SBOX_DEPFILE__"
 	sandboxDirPlaceholder = "__SBOX_SANDBOX_DIR__"
 )
 
@@ -170,37 +168,19 @@ func run() error {
 
 	// If there is more than one command in the manifest use a separate directory for each one.
 	useSubDir := len(manifest.Commands) > 1
-	var commandDepFiles []string
 
 	for i, command := range manifest.Commands {
 		localTempDir := tempDir
 		if useSubDir {
 			localTempDir = filepath.Join(localTempDir, strconv.Itoa(i))
 		}
-		depFile, err := runCommand(command, localTempDir, i)
+		err := runCommand(command, localTempDir, i)
 		if err != nil {
 			// Running the command failed, keep the temporary output directory around in
 			// case a user wants to inspect it for debugging purposes.  Soong will delete
 			// it at the beginning of the next build anyway.
 			keepOutDir = true
 			return err
-		}
-		if depFile != "" {
-			commandDepFiles = append(commandDepFiles, depFile)
-		}
-	}
-
-	outputDepFile := manifest.GetOutputDepfile()
-	if len(commandDepFiles) > 0 && outputDepFile == "" {
-		return fmt.Errorf("Sandboxed commands used %s but output depfile is not set in manifest file",
-			depFilePlaceholder)
-	}
-
-	if outputDepFile != "" {
-		// Merge the depfiles from each command in the manifest to a single output depfile.
-		err = rewriteDepFiles(commandDepFiles, outputDepFile)
-		if err != nil {
-			return fmt.Errorf("failed merging depfiles: %w", err)
 		}
 	}
 
@@ -286,18 +266,17 @@ func createEnv(command *sbox_proto.Command) ([]string, error) {
 	return env, nil
 }
 
-// runCommand runs a single command from a manifest.  If the command references the
-// __SBOX_DEPFILE__ placeholder it returns the name of the depfile that was used.
-func runCommand(command *sbox_proto.Command, tempDir string, commandIndex int) (depFile string, err error) {
+// runCommand runs a single command from a manifest.
+func runCommand(command *sbox_proto.Command, tempDir string, commandIndex int) (err error) {
 	rawCommand := command.GetCommand()
 	if rawCommand == "" {
-		return "", fmt.Errorf("command is required")
+		return fmt.Errorf("command is required")
 	}
 
 	// Remove files from the output directory
 	err = clearOutputDirectory(command.CopyAfter, outputDir, writeType(writeIfChanged))
 	if err != nil {
-		return "", err
+		return err
 	}
 
 	pathToTempDirInSbox := tempDir
@@ -307,22 +286,21 @@ func runCommand(command *sbox_proto.Command, tempDir string, commandIndex int) (
 
 	err = os.MkdirAll(tempDir, 0777)
 	if err != nil {
-		return "", fmt.Errorf("failed to create %q: %w", tempDir, err)
+		return fmt.Errorf("failed to create %q: %w", tempDir, err)
 	}
 
 	// Copy in any files specified by the manifest.
 	err = copyFiles(command.CopyBefore, "", tempDir, requireFromExists, alwaysWrite)
 	if err != nil {
-		return "", err
+		return err
+	}
+	err = copyDirs(command.CopyDirBefore, "", tempDir)
+	if err != nil {
+		return err
 	}
 	err = copyRspFiles(command.RspFiles, tempDir, pathToTempDirInSbox)
 	if err != nil {
-		return "", err
-	}
-
-	if strings.Contains(rawCommand, depFilePlaceholder) {
-		depFile = filepath.Join(pathToTempDirInSbox, "deps.d")
-		rawCommand = strings.Replace(rawCommand, depFilePlaceholder, depFile, -1)
+		return err
 	}
 
 	if strings.Contains(rawCommand, sandboxDirPlaceholder) {
@@ -333,7 +311,7 @@ func runCommand(command *sbox_proto.Command, tempDir string, commandIndex int) (
 	// running the command.
 	err = makeOutputDirs(command.CopyAfter, tempDir)
 	if err != nil {
-		return "", err
+		return err
 	}
 
 	scriptName := fmt.Sprintf("sbox_command.%d.bash", commandIndex)
@@ -341,7 +319,7 @@ func runCommand(command *sbox_proto.Command, tempDir string, commandIndex int) (
 	scriptPathInSandbox := joinPath(pathToTempDirInSbox, scriptName)
 	cmd, err := createCommandScript(rawCommand, scriptPath, scriptPathInSandbox)
 	if err != nil {
-		return "", err
+		return err
 	}
 
 	buf := &bytes.Buffer{}
@@ -354,17 +332,17 @@ func runCommand(command *sbox_proto.Command, tempDir string, commandIndex int) (
 		path := os.Getenv("PATH")
 		absPath, err := makeAbsPathEnv(path)
 		if err != nil {
-			return "", err
+			return err
 		}
 		err = os.Setenv("PATH", absPath)
 		if err != nil {
-			return "", fmt.Errorf("Failed to update PATH: %w", err)
+			return fmt.Errorf("Failed to update PATH: %w", err)
 		}
 	}
 
 	cmd.Env, err = createEnv(command)
 	if err != nil {
-		return "", err
+		return err
 	}
 
 	err = cmd.Run()
@@ -392,21 +370,21 @@ func runCommand(command *sbox_proto.Command, tempDir string, commandIndex int) (
 	os.Stdout.Write(buf.Bytes())
 
 	if err != nil {
-		return "", err
+		return err
 	}
 
 	err = validateOutputFiles(command.CopyAfter, tempDir, outputDir, rawCommand)
 	if err != nil {
-		return "", err
+		return err
 	}
 
 	// the created files match the declared files; now move them
 	err = moveFiles(command.CopyAfter, tempDir, "", writeType(writeIfChanged))
 	if err != nil {
-		return "", err
+		return err
 	}
 
-	return depFile, nil
+	return nil
 }
 
 // makeOutputDirs creates directories in the sandbox dir for every file that has a rule to be copied
@@ -619,6 +597,47 @@ func copyOneFile(from string, to string, forceExecutable bool, exists existsType
 	return nil
 }
 
+// copyFiles copies files in or out of the sandbox.  If exists is allowFromNotExists then errors
+// caused by a from path not existing are ignored.  If write is onlyWriteIfChanged then the output
+// file is compared to the input file and not written to if it is the same, avoiding updating
+// the timestamp.
+func copyDirs(copies []*sbox_proto.CopyDir, fromDir, toDir string) error {
+	for _, copyPair := range copies {
+		fromPath := joinPath(fromDir, copyPair.GetFrom())
+		toPath := joinPath(toDir, copyPair.GetTo())
+		err := copyOneDir(fromPath, toPath)
+		if err != nil {
+			return fmt.Errorf("error copying %q to %q: %w", fromPath, toPath, err)
+		}
+	}
+	return nil
+}
+
+func copyOneDir(from, to string) error {
+	stat, err := os.Lstat(from)
+	if err != nil {
+		return err
+	}
+	if !stat.IsDir() {
+		return fmt.Errorf("expected %q to be a directory, but it wasn't", from)
+	}
+	dirEnts, err := os.ReadDir(from)
+	if err != nil {
+		return err
+	}
+	for _, entry := range dirEnts {
+		if entry.IsDir() {
+			err = copyOneDir(filepath.Join(from, entry.Name()), filepath.Join(to, entry.Name()))
+		} else {
+			err = copyOneFile(filepath.Join(from, entry.Name()), filepath.Join(to, entry.Name()), false, requireFromExists, alwaysWrite)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // copyRspFiles copies rsp files into the sandbox with path mappings, and also copies the files
 // listed into the sandbox.
 func copyRspFiles(rspFiles []*sbox_proto.RspFile, toDir, toDirInSandbox string) error {
@@ -759,40 +778,6 @@ func clearOutputDirectory(copies []*sbox_proto.Copy, outputDir string, write wri
 	}
 
 	return nil
-}
-
-// Rewrite one or more depfiles so that it doesn't include the (randomized) sandbox directory
-// to an output file.
-func rewriteDepFiles(ins []string, out string) error {
-	var mergedDeps []string
-	for _, in := range ins {
-		data, err := ioutil.ReadFile(in)
-		if err != nil {
-			return err
-		}
-
-		deps, err := makedeps.Parse(in, bytes.NewBuffer(data))
-		if err != nil {
-			return err
-		}
-		mergedDeps = append(mergedDeps, deps.Inputs...)
-	}
-
-	deps := makedeps.Deps{
-		// Ninja doesn't care what the output file is, so we can use any string here.
-		Output: "outputfile",
-		Inputs: mergedDeps,
-	}
-
-	// Make the directory for the output depfile in case it is in a different directory
-	// than any of the output files.
-	outDir := filepath.Dir(out)
-	err := os.MkdirAll(outDir, 0777)
-	if err != nil {
-		return fmt.Errorf("failed to create %q: %w", outDir, err)
-	}
-
-	return ioutil.WriteFile(out, deps.Print(), 0666)
 }
 
 // joinPath wraps filepath.Join but returns file without appending to dir if file is

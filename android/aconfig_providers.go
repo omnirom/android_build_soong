@@ -23,6 +23,8 @@ import (
 	"github.com/google/blueprint"
 )
 
+//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+
 var (
 	mergeAconfigFilesRule = pctx.AndroidStaticRule("mergeAconfigFilesRule",
 		blueprint.RuleParams{
@@ -33,6 +35,7 @@ var (
 )
 
 // Provider published by aconfig_value_set
+// @auto-generate: gob
 type AconfigDeclarationsProviderData struct {
 	Package                     string
 	Container                   string
@@ -43,14 +46,20 @@ type AconfigDeclarationsProviderData struct {
 
 var AconfigDeclarationsProviderKey = blueprint.NewProvider[AconfigDeclarationsProviderData]()
 
-type AconfigReleaseDeclarationsProviderData map[string]AconfigDeclarationsProviderData
+// @auto-generate: gob
+type AconfigReleaseDeclarationsProviderData struct {
+	Data map[string]AconfigDeclarationsProviderData
+}
 
 var AconfigReleaseDeclarationsProviderKey = blueprint.NewProvider[AconfigReleaseDeclarationsProviderData]()
 
+// @auto-generate: gob
 type ModeInfo struct {
 	Container string
 	Mode      string
 }
+
+// @auto-generate: gob
 type CodegenInfo struct {
 	// AconfigDeclarations is the name of the aconfig_declarations modules that
 	// the codegen module is associated with
@@ -67,7 +76,7 @@ type CodegenInfo struct {
 
 var CodegenInfoProvider = blueprint.NewProvider[CodegenInfo]()
 
-func propagateModeInfos(ctx ModuleContext, module Module, to, from map[string]ModeInfo) {
+func propagateModeInfos(ctx ModuleContext, module ModuleProxy, to, from map[string]ModeInfo) {
 	if len(from) > 0 {
 		depTag := ctx.OtherModuleDependencyTag(module)
 		if tag, ok := depTag.(PropagateAconfigValidationDependencyTag); ok && tag.PropagateAconfigValidation() {
@@ -76,6 +85,7 @@ func propagateModeInfos(ctx ModuleContext, module Module, to, from map[string]Mo
 	}
 }
 
+// @auto-generate: gob
 type aconfigPropagatingDeclarationsInfo struct {
 	AconfigFiles map[string]Paths
 	ModeInfos    map[string]ModeInfo
@@ -83,7 +93,7 @@ type aconfigPropagatingDeclarationsInfo struct {
 
 var AconfigPropagatingProviderKey = blueprint.NewProvider[aconfigPropagatingDeclarationsInfo]()
 
-func VerifyAconfigBuildMode(ctx ModuleContext, container string, module blueprint.Module, asError bool) {
+func VerifyAconfigBuildMode(ctx ModuleContext, container string, module ModuleOrProxy, asError bool) {
 	if dep, ok := OtherModuleProvider(ctx, module, AconfigPropagatingProviderKey); ok {
 		for k, v := range dep.ModeInfos {
 			msg := fmt.Sprintf("%s/%s depends on %s/%s/%s across containers\n",
@@ -191,7 +201,7 @@ func aconfigUpdateAndroidMkEntries(ctx fillInEntriesContext, mod Module, entries
 
 // TODO(b/397766191): Change the signature to take ModuleProxy
 // Please only access the module's internal data through providers.
-func aconfigUpdateAndroidMkInfos(ctx fillInEntriesContext, mod Module, infos *AndroidMkProviderInfo) {
+func aconfigUpdateAndroidMkInfos(ctx fillInEntriesContext, mod ModuleOrProxy, infos *AndroidMkProviderInfo) {
 	info, ok := OtherModuleProvider(ctx, mod, AconfigPropagatingProviderKey)
 	if !ok || len(info.AconfigFiles) == 0 {
 		return
@@ -213,7 +223,7 @@ func mergeAconfigFiles(ctx ModuleContext, container string, inputs Paths, genera
 		return Paths{inputs[0]}
 	}
 
-	output := PathForModuleOut(ctx, container, "aconfig_merged.pb")
+	output := PathForModuleOut(ctx, "merged_aconfig_files", container, "aconfig_merged.pb")
 
 	if generateRule {
 		ctx.Build(pctx, BuildParams{
@@ -246,7 +256,7 @@ func getContainer(m Module) string {
 
 // TODO(b/397766191): Change the signature to take ModuleProxy
 // Please only access the module's internal data through providers.
-func getContainerUsingProviders(ctx OtherModuleProviderContext, m Module) string {
+func getContainerUsingProviders(ctx OtherModuleProviderContext, m ModuleOrProxy) string {
 	container := "system"
 	commonInfo := OtherModulePointerProviderOrDefault(ctx, m, CommonModuleInfoProvider)
 	if commonInfo.Vendor || commonInfo.Proprietary || commonInfo.SocSpecific {

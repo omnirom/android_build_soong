@@ -18,7 +18,9 @@ bootstrap_go_package {
         "dexpreopt_test.go",
     ],
     deps: [
+        "blueprint",
         "blueprint-pathtools",
+        "blueprint-proptools",
         "soong-android",
     ],
 }

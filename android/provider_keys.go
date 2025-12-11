@@ -22,3 +22,11 @@ type AndroidDeviceInfo struct {
 }
 
 var AndroidDeviceInfoProvider = blueprint.NewProvider[AndroidDeviceInfo]()
+
+// Providers of prebuilt_kernel_modules
+type PrebuiltKernelModulesComplianceMetadata struct {
+	Srcs  []string
+	Dests []string
+}
+
+var PrebuiltKernelModulesComplianceMetadataProvider = blueprint.NewProvider[PrebuiltKernelModulesComplianceMetadata]()

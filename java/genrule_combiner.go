@@ -15,9 +15,6 @@
 package java
 
 import (
-	"fmt"
-	"io"
-
 	"android/soong/android"
 	"android/soong/dexpreopt"
 
@@ -95,7 +92,7 @@ func (j *GenruleCombiner) GenerateAndroidBuildActions(ctx android.ModuleContext)
 
 	// Collect the headers first, so that aconfig flag values for the libraries will override
 	// values from the headers (if they are different).
-	ctx.VisitDirectDepsWithTag(genruleCombinerHeaderDepTag, func(m android.Module) {
+	ctx.VisitDirectDepsProxyWithTag(genruleCombinerHeaderDepTag, func(m android.ModuleProxy) {
 		if dep, ok := android.OtherModuleProvider(ctx, m, JavaInfoProvider); ok {
 			j.headerJars = append(j.headerJars, dep.HeaderJars...)
 
@@ -113,7 +110,7 @@ func (j *GenruleCombiner) GenerateAndroidBuildActions(ctx android.ModuleContext)
 			ctx.PropertyErrorf("headers", "module %q cannot be used as a dependency", ctx.OtherModuleName(m))
 		}
 	})
-	ctx.VisitDirectDepsWithTag(staticLibTag, func(m android.Module) {
+	ctx.VisitDirectDepsProxyWithTag(staticLibTag, func(m android.ModuleProxy) {
 		if dep, ok := android.OtherModuleProvider(ctx, m, JavaInfoProvider); ok {
 			j.implementationJars = append(j.implementationJars, dep.ImplementationJars...)
 			j.implementationAndResourceJars = append(j.implementationAndResourceJars, dep.ImplementationAndResourcesJars...)
@@ -178,6 +175,17 @@ func (j *GenruleCombiner) GenerateAndroidBuildActions(ctx android.ModuleContext)
 	ctx.SetOutputFiles(javaInfo.HeaderJars, ".hjar")
 	android.SetProvider(ctx, JavaInfoProvider, javaInfo)
 
+	moduleInfoJSON := ctx.ModuleInfoJSON()
+	moduleInfoJSON.Class = []string{"JAVA_LIBRARIES"}
+	if j.combinedImplementationJar != nil {
+		moduleInfoJSON.ClassesJar = []string{j.combinedImplementationJar.String()}
+	}
+	moduleInfoJSON.SystemSharedLibs = []string{"none"}
+
+	if ctx.Os() == android.Windows {
+		// Make does not support Windows Java modules
+		j.HideFromMake()
+	}
 }
 
 func (j *GenruleCombiner) GeneratedSourceFiles() android.Paths {
@@ -220,25 +228,18 @@ func (j *GenruleCombiner) ClassLoaderContexts() dexpreopt.ClassLoaderContextMap 
 	return nil
 }
 
-func (j *GenruleCombiner) JacocoReportClassesFile() android.Path {
-	return nil
-}
-
-func (j *GenruleCombiner) AndroidMk() android.AndroidMkData {
-	return android.AndroidMkData{
+func (j *GenruleCombiner) PrepareAndroidMKProviderInfo(config android.Config) *android.AndroidMkProviderInfo {
+	info := &android.AndroidMkProviderInfo{}
+	info.PrimaryInfo = android.AndroidMkInfo{
 		Class:      "JAVA_LIBRARIES",
 		OutputFile: android.OptionalPathForPath(j.combinedImplementationJar),
-		// Make does not support Windows Java modules
-		Disabled: j.Os() == android.Windows,
-		Include:  "$(BUILD_SYSTEM)/soong_java_prebuilt.mk",
-		Extra: []android.AndroidMkExtraFunc{
-			func(w io.Writer, outputFile android.Path) {
-				fmt.Fprintln(w, "LOCAL_UNINSTALLABLE_MODULE := true")
-				fmt.Fprintln(w, "LOCAL_SOONG_HEADER_JAR :=", j.combinedHeaderJar.String())
-				fmt.Fprintln(w, "LOCAL_SOONG_CLASSES_JAR :=", j.combinedImplementationJar.String())
-			},
-		},
+		Include:    "$(BUILD_SYSTEM)/soong_java_prebuilt.mk",
 	}
+	info.PrimaryInfo.SetBool("LOCAL_UNINSTALLABLE_MODULE", true)
+	info.PrimaryInfo.SetPath("LOCAL_SOONG_HEADER_JAR", j.combinedHeaderJar)
+	info.PrimaryInfo.SetPath("LOCAL_SOONG_CLASSES_JAR", j.combinedImplementationJar)
+
+	return info
 }
 
 // implement the following interface for IDE completion.

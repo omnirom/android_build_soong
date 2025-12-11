@@ -83,7 +83,7 @@ type RuntimeResourceOverlayProperties struct {
 
 	// if not blank, set the minimum version of the sdk that the compiled artifacts will run against.
 	// Defaults to sdk_version if not set.
-	Min_sdk_version *string
+	Min_sdk_version proptools.Configurable[string] `android:"replace_instead_of_append"`
 
 	// list of android_library modules whose resources are extracted and linked against statically
 	Static_libs proptools.Configurable[[]string]
@@ -213,12 +213,17 @@ func (r *RuntimeResourceOverlay) GenerateAndroidBuildActions(ctx android.ModuleC
 		Theme:       r.Theme(),
 	})
 
+	android.SetProvider(ctx, ApkCertInfoProvider, ApkCertInfo{
+		Certificate: r.Certificate(),
+		Name:        r.outputFile.Base(),
+	})
+
 	ctx.SetOutputFiles([]android.Path{r.outputFile}, "")
 
 	buildComplianceMetadata(ctx)
 }
 
-func (r *RuntimeResourceOverlay) SdkVersion(ctx android.EarlyModuleContext) android.SdkSpec {
+func (r *RuntimeResourceOverlay) SdkVersion(ctx android.ConfigContext) android.SdkSpec {
 	return android.SdkSpecFrom(ctx, String(r.properties.Sdk_version))
 }
 
@@ -226,9 +231,10 @@ func (r *RuntimeResourceOverlay) SystemModules() string {
 	return ""
 }
 
-func (r *RuntimeResourceOverlay) MinSdkVersion(ctx android.EarlyModuleContext) android.ApiLevel {
-	if r.properties.Min_sdk_version != nil {
-		return android.ApiLevelFrom(ctx, *r.properties.Min_sdk_version)
+func (r *RuntimeResourceOverlay) MinSdkVersion(ctx android.MinSdkVersionFromValueContext) android.ApiLevel {
+	minSdkVersion := r.properties.Min_sdk_version.Get(r.ConfigurableEvaluator(ctx))
+	if minSdkVersion.IsPresent() {
+		return android.ApiLevelFrom(ctx, minSdkVersion.Get())
 	}
 	return r.SdkVersion(ctx).ApiLevel
 }
@@ -261,6 +267,17 @@ func RuntimeResourceOverlayFactory() android.Module {
 	android.InitAndroidMultiTargetsArchModule(module, android.DeviceSupported, android.MultilibCommon)
 	android.InitDefaultableModule(module)
 	android.InitOverridableModule(module, &module.properties.Overrides)
+
+	module.SetDefaultableHook(func(ctx android.DefaultableHookContext) {
+		// Make this module product_specific by default. Keep this in sync with rroPartition()
+		if !ctx.DeviceSpecific() && !ctx.SocSpecific() && !ctx.SystemExtSpecific() {
+			proptools.AppendMatchingProperties(ctx.Module().GetProperties(), &struct {
+				Product_specific *bool
+			}{
+				Product_specific: proptools.BoolPtr(true),
+			}, nil)
+		}
+	})
 	return module
 }
 
@@ -358,12 +375,12 @@ func (a *AutogenRuntimeResourceOverlay) GenerateAndroidBuildActions(ctx android.
 	}
 	var rroDirs android.Paths
 	// Get rro dirs of the base app
-	ctx.VisitDirectDepsWithTag(rroDepTag, func(m android.Module) {
-		aarDep, _ := m.(AndroidLibraryDependency)
+	ctx.VisitDirectDepsProxyWithTag(rroDepTag, func(m android.ModuleProxy) {
+		javaInfo, _ := android.OtherModuleProvider(ctx, m, JavaInfoProvider)
 		if ctx.InstallInProduct() {
-			rroDirs = filterRRO(aarDep.RRODirsDepSet(), product)
+			rroDirs = filterRRO(javaInfo.AndroidLibraryDependencyInfo.RRODirsDepSet, product)
 		} else {
-			rroDirs = filterRRO(aarDep.RRODirsDepSet(), device)
+			rroDirs = filterRRO(javaInfo.AndroidLibraryDependencyInfo.RRODirsDepSet, device)
 		}
 	})
 
@@ -421,9 +438,14 @@ func (a *AutogenRuntimeResourceOverlay) GenerateAndroidBuildActions(ctx android.
 		OutputFile:  signed,
 		Certificate: a.certificate,
 	})
+
+	android.SetProvider(ctx, ApkCertInfoProvider, ApkCertInfo{
+		Certificate: a.certificate,
+		Name:        signed.Base(),
+	})
 }
 
-func (a *AutogenRuntimeResourceOverlay) SdkVersion(ctx android.EarlyModuleContext) android.SdkSpec {
+func (a *AutogenRuntimeResourceOverlay) SdkVersion(ctx android.ConfigContext) android.SdkSpec {
 	return android.SdkSpecFrom(ctx, String(a.properties.Sdk_version))
 }
 
@@ -431,7 +453,7 @@ func (a *AutogenRuntimeResourceOverlay) SystemModules() string {
 	return ""
 }
 
-func (a *AutogenRuntimeResourceOverlay) MinSdkVersion(ctx android.EarlyModuleContext) android.ApiLevel {
+func (a *AutogenRuntimeResourceOverlay) MinSdkVersion(ctx android.MinSdkVersionFromValueContext) android.ApiLevel {
 	return a.SdkVersion(ctx).ApiLevel
 }
 

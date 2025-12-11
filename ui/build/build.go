@@ -31,7 +31,7 @@ import (
 func SetupOutDir(ctx Context, config Config) {
 	ensureEmptyFileExists(ctx, filepath.Join(config.OutDir(), "Android.mk"))
 	ensureEmptyFileExists(ctx, filepath.Join(config.OutDir(), "CleanSpec.mk"))
-	ensureEmptyDirectoriesExist(ctx, config.TempDir())
+	ensureDirectoriesExist(ctx, config.SoongOutDir())
 
 	// The ninja_build file is used by our buildbots to understand that the output
 	// can be parsed as ninja output.
@@ -61,19 +61,19 @@ func SetupOutDir(ctx Context, config Config) {
 	// causes unnecessary rebuilds for local development.
 	buildNumber, ok := config.environ.Get("BUILD_NUMBER")
 	if ok {
-		writeValueIfChanged(ctx, config, config.OutDir(), "file_name_tag.txt", buildNumber)
+		writeValueIfChanged(ctx, filepath.Join(config.OutDir(), "file_name_tag.txt"), buildNumber)
 	} else {
 		var username string
 		if username, ok = config.environ.Get("BUILD_USERNAME"); !ok {
 			ctx.Fatalln("Missing BUILD_USERNAME")
 		}
 		buildNumber = fmt.Sprintf("eng.%.6s", username)
-		writeValueIfChanged(ctx, config, config.OutDir(), "file_name_tag.txt", username)
+		writeValueIfChanged(ctx, filepath.Join(config.OutDir(), "file_name_tag.txt"), username)
 	}
 	// Write the build number to a file so it can be read back in
 	// without changing the command line every time.  Avoids rebuilds
 	// when using ninja.
-	writeValueIfChanged(ctx, config, config.SoongOutDir(), "build_number.txt", buildNumber)
+	writeValueIfChanged(ctx, filepath.Join(config.SoongOutDir(), "build_number.txt"), buildNumber)
 
 	hostname, ok := config.environ.Get("BUILD_HOSTNAME")
 	if !ok {
@@ -84,22 +84,12 @@ func SetupOutDir(ctx Context, config Config) {
 			hostname = "unknown"
 		}
 	}
-	writeValueIfChanged(ctx, config, config.SoongOutDir(), "build_hostname.txt", hostname)
+	writeValueIfChanged(ctx, filepath.Join(config.SoongOutDir(), "build_hostname.txt"), hostname)
 }
 
-// SetupKatiEnabledMarker creates or delets a file that tells soong_build if we're running with
-// kati.
-func SetupKatiEnabledMarker(ctx Context, config Config) {
-	// Potentially write a marker file for whether kati is enabled. This is used by soong_build to
-	// potentially run the AndroidMk singleton and postinstall commands.
-	// Note that the absence of the file does not preclude running Kati for product
-	// configuration purposes.
-	katiEnabledMarker := filepath.Join(config.SoongOutDir(), ".soong.kati_enabled")
-	if config.SkipKati() || config.SkipKatiNinja() {
-		os.Remove(katiEnabledMarker)
-	} else {
-		ensureEmptyFileExists(ctx, katiEnabledMarker)
-	}
+// SetupTempDir makes sure config.TempDir() exists and is empty.
+func SetupTempDir(ctx Context, config Config) {
+	ensureEmptyDirectoriesExist(ctx, config.TempDir())
 }
 
 var combinedBuildNinjaTemplate = template.Must(template.New("combined").Parse(`
@@ -198,7 +188,7 @@ func checkCaseSensitivity(ctx Context, config Config) {
 
 // help prints a help/usage message, via the build/make/help.sh script.
 func help(ctx Context, config Config) {
-	cmd := Command(ctx, config, "help.sh", "build/make/help.sh")
+	cmd := Command(ctx, config, nil, "help.sh", "build/make/help.sh")
 	cmd.Sandbox = dumpvarsSandbox
 	cmd.RunAndPrintOrFatal()
 }
@@ -231,7 +221,7 @@ func abfsBuildStarted(ctx Context, config Config) {
 	abfsBox := config.PrebuiltBuildTool("abfsbox")
 	cmdArgs := []string{"build-started", "--"}
 	cmdArgs = append(cmdArgs, config.Arguments()...)
-	cmd := Command(ctx, config, "abfsbox", abfsBox, cmdArgs...)
+	cmd := Command(ctx, config, nil, "abfsbox", abfsBox, cmdArgs...)
 	cmd.Sandbox = noSandbox
 	cmd.RunAndPrintOrFatal()
 }
@@ -244,7 +234,7 @@ func abfsBuildFinished(ctx Context, config Config, finished bool) {
 	abfsBox := config.PrebuiltBuildTool("abfsbox")
 	cmdArgs := []string{"build-finished", "-e", errMsg, "--"}
 	cmdArgs = append(cmdArgs, config.Arguments()...)
-	cmd := Command(ctx, config, "abfsbox", abfsBox, cmdArgs...)
+	cmd := Command(ctx, config, nil, "abfsbox", abfsBox, cmdArgs...)
 	cmd.RunAndPrintOrFatal()
 }
 
@@ -252,18 +242,18 @@ func abfsBuildFinished(ctx Context, config Config, finished bool) {
 // the build to run.
 func Build(ctx Context, config Config) {
 	done := false
+	ctx.Verboseln("Starting build with args:", config.Arguments())
+	ctx.Verboseln("Environment:", config.Environment().Environ())
+
+	e := ctx.BeginTrace(metrics.Total, "total")
+	defer e.End()
+
 	if config.UseABFS() {
 		abfsBuildStarted(ctx, config)
 		defer func() {
 			abfsBuildFinished(ctx, config, done)
 		}()
 	}
-
-	ctx.Verboseln("Starting build with args:", config.Arguments())
-	ctx.Verboseln("Environment:", config.Environment().Environ())
-
-	ctx.BeginTrace(metrics.Total, "total")
-	defer ctx.EndTrace()
 
 	if inList("help", config.Arguments()) {
 		help(ctx, config)
@@ -300,21 +290,19 @@ func Build(ctx Context, config Config) {
 	checkRAM(ctx, config)
 
 	SetupOutDir(ctx, config)
+	SetupTempDir(ctx, config)
 
 	// checkCaseSensitivity issues a warning if a case-insensitive file system is being used.
 	checkCaseSensitivity(ctx, config)
 
 	SetupPath(ctx, config)
+	mapsCh := QueryProductReleaseConfigMaps(ctx, config)
 
 	what := evaluateWhatToRun(config, ctx.Verboseln)
 
-	if config.StartGoma() {
-		startGoma(ctx, config)
-	}
-
 	rbeCh := make(chan bool)
 	var rbePanic any
-	if config.StartRBE() {
+	if config.StartReproxy() {
 		cleanupRBELogsDir(ctx, config)
 		checkRBERequirements(ctx, config)
 		go func() {
@@ -329,6 +317,12 @@ func Build(ctx Context, config Config) {
 		close(rbeCh)
 	}
 
+	if config.RunCIPDProxyServer() && shouldRunCIPDProxy(config) {
+		cipdProxy := startCIPDProxyServer(ctx, config)
+		defer cipdProxy.Stop(ctx)
+	}
+
+	SetProductReleaseConfigMaps(ctx, config, mapsCh)
 	if what&RunProductConfig != 0 {
 		runMakeProductConfig(ctx, config)
 
@@ -338,8 +332,6 @@ func Build(ctx Context, config Config) {
 	}
 
 	// Everything below here depends on product config.
-
-	SetupKatiEnabledMarker(ctx, config)
 
 	if inList("installclean", config.Arguments()) ||
 		inList("install-clean", config.Arguments()) {
@@ -362,7 +354,7 @@ func Build(ctx Context, config Config) {
 	genKatiSuffix(ctx, config)
 
 	if what&RunSoong != 0 {
-		runSoong(ctx, config)
+		runSoong(ctx, config, what&RunBuildTests != 0)
 	}
 
 	if what&RunKati != 0 {
@@ -404,6 +396,9 @@ func Build(ctx Context, config Config) {
 		partialCompileCleanIfNecessary(ctx, config)
 		runNinjaForBuild(ctx, config)
 		updateBuildIdDir(ctx, config)
+
+		runUpdateApi(ctx, config)
+		runUpdateAidlApi(ctx, config)
 	}
 
 	if what&RunDistActions != 0 {
@@ -413,8 +408,8 @@ func Build(ctx Context, config Config) {
 }
 
 func updateBuildIdDir(ctx Context, config Config) {
-	ctx.BeginTrace(metrics.RunShutdownTool, "update_build_id_dir")
-	defer ctx.EndTrace()
+	e := ctx.BeginTrace(metrics.RunShutdownTool, "update_build_id_dir")
+	defer e.End()
 
 	symbolsDir := filepath.Join(config.ProductOut(), "symbols")
 	if err := elf.UpdateBuildIdDir(symbolsDir); err != nil {
@@ -478,8 +473,8 @@ var distWaitGroup sync.WaitGroup
 
 // waitForDist waits for all backgrounded distGzipFile and distFile writes to finish
 func waitForDist(ctx Context) {
-	ctx.BeginTrace("soong_ui", "dist")
-	defer ctx.EndTrace()
+	e := ctx.BeginTrace("soong_ui", "dist")
+	defer e.End()
 
 	distWaitGroup.Wait()
 }
@@ -533,6 +528,19 @@ func distFile(ctx Context, config Config, src string, subDirs ...string) {
 // Actions to run on every build where 'dist' is in the actions.
 // Be careful, anything added here slows down EVERY CI build
 func runDistActions(ctx Context, config Config) {
+	// Always dist the build flags used in this build.
+	if product, err := config.TargetProductOrErr(); err == nil {
+		buildFlagsDir := filepath.Join(config.DistDir(), "build_flags")
+		ensureDirectoriesExist(ctx, buildFlagsDir)
+		flagsFile := filepath.Join(config.SoongOutDir(), "release-config", fmt.Sprintf("release_config-%s.vars", product))
+		flagsData, err := os.ReadFile(flagsFile)
+		if err != nil {
+			ctx.Printf("failed to read %s: %v", flagsFile, err)
+			return
+		}
+		distFlagsFile := filepath.Join(buildFlagsDir, filepath.Base(flagsFile))
+		os.WriteFile(distFlagsFile, flagsData, 0666)
+	}
+
 	runStagingSnapshot(ctx, config)
-	runSourceInputs(ctx, config)
 }

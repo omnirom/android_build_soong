@@ -29,8 +29,8 @@ type afdo struct {
 	Properties cc.AfdoProperties
 }
 
-func (afdo *afdo) props() []interface{} {
-	return []interface{}{&afdo.Properties}
+func (afdo *afdo) props() []any {
+	return []any{&afdo.Properties}
 }
 
 func (afdo *afdo) addDep(ctx BaseModuleContext, actx android.BottomUpMutatorContext) {

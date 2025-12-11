@@ -16,12 +16,15 @@ package cc
 
 import "android/soong/android"
 
+//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+
 // This file contains support for the native bridge sdk trait.
 
 func init() {
 	android.RegisterSdkMemberTrait(nativeBridgeSdkTrait)
 }
 
+// @auto-generate: gob
 type nativeBridgeSdkTraitStruct struct {
 	android.SdkMemberTraitBase
 }

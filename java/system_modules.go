@@ -14,8 +14,6 @@
 package java
 
 import (
-	"fmt"
-	"io"
 	"strings"
 
 	"github.com/google/blueprint"
@@ -28,6 +26,8 @@ import (
 // OpenJDK 9 introduces the concept of "system modules", which replace the bootclasspath.  This
 // file will produce the rules necessary to convert each unique set of bootclasspath jars into
 // system modules in a runtime image using the jmod and jlink tools.
+
+//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
 
 func init() {
 	RegisterSystemModulesBuildComponents(android.InitRegistrationContext)
@@ -121,6 +121,7 @@ func SystemModulesFactory() android.Module {
 	return module
 }
 
+// @auto-generate: gob
 type SystemModulesProviderInfo struct {
 	// The aggregated header jars from all jars specified in the libs property.
 	// Used when system module is added as a dependency to bootclasspath.
@@ -131,6 +132,8 @@ type SystemModulesProviderInfo struct {
 
 	// depset of header jars for this module and all transitive static dependencies
 	TransitiveStaticLibsHeaderJars depset.DepSet[android.Path]
+	Prebuilt                       bool
+	Libs                           []string
 }
 
 var SystemModulesProvider = blueprint.NewProvider[*SystemModulesProviderInfo]()
@@ -150,11 +153,21 @@ type SystemModulesProperties struct {
 	Libs []string
 }
 
+func (system *systemModulesImport) GenerateAndroidBuildActions(ctx android.ModuleContext) {
+	info := system.commonBuildActions(ctx)
+	info.Prebuilt = true
+	android.SetProvider(ctx, SystemModulesProvider, info)
+}
+
 func (system *SystemModules) GenerateAndroidBuildActions(ctx android.ModuleContext) {
+	android.SetProvider(ctx, SystemModulesProvider, system.commonBuildActions(ctx))
+}
+
+func (system *SystemModules) commonBuildActions(ctx android.ModuleContext) *SystemModulesProviderInfo {
 	var jars android.Paths
 
 	var transitiveStaticLibsHeaderJars []depset.DepSet[android.Path]
-	ctx.VisitDirectDepsWithTag(systemModulesLibsTag, func(module android.Module) {
+	ctx.VisitDirectDepsProxyWithTag(systemModulesLibsTag, func(module android.ModuleProxy) {
 		if dep, ok := android.OtherModuleProvider(ctx, module, JavaInfoProvider); ok {
 			jars = append(jars, dep.HeaderJars...)
 			transitiveStaticLibsHeaderJars = append(transitiveStaticLibsHeaderJars, dep.TransitiveStaticLibsHeaderJars)
@@ -163,12 +176,13 @@ func (system *SystemModules) GenerateAndroidBuildActions(ctx android.ModuleConte
 
 	system.outputDir, system.outputDeps = TransformJarsToSystemModules(ctx, jars)
 
-	android.SetProvider(ctx, SystemModulesProvider, &SystemModulesProviderInfo{
+	return &SystemModulesProviderInfo{
 		HeaderJars:                     jars,
 		OutputDir:                      system.outputDir,
 		OutputDirDeps:                  system.outputDeps,
 		TransitiveStaticLibsHeaderJars: depset.New(depset.PREORDER, nil, transitiveStaticLibsHeaderJars),
-	})
+		Libs:                           system.properties.Libs,
+	}
 }
 
 // ComponentDepsMutator is called before prebuilt modules without a corresponding source module are
@@ -181,28 +195,19 @@ func (system *SystemModules) ComponentDepsMutator(ctx android.BottomUpMutatorCon
 	ctx.AddVariationDependencies(nil, systemModulesLibsTag, system.properties.Libs...)
 }
 
-func (system *SystemModules) AndroidMk() android.AndroidMkData {
-	return android.AndroidMkData{
-		Custom: func(w io.Writer, name, prefix, moduleDir string, data android.AndroidMkData) {
-			fmt.Fprintln(w)
-
-			makevar := "SOONG_SYSTEM_MODULES_" + name
-			fmt.Fprintln(w, makevar, ":=$=", system.outputDir.String())
-			fmt.Fprintln(w)
-
-			makevar = "SOONG_SYSTEM_MODULES_LIBS_" + name
-			fmt.Fprintln(w, makevar, ":=$=", strings.Join(system.properties.Libs, " "))
-			fmt.Fprintln(w)
-
-			makevar = "SOONG_SYSTEM_MODULES_DEPS_" + name
-			fmt.Fprintln(w, makevar, ":=$=", strings.Join(system.outputDeps.Strings(), " "))
-			fmt.Fprintln(w)
-
-			fmt.Fprintln(w, name+":", "$("+makevar+")")
-			fmt.Fprintln(w, ".PHONY:", name)
-			// TODO(b/151177513): Licenses: Doesn't go through base_rules. May have to generate meta_lic and meta_module here.
-		},
+func (system *SystemModules) PrepareAndroidMKProviderInfo(config android.Config) *android.AndroidMkProviderInfo {
+	info := &android.AndroidMkProviderInfo{}
+	info.PrimaryInfo = android.AndroidMkInfo{
+		Class:      "SYSTEM_MODULES",
+		Include:    "$(BUILD_SYSTEM)/soong_system_modules.mk",
+		OutputFile: android.OptionalPathForPath(system.outputDir),
 	}
+	info.PrimaryInfo.SetPath("LOCAL_SOONG_SYSTEM_MODULES_DIR", system.outputDir)
+	info.PrimaryInfo.AddStrings("LOCAL_SOONG_SYSTEM_MODULES_LIBS", system.properties.Libs...)
+	info.PrimaryInfo.AddPaths("LOCAL_SOONG_SYSTEM_MODULES_DEPS", system.outputDeps)
+	// TODO(b/151177513): Licenses: Doesn't go through base_rules. May have to generate meta_lic and meta_module here.
+
+	return info
 }
 
 // A prebuilt version of java_system_modules. It does not import the
@@ -275,12 +280,11 @@ func (mt *systemModulesSdkMemberType) AddDependencies(ctx android.SdkDependencyC
 	ctx.AddVariationDependencies(nil, dependencyTag, names...)
 }
 
-func (mt *systemModulesSdkMemberType) IsInstance(module android.Module) bool {
-	if _, ok := module.(*SystemModules); ok {
+func (mt *systemModulesSdkMemberType) IsInstance(ctx android.ModuleContext, module android.ModuleProxy) bool {
+	if info, ok := android.OtherModuleProvider(ctx, module, SystemModulesProvider); ok {
 		// A prebuilt system module cannot be added as a member of an sdk because the source and
 		// snapshot instances would conflict.
-		_, ok := module.(*systemModulesImport)
-		return !ok
+		return !info.Prebuilt
 	}
 	return false
 }
@@ -299,9 +303,8 @@ func (mt *systemModulesSdkMemberType) CreateVariantPropertiesStruct() android.Sd
 	return &systemModulesInfoProperties{}
 }
 
-func (p *systemModulesInfoProperties) PopulateFromVariant(ctx android.SdkMemberContext, variant android.Module) {
-	systemModule := variant.(*SystemModules)
-	p.Libs = systemModule.properties.Libs
+func (p *systemModulesInfoProperties) PopulateFromVariant(ctx android.SdkMemberContext, variant android.ModuleProxy) {
+	p.Libs = android.OtherModulePointerProviderOrDefault(ctx.SdkModuleContext(), variant, SystemModulesProvider).Libs
 }
 
 func (p *systemModulesInfoProperties) AddToPropertySet(ctx android.SdkMemberContext, propertySet android.BpPropertySet) {

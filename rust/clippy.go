@@ -33,8 +33,8 @@ type clippy struct {
 	Properties ClippyProperties
 }
 
-func (c *clippy) props() []interface{} {
-	return []interface{}{&c.Properties}
+func (c *clippy) props() []any {
+	return []any{&c.Properties}
 }
 
 func (c *clippy) flags(ctx ModuleContext, flags Flags, deps PathDeps) (Flags, PathDeps) {

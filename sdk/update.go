@@ -111,14 +111,19 @@ func (gc *generatedContents) UnindentedPrintf(format string, args ...interface{}
 
 // Collect all the members.
 //
-// Updates the sdk module with a list of sdkMemberVariantDep instances and details as to which
-// multilibs (32/64/both) are used by this sdk variant.
-func (s *sdk) collectMembers(ctx android.ModuleContext) {
-	s.multilibUsages = multilibNone
-	ctx.WalkDeps(func(child android.Module, parent android.Module) bool {
+// Returns a list of sdkMemberVariantDep instances for the given OSType-specific variant of the SDK.
+func (s *sdk) collectMembers(ctx android.ModuleContext, osSpecificSdk android.ModuleProxy) []sdkMemberVariantDep {
+	var memberVariantDeps []sdkMemberVariantDep
+	ctx.WalkDepsProxy(func(child, parent android.ModuleProxy) bool {
+		if parent == ctx.ModuleProxy() {
+			// Only recurse into the requested os-specific variant of this common OS sdk module.
+			return child == osSpecificSdk
+		}
+
+		// This is a subdependency of the requested OSType-specific variant
 		tag := ctx.OtherModuleDependencyTag(child)
 		if memberTag, ok := tag.(android.SdkMemberDependencyTag); ok {
-			memberType := memberTag.SdkMemberType(child)
+			memberType := memberTag.SdkMemberType(ctx, child)
 
 			// If a nil SdkMemberType was returned then this module should not be added to the sdk.
 			if memberType == nil {
@@ -126,32 +131,30 @@ func (s *sdk) collectMembers(ctx android.ModuleContext) {
 			}
 
 			// Make sure that the resolved module is allowed in the member list property.
-			if !memberType.IsInstance(child) {
+			if !memberType.IsInstance(ctx, child) {
 				ctx.ModuleErrorf("module %q is not valid in property %s", ctx.OtherModuleName(child), memberType.SdkPropertyName())
 			}
 
 			// Keep track of which multilib variants are used by the sdk.
-			s.multilibUsages = s.multilibUsages.addArchType(child.Target().Arch.ArchType)
+			commonInfo := android.OtherModulePointerProviderOrDefault(ctx, child, android.CommonModuleInfoProvider)
 
 			exportedComponentsInfo, _ := android.OtherModuleProvider(ctx, child, android.ExportedComponentsInfoProvider)
 
-			var container android.Module
-			if parent != ctx.Module() {
-				container = parent
-			}
-
-			minApiLevel := android.MinApiLevelForSdkSnapshot(ctx, child)
-
+			minApiLevel := android.MinApiLevelForSdkSnapshot(commonInfo)
 			export := memberTag.ExportMember()
-			s.memberVariantDeps = append(s.memberVariantDeps, sdkMemberVariantDep{
+			vd := sdkMemberVariantDep{
 				sdkVariant:             s,
 				memberType:             memberType,
 				variant:                child,
 				minApiLevel:            minApiLevel,
-				container:              container,
 				export:                 export,
 				exportedComponentsInfo: exportedComponentsInfo,
-			})
+			}
+			if !android.EqualModules(parent, osSpecificSdk) {
+				container := parent
+				vd.container = &container
+			}
+			memberVariantDeps = append(memberVariantDeps, vd)
 
 			// Recurse down into the member's dependencies as it may have dependencies that need to be
 			// automatically added to the sdk.
@@ -160,6 +163,8 @@ func (s *sdk) collectMembers(ctx android.ModuleContext) {
 
 		return false
 	})
+
+	return memberVariantDeps
 }
 
 // A denylist of modules whose host variants will be removed from the generated snapshots above the ApiLevel
@@ -198,7 +203,7 @@ func (s *sdk) groupMemberVariantsByMemberThenType(ctx android.ModuleContext, tar
 		if err != nil {
 			targetApiLevel = android.FutureApiLevel
 		}
-		if lastApiLevel, exists := ignoreHostModuleVariantsAboveDessert[name]; exists && targetApiLevel.GreaterThan(lastApiLevel) && memberVariantDep.Host() {
+		if lastApiLevel, exists := ignoreHostModuleVariantsAboveDessert[name]; exists && targetApiLevel.GreaterThan(lastApiLevel) && memberVariantDep.Host(ctx) {
 			// ignore host variant of this module if the targetApiLevel is V and above.
 			continue
 		}
@@ -255,7 +260,7 @@ func isMemberTypeSupportedByTargetBuildRelease(memberType android.SdkMemberType,
 	return supportedByTargetBuildRelease
 }
 
-func appendUniqueVariants(variants []android.Module, newVariant android.Module) []android.Module {
+func appendUniqueVariants(variants []android.ModuleProxy, newVariant android.ModuleProxy) []android.ModuleProxy {
 	for _, v := range variants {
 		if v == newVariant {
 			return variants
@@ -300,7 +305,7 @@ func (s sdk) targetBuildRelease(ctx android.ModuleContext) *buildRelease {
 
 // buildSnapshot is the main function in this source file. It creates rules to copy
 // the contents (header files, stub libraries, etc) into the zip file.
-func (s *sdk) buildSnapshot(ctx android.ModuleContext, sdkVariants []*sdk) {
+func (s *sdk) buildSnapshot(ctx android.ModuleContext, memberVariantDeps []sdkMemberVariantDep) {
 
 	targetBuildRelease := s.targetBuildRelease(ctx)
 	targetApiLevel, err := android.ApiLevelFromUser(ctx, targetBuildRelease.name)
@@ -310,10 +315,6 @@ func (s *sdk) buildSnapshot(ctx android.ModuleContext, sdkVariants []*sdk) {
 
 	// Aggregate all the sdkMemberVariantDep instances from all the sdk variants.
 	hasLicenses := false
-	var memberVariantDeps []sdkMemberVariantDep
-	for _, sdkVariant := range sdkVariants {
-		memberVariantDeps = append(memberVariantDeps, sdkVariant.memberVariantDeps...)
-	}
 
 	// Filter out any sdkMemberVariantDep that is a component of another.
 	memberVariantDeps = filterOutComponents(ctx, memberVariantDeps)
@@ -346,7 +347,7 @@ func (s *sdk) buildSnapshot(ctx android.ModuleContext, sdkVariants []*sdk) {
 		// Always include host variants (e.g. host tools) in the snapshot.
 		// Host variants should not be guarded by a min_sdk_version check. In fact, host variants
 		// do not have a `min_sdk_version`.
-		if memberVariantDep.Host() {
+		if memberVariantDep.Host(ctx) {
 			exclude = false
 		}
 
@@ -623,7 +624,7 @@ func (s *sdk) generateInfoData(ctx android.ModuleContext, memberVariantDeps []sd
 	modules = append(modules, &sdkInfo)
 
 	name2Info := map[string]*moduleInfo{}
-	getModuleInfo := func(module android.Module) *moduleInfo {
+	getModuleInfo := func(module android.ModuleProxy) *moduleInfo {
 		name := module.Name()
 		info := name2Info[name]
 		if info == nil {
@@ -655,7 +656,7 @@ func (s *sdk) generateInfoData(ctx android.ModuleContext, memberVariantDeps []sd
 		sdkInfo.memberSpecific[propertyName] = android.SortedUniqueStrings(list)
 
 		if memberVariantDep.container != nil {
-			containerInfo := getModuleInfo(memberVariantDep.container)
+			containerInfo := getModuleInfo(*memberVariantDep.container)
 			containerInfo.deps = android.SortedUniqueStrings(append(containerInfo.deps, memberName))
 		}
 
@@ -1129,8 +1130,8 @@ func (s *snapshotBuilder) AddPrebuiltModule(member android.SdkMember, moduleType
 	}
 
 	// Where available copy apex_available properties from the member.
-	if apexAware, ok := variant.(interface{ ApexAvailable() []string }); ok {
-		apexAvailable := apexAware.ApexAvailable()
+	if info, ok := android.OtherModuleProvider(s.ctx, variant, android.CommonModuleInfoProvider); ok && info.IsApexModule {
+		apexAvailable := info.ApexAvailable
 		if len(apexAvailable) == 0 {
 			// //apex_available:platform is the default.
 			apexAvailable = []string{android.AvailableToPlatform}
@@ -1154,7 +1155,7 @@ func (s *snapshotBuilder) AddPrebuiltModule(member android.SdkMember, moduleType
 	hostSupported := false
 
 	for _, variant := range member.Variants() {
-		osClass := variant.Target().Os.Class
+		osClass := android.OtherModulePointerProviderOrDefault(mctx, variant, android.CommonModuleInfoProvider).Target.Os.Class
 		if osClass == android.Host {
 			hostSupported = true
 		} else if osClass == android.Device {
@@ -1250,12 +1251,12 @@ type sdkMemberVariantDep struct {
 	memberType android.SdkMemberType
 
 	// The variant that is added to the sdk.
-	variant android.Module
+	variant android.ModuleProxy
 
 	// The optional container of this member, i.e. the module that is depended upon by the sdk
 	// (possibly transitively) and whose dependency on this module is why it was added to the sdk.
 	// Is nil if this a direct dependency of the sdk.
-	container android.Module
+	container *android.ModuleProxy
 
 	// True if the member should be exported, i.e. accessible, from outside the sdk.
 	export bool
@@ -1268,8 +1269,8 @@ type sdkMemberVariantDep struct {
 }
 
 // Host returns true if the sdk member is a host variant (e.g. host tool)
-func (s *sdkMemberVariantDep) Host() bool {
-	return s.variant.Target().Os.Class == android.Host
+func (s *sdkMemberVariantDep) Host(ctx android.ModuleContext) bool {
+	return android.OtherModulePointerProviderOrDefault(ctx, s.variant, android.CommonModuleInfoProvider).Host
 }
 
 var _ android.SdkMember = (*sdkMember)(nil)
@@ -1279,14 +1280,14 @@ var _ android.SdkMember = (*sdkMember)(nil)
 type sdkMember struct {
 	memberType android.SdkMemberType
 	name       string
-	variants   []android.Module
+	variants   []android.ModuleProxy
 }
 
 func (m *sdkMember) Name() string {
 	return m.name
 }
 
-func (m *sdkMember) Variants() []android.Module {
+func (m *sdkMember) Variants() []android.ModuleProxy {
 	return m.variants
 }
 
@@ -1344,15 +1345,16 @@ type variantCoordinate struct {
 	linkType string
 }
 
-func getVariantCoordinate(ctx *memberContext, variant android.Module) variantCoordinate {
+func getVariantCoordinate(ctx *memberContext, variant android.ModuleProxy) variantCoordinate {
 	linkType := ""
 	if len(ctx.MemberType().SupportedLinkages()) > 0 {
-		linkType = getLinkType(variant)
+		linkType = getLinkType(ctx.sdkMemberContext, variant)
 	}
+	info := android.OtherModulePointerProviderOrDefault(ctx.SdkModuleContext(), variant, android.CommonModuleInfoProvider)
 	return variantCoordinate{
-		osType:   variant.Target().Os,
-		archId:   archIdFromTarget(variant.Target()),
-		image:    variant.ImageVariation().Variation,
+		osType:   info.Target.Os,
+		archId:   archIdFromTarget(info.Target),
+		image:    info.ImageVariation.Variation,
 		linkType: linkType,
 	}
 }
@@ -1371,24 +1373,24 @@ func getVariantCoordinate(ctx *memberContext, variant android.Module) variantCoo
 // by apex variant, where one is the default/platform variant and one is the APEX variant. In that
 // case it picks the APEX variant. It picks the APEX variant because that is the behavior that would
 // be expected
-func selectApexVariantsWhereAvailable(ctx *memberContext, variants []android.Module) []android.Module {
+func selectApexVariantsWhereAvailable(ctx *memberContext, variants []android.ModuleProxy) []android.ModuleProxy {
 	moduleCtx := ctx.sdkMemberContext
 
 	// Group the variants by coordinates.
-	variantsByCoord := make(map[variantCoordinate][]android.Module)
+	variantsByCoord := make(map[variantCoordinate][]android.ModuleProxy)
 	for _, variant := range variants {
 		coord := getVariantCoordinate(ctx, variant)
 		variantsByCoord[coord] = append(variantsByCoord[coord], variant)
 	}
 
-	toDiscard := make(map[android.Module]struct{})
+	toDiscard := make(map[android.ModuleProxy]struct{})
 	for coord, list := range variantsByCoord {
 		count := len(list)
 		if count == 1 {
 			continue
 		}
 
-		variantsByApex := make(map[string]android.Module)
+		variantsByApex := make(map[string]android.ModuleProxy)
 		conflictDetected := false
 		for _, variant := range list {
 			apexInfo, _ := android.OtherModuleProvider(moduleCtx, variant, android.ApexInfoProvider)
@@ -1430,7 +1432,7 @@ func selectApexVariantsWhereAvailable(ctx *memberContext, variants []android.Mod
 	// If there are any variants to discard then remove them from the list of variants, while
 	// preserving the order.
 	if len(toDiscard) > 0 {
-		filtered := []android.Module{}
+		filtered := []android.ModuleProxy{}
 		for _, variant := range variants {
 			if _, ok := toDiscard[variant]; !ok {
 				filtered = append(filtered, variant)
@@ -1469,7 +1471,7 @@ type variantPropertiesFactoryFunc func() android.SdkMemberProperties
 
 // Create a new osTypeSpecificInfo for the specified os type and its properties
 // structures populated with information from the variants.
-func newOsTypeSpecificInfo(ctx android.SdkMemberContext, osType android.OsType, variantPropertiesFactory variantPropertiesFactoryFunc, osTypeVariants []android.Module) *osTypeSpecificInfo {
+func newOsTypeSpecificInfo(ctx android.SdkMemberContext, osType android.OsType, variantPropertiesFactory variantPropertiesFactoryFunc, osTypeVariants []android.ModuleProxy) *osTypeSpecificInfo {
 	osInfo := &osTypeSpecificInfo{
 		osType: osType,
 	}
@@ -1485,10 +1487,10 @@ func newOsTypeSpecificInfo(ctx android.SdkMemberContext, osType android.OsType, 
 	osInfo.Properties = osSpecificVariantPropertiesFactory()
 
 	// Group the variants by arch type.
-	var variantsByArchId = make(map[archId][]android.Module)
+	var variantsByArchId = make(map[archId][]android.ModuleProxy)
 	var archIds []archId
 	for _, variant := range osTypeVariants {
-		target := variant.Target()
+		target := android.OtherModulePointerProviderOrDefault(ctx.SdkModuleContext(), variant, android.CommonModuleInfoProvider).Target
 		id := archIdFromTarget(target)
 		if _, ok := variantsByArchId[id]; !ok {
 			archIds = append(archIds, id)
@@ -1695,7 +1697,7 @@ var _ propertiesContainer = (*archTypeSpecificInfo)(nil)
 
 // Create a new archTypeSpecificInfo for the specified arch type and its properties
 // structures populated with information from the variants.
-func newArchSpecificInfo(ctx android.SdkMemberContext, archId archId, osType android.OsType, variantPropertiesFactory variantPropertiesFactoryFunc, archVariants []android.Module) *archTypeSpecificInfo {
+func newArchSpecificInfo(ctx android.SdkMemberContext, archId archId, osType android.OsType, variantPropertiesFactory variantPropertiesFactoryFunc, archVariants []android.ModuleProxy) *archTypeSpecificInfo {
 
 	// Create an arch specific info into which the variant properties can be copied.
 	archInfo := &archTypeSpecificInfo{archId: archId, osType: osType}
@@ -1710,9 +1712,9 @@ func newArchSpecificInfo(ctx android.SdkMemberContext, archId archId, osType and
 		archInfo.Properties.PopulateFromVariant(ctx, archVariants[0])
 	} else {
 		// Group the variants by image type.
-		variantsByImage := make(map[string][]android.Module)
+		variantsByImage := make(map[string][]android.ModuleProxy)
 		for _, variant := range archVariants {
-			image := variant.ImageVariation().Variation
+			image := android.OtherModulePointerProviderOrDefault(ctx.SdkModuleContext(), variant, android.CommonModuleInfoProvider).ImageVariation.Variation
 			variantsByImage[image] = append(variantsByImage[image], variant)
 		}
 
@@ -1730,14 +1732,14 @@ func newArchSpecificInfo(ctx android.SdkMemberContext, archId archId, osType and
 //
 // If the variant is not differentiated by link type then it returns "",
 // otherwise it returns one of "static" or "shared".
-func getLinkType(variant android.Module) string {
+func getLinkType(ctx android.ModuleContext, variant android.ModuleProxy) string {
 	linkType := ""
-	if linkable, ok := variant.(cc.LinkableInterface); ok {
-		if linkable.Shared() && linkable.Static() {
+	if linkable, ok := android.OtherModuleProvider(ctx, variant, cc.LinkableInfoProvider); ok {
+		if linkable.Shared && linkable.Static {
 			panic(fmt.Errorf("expected variant %q to be either static or shared but was both", variant.String()))
-		} else if linkable.Shared() {
+		} else if linkable.Shared {
 			linkType = "shared"
-		} else if linkable.Static() {
+		} else if linkable.Static {
 			linkType = "static"
 		} else {
 			panic(fmt.Errorf("expected variant %q to be either static or shared but was neither", variant.String()))
@@ -1825,7 +1827,7 @@ type imageVariantSpecificInfo struct {
 	linkInfos []*linkTypeSpecificInfo
 }
 
-func newImageVariantSpecificInfo(ctx android.SdkMemberContext, imageVariant string, variantPropertiesFactory variantPropertiesFactoryFunc, imageVariants []android.Module) *imageVariantSpecificInfo {
+func newImageVariantSpecificInfo(ctx android.SdkMemberContext, imageVariant string, variantPropertiesFactory variantPropertiesFactoryFunc, imageVariants []android.ModuleProxy) *imageVariantSpecificInfo {
 
 	// Create an image variant specific info into which the variant properties can be copied.
 	imageInfo := &imageVariantSpecificInfo{imageVariant: imageVariant}
@@ -1841,7 +1843,7 @@ func newImageVariantSpecificInfo(ctx android.SdkMemberContext, imageVariant stri
 		// There is more than one variant for this image variant which must be differentiated by link
 		// type. Or there are multiple supported linkages and we need to nest based on link type.
 		for _, linkVariant := range imageVariants {
-			linkType := getLinkType(linkVariant)
+			linkType := getLinkType(ctx.SdkModuleContext(), linkVariant)
 			if linkType == "" {
 				panic(fmt.Errorf("expected one arch specific variant as it is not identified by link type but found %d", len(imageVariants)))
 			} else {
@@ -1925,7 +1927,7 @@ var _ propertiesContainer = (*linkTypeSpecificInfo)(nil)
 
 // Create a new linkTypeSpecificInfo for the specified link type and its properties
 // structures populated with information from the variant.
-func newLinkSpecificInfo(ctx android.SdkMemberContext, linkType string, variantPropertiesFactory variantPropertiesFactoryFunc, linkVariant android.Module) *linkTypeSpecificInfo {
+func newLinkSpecificInfo(ctx android.SdkMemberContext, linkType string, variantPropertiesFactory variantPropertiesFactoryFunc, linkVariant android.ModuleProxy) *linkTypeSpecificInfo {
 	linkInfo := &linkTypeSpecificInfo{
 		baseInfo: baseInfo{
 			// Create the properties into which the link type specific properties will be
@@ -2008,9 +2010,10 @@ func (s *sdk) createMemberSnapshot(ctx *memberContext, member *sdkMember, bpModu
 	variants := selectApexVariantsWhereAvailable(ctx, member.variants)
 
 	// Group the variants by os type.
-	variantsByOsType := make(map[android.OsType][]android.Module)
+	variantsByOsType := make(map[android.OsType][]android.ModuleProxy)
 	for _, variant := range variants {
-		osType := variant.Target().Os
+		osType := android.OtherModulePointerProviderOrDefault(
+			ctx.SdkModuleContext(), variant, android.CommonModuleInfoProvider).Target.Os
 		variantsByOsType[osType] = append(variantsByOsType[osType], variant)
 	}
 

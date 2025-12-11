@@ -162,6 +162,7 @@ type Context struct {
 func NewContext(config Config) *Context {
 	ctx := &Context{blueprint.NewContext(), config}
 	ctx.SetSrcDir(absSrcDir)
+	ctx.SetIncrementalDBDir(config.SoongOutDir())
 	ctx.AddSourceRootDirs(config.SourceRootDirs()...)
 	return ctx
 }

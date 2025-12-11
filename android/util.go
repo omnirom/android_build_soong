@@ -209,8 +209,8 @@ func PrettyConcat(list []string, quote bool, lastSep string) string {
 // that are in l1 but not l2, and l2 but not l1.
 func ListSetDifference[T comparable](l1, l2 []T) (bool, []T, []T) {
 	listsDiffer := false
-	l1 = firstUnique(l1)
-	l2 = firstUnique(l2)
+	l1 = FirstUnique(l1)
+	l2 = FirstUnique(l2)
 	diff1 := []T{}
 	diff2 := []T{}
 	m1 := setFromList(l1)
@@ -379,21 +379,21 @@ outer:
 // FirstUniqueStrings returns all unique elements of a slice of strings, keeping the first copy of
 // each.  It does not modify the input slice.
 func FirstUniqueStrings(list []string) []string {
-	return firstUnique(list)
+	return FirstUnique(list)
 }
 
-// firstUnique returns all unique elements of a slice, keeping the first copy of each.  It
+// FirstUnique returns all unique elements of a slice, keeping the first copy of each.  It
 // does not modify the input slice.
-func firstUnique[T comparable](slice []T) []T {
+func FirstUnique[T comparable](slice []T) []T {
 	// Do not modify the input in-place, operate on a copy instead.
 	slice = CopyOf(slice)
-	return firstUniqueInPlace(slice)
+	return FirstUniqueInPlace(slice)
 }
 
-// firstUniqueInPlace returns all unique elements of a slice, keeping the first copy of
+// FirstUniqueInPlace returns all unique elements of a slice, keeping the first copy of
 // each.  It modifies the slice contents in place, and returns a subslice of the original
 // slice.
-func firstUniqueInPlace[T comparable](slice []T) []T {
+func FirstUniqueInPlace[T comparable](slice []T) []T {
 	// 128 was chosen based on BenchmarkFirstUniqueStrings results.
 	if len(slice) > 128 {
 		return firstUniqueMap(slice)
@@ -401,7 +401,7 @@ func firstUniqueInPlace[T comparable](slice []T) []T {
 	return firstUniqueList(slice)
 }
 
-// firstUniqueList is an implementation of firstUnique using an O(N^2) list comparison to look for
+// firstUniqueList is an implementation of FirstUnique using an O(N^2) list comparison to look for
 // duplicates.
 func firstUniqueList[T any](in []T) []T {
 	writeIndex := 0
@@ -422,7 +422,7 @@ outer:
 	return in[0:writeIndex]
 }
 
-// firstUniqueMap is an implementation of firstUnique using an O(N) hash set lookup to look for
+// firstUniqueMap is an implementation of FirstUnique using an O(N) hash set lookup to look for
 // duplicates.
 func firstUniqueMap[T comparable](in []T) []T {
 	writeIndex := 0
@@ -564,7 +564,7 @@ func substPattern(pat, repl, str string) string {
 }
 
 // copied from build/kati/strutil.go
-func matchPattern(pat, str string) bool {
+func MatchPattern(pat, str string) bool {
 	i := strings.IndexByte(pat, '%')
 	if i < 0 {
 		return pat == str

@@ -251,6 +251,67 @@ func (c *ClassLoaderContext) excludeLibs(excludedLibs []string) (*ClassLoaderCon
 // passed to dex2oat is unknown to the build system, and gets known only at Ninja stage.
 type ClassLoaderContextMap map[int][]*ClassLoaderContext
 
+// DeepCopy creates a deep copy of the ClassLoaderContextMap.
+// It uses a memoization map to handle circular references (cycles) within the ClassLoaderContext graph,
+// ensuring that referenced objects are copied only once and references are correctly re-established in the copy.
+func (m ClassLoaderContextMap) DeepCopy() ClassLoaderContextMap {
+	if m == nil {
+		return nil
+	}
+
+	copiedMap := make(ClassLoaderContextMap, len(m))
+	// Memoization map: original pointer -> copied pointer
+	// This is crucial for handling circular references and shared objects.
+	memo := make(map[*ClassLoaderContext]*ClassLoaderContext)
+
+	for key, clcList := range m {
+		if clcList == nil {
+			copiedMap[key] = nil
+			continue
+		}
+
+		copiedList := make([]*ClassLoaderContext, len(clcList))
+		for i, clc := range clcList {
+			copiedList[i] = deepCopyClassLoaderContext(clc, memo)
+		}
+		copiedMap[key] = copiedList
+	}
+	return copiedMap
+}
+
+// deepCopyClassLoaderContext is a recursive helper function to deep copy a single ClassLoaderContext.
+// It utilizes the memo map to prevent infinite recursion and correctly handle shared references.
+func deepCopyClassLoaderContext(original *ClassLoaderContext, memo map[*ClassLoaderContext]*ClassLoaderContext) *ClassLoaderContext {
+	if original == nil {
+		return nil
+	}
+
+	// Check if this object has already been copied in the current deep copy operation
+	if copied, ok := memo[original]; ok {
+		return copied // Return the already copied instance to handle cycles
+	}
+
+	// Create a new instance and immediately add it to the memo map
+	// This must happen *before* recursing, to handle forward references in cycles
+	copied := &ClassLoaderContext{
+		Name:     original.Name,
+		Optional: original.Optional,
+		Host:     original.Host,   // Assuming Path is a value type or simple copy
+		Device:   original.Device, // Assuming string is a value type
+	}
+	memo[original] = copied
+
+	// Recursively deep copy Subcontexts
+	if original.Subcontexts != nil {
+		copied.Subcontexts = make([]*ClassLoaderContext, len(original.Subcontexts))
+		for i, subCLC := range original.Subcontexts {
+			copied.Subcontexts[i] = deepCopyClassLoaderContext(subCLC, memo)
+		}
+	}
+
+	return copied
+}
+
 // Compatibility libraries. Some are optional, and some are required: this is the default that
 // affects how they are handled by the Soong logic that automatically adds implicit SDK libraries
 // to the manifest_fixer, but an explicit `uses_libs`/`optional_uses_libs` can override this.
@@ -328,7 +389,12 @@ func (clcMap ClassLoaderContextMap) addContext(ctx android.ModuleInstallPathCont
 		} else if clc.Host == hostPath && clc.Device == devicePath {
 			// Ok, the same library with the same paths. Don't re-add it, but don't raise an error
 			// either, as the same library may be reachable via different transitional dependencies.
+			// For the same library brought in by different dependencies, some of them don't carry all the
+			// fields, so we populate the fields from other dependencies when available.
 			clc.Optional = clc.Optional && optional
+			if len(clc.Subcontexts) == 0 {
+				clc.Subcontexts = subcontexts
+			}
 			return nil
 		} else {
 			// Fail, as someone is trying to add the same library with different paths. This likely

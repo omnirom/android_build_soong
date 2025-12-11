@@ -35,6 +35,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"android/soong/shared"
@@ -58,7 +59,6 @@ const (
 	RunSoong     = "soong"
 	PrimaryNinja = "ninja"
 	RunKati      = "kati"
-	RunBazel     = "bazel"
 
 	// Overall build from building the graph to building the target.
 	Total = "total"
@@ -80,16 +80,15 @@ type Metrics struct {
 	// Protobuf containing metrics pertaining to number of makefiles in a build.
 	mkMetrics mk_metrics_proto.MkMetrics
 
-	// A list of pending build events.
-	EventTracer *EventTracer
+	// Mutex protects fields that may be set by multiple goroutines.
+	sync.Mutex
 }
 
 // New returns a pointer of Metrics to store a set of metrics.
 func New() (metrics *Metrics) {
 	m := &Metrics{
-		metrics:     soong_metrics_proto.MetricsBase{},
-		mkMetrics:   mk_metrics_proto.MkMetrics{},
-		EventTracer: &EventTracer{},
+		metrics:   soong_metrics_proto.MetricsBase{},
+		mkMetrics: mk_metrics_proto.MkMetrics{},
 	}
 	return m
 }
@@ -102,31 +101,35 @@ func (m *Metrics) SetToplevelMakefiles(total int) {
 	m.mkMetrics.ToplevelMakefiles = uint32(total)
 }
 
+func (m *Metrics) SetSoongOnly(soongOnly bool) {
+	m.metrics.BuildConfig.SoongOnly = &soongOnly
+}
+
 func (m *Metrics) DumpMkMetrics(outPath string) {
 	shared.Save(&m.mkMetrics, outPath)
 }
 
 // SetTimeMetrics stores performance information from an executed block of
 // code.
-func (m *Metrics) SetTimeMetrics(perf soong_metrics_proto.PerfInfo) {
+func (m *Metrics) SetTimeMetrics(perf *soong_metrics_proto.PerfInfo) {
+	m.Lock()
+	defer m.Unlock()
 	switch perf.GetName() {
 	case RunKati:
-		m.metrics.KatiRuns = append(m.metrics.KatiRuns, &perf)
+		m.metrics.KatiRuns = append(m.metrics.KatiRuns, perf)
 	case RunSoong:
-		m.metrics.SoongRuns = append(m.metrics.SoongRuns, &perf)
-	case RunBazel:
-		m.metrics.BazelRuns = append(m.metrics.BazelRuns, &perf)
+		m.metrics.SoongRuns = append(m.metrics.SoongRuns, perf)
 	case PrimaryNinja:
-		m.metrics.NinjaRuns = append(m.metrics.NinjaRuns, &perf)
+		m.metrics.NinjaRuns = append(m.metrics.NinjaRuns, perf)
 	case RunSetupTool:
-		m.metrics.SetupTools = append(m.metrics.SetupTools, &perf)
+		m.metrics.SetupTools = append(m.metrics.SetupTools, perf)
 	case Total:
-		m.metrics.Total = &perf
+		m.metrics.Total = perf
 	}
 }
 
-func (m *Metrics) SetCriticalPathInfo(criticalPathInfo soong_metrics_proto.CriticalPathInfo) {
-	m.metrics.CriticalPathInfo = &criticalPathInfo
+func (m *Metrics) SetCriticalPathInfo(criticalPathInfo *soong_metrics_proto.CriticalPathInfo) {
+	m.metrics.CriticalPathInfo = criticalPathInfo
 }
 
 // SetFatalOrPanicMessage stores a non-zero exit and the relevant message in the latest event if
@@ -135,12 +138,9 @@ func (m *Metrics) SetFatalOrPanicMessage(errMsg string) {
 	if m == nil {
 		return
 	}
-	if event := m.EventTracer.peek(); event != nil {
-		event.nonZeroExitCode = true
-		event.errorMsg = &errMsg
-	} else {
-		m.metrics.ErrorMessage = proto.String(errMsg)
-	}
+	m.Lock()
+	defer m.Unlock()
+	m.metrics.ErrorMessage = proto.String(errMsg)
 	m.metrics.NonZeroExit = proto.Bool(true)
 }
 
@@ -255,34 +255,8 @@ func (m *Metrics) Dump(out string) error {
 	return shared.Save(&m.metrics, out)
 }
 
-// SetSoongBuildMetrics sets the metrics collected from the soong_build
-// execution.
-func (m *Metrics) SetSoongBuildMetrics(metrics *soong_metrics_proto.SoongBuildMetrics) {
-	m.metrics.SoongBuildMetrics = metrics
-}
-
-// A CriticalUserJourneysMetrics is a struct that contains critical user journey
-// metrics. These critical user journeys are defined under cuj/cuj.go file.
-type CriticalUserJourneysMetrics struct {
-	// A list of collected CUJ metrics.
-	cujs soong_metrics_proto.CriticalUserJourneysMetrics
-}
-
-// NewCriticalUserJourneyMetrics returns a pointer of CriticalUserJourneyMetrics
-// to capture CUJs metrics.
-func NewCriticalUserJourneysMetrics() *CriticalUserJourneysMetrics {
-	return &CriticalUserJourneysMetrics{}
-}
-
-// Add adds a set of collected metrics from an executed critical user journey.
-func (c *CriticalUserJourneysMetrics) Add(name string, metrics *Metrics) {
-	c.cujs.Cujs = append(c.cujs.Cujs, &soong_metrics_proto.CriticalUserJourneyMetrics{
-		Name:    proto.String(name),
-		Metrics: &metrics.metrics,
-	})
-}
-
-// Dump saves the collected CUJs metrics to the raw protobuf file.
-func (c *CriticalUserJourneysMetrics) Dump(filename string) (err error) {
-	return shared.Save(&c.cujs, filename)
+// Begin starts tracing the event.  Call End on the returned Event
+// to end the event.
+func (m *Metrics) Begin(name, desc string) *Event {
+	return newEvent(m, name, desc)
 }

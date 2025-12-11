@@ -18,40 +18,80 @@ import (
 	"strings"
 
 	"android/soong/android"
+
+	cc_config "android/soong/cc/config"
 )
 
 var (
 	Arm64RustFlags = []string{
 		"-C force-frame-pointers=y",
 	}
-	Arm64ArchFeatureRustFlags = map[string][]string{}
-	Arm64LinkFlags            = []string{}
+	Arm64ArchFeatureRustFlags = map[string][]string{
+		// branch-protection=bti,pac-ret is equivalent to Clang's mbranch-protection=standard
+		"branchprot": {
+			"-Z branch-protection=bti,pac-ret",
+			"-Z stack-protector=none",
+		},
+	}
+	Arm64LinkFlags = []string{}
+
+	// We could simply pass "-C target-feature=+v8.2a" and similar, but "v8.2a" and the other
+	// architecture version target-features are marked unstable and spam warnings in the build log,
+	// even though they're just aliases for groups of other features, most of which are stable.
+	// As a workaround, we'll simply look at this file and enable the constituent features:
+	// https://doc.rust-lang.org/nightly/nightly-rustc/src/rustc_target/target_features.rs.html
+
+	// Mandatory extensions from ARMv8.1-A and ARMv8.2-A
+	armv82aFeatures = "-C target-feature=+crc,+lse,+rdm,+pan,+lor,+vh,+ras,+dpb"
+	// Mandatory extensions from ARMv8.3-A, ARMv8.4-A and ARMv8.5-A
+	armv85aFeatures = "-C target-feature=+rcpc,+paca,+pacg,+jsconv,+dotprod,+dit,+flagm,+ssbs,+sb,+dpb2,+bti"
+	// Mandatory extensions from ARMv8.6-A and ARMv8.7-A
+	// "wfxt" is marked unstable, so we don't include it yet.
+	armv87aFeatures = "-C target-feature=+bf16,+i8mm"
 
 	Arm64ArchVariantRustFlags = map[string][]string{
-		"armv8-a": []string{},
-		"armv8-a-branchprot": []string{
-			// branch-protection=bti,pac-ret is equivalent to Clang's mbranch-protection=standard
-			"-Z branch-protection=bti,pac-ret",
+		"armv8-a":            {},
+		"armv8-a-branchprot": {},
+		"armv8-2a": {
+			armv82aFeatures,
 		},
-		"armv8-2a":         []string{},
-		"armv8-2a-dotprod": []string{},
+		"armv8-2a-dotprod": {
+			armv82aFeatures,
+			"-C target-feature=+dotprod",
+		},
+		"armv8-5a": {
+			armv82aFeatures,
+			armv85aFeatures,
+		},
+		"armv8-7a": {
+			armv82aFeatures,
+			armv85aFeatures,
+			armv87aFeatures,
+		},
 
-		// branch-protection=bti,pac-ret is equivalent to Clang's mbranch-protection=standard
-		"armv9-a": []string{
-			"-Z branch-protection=bti,pac-ret",
-			"-Z stack-protector=none",
+		// All of the Armv9 entries below should have "-C target-feature=+sve2",
+		// but a large subset of Rust code runs in VMs that are incompatible with SVE.
+		// TODO: b/409859765 - apply a solution similar to cc_baremetal_defaults.
+		"armv9-a": {
+			armv82aFeatures,
+			armv85aFeatures,
 		},
-		"armv9-2a": []string{
-			"-Z branch-protection=bti,pac-ret",
-			"-Z stack-protector=none",
+		"armv9-2a": {
+			armv82aFeatures,
+			armv85aFeatures,
+			armv87aFeatures,
 		},
-		"armv9-3a": []string{
-			"-Z branch-protection=bti,pac-ret",
-			"-Z stack-protector=none",
+		// ARMv9.3-A adds +hbc,+mops but they're both unstable
+		"armv9-3a": {
+			armv82aFeatures,
+			armv85aFeatures,
+			armv87aFeatures,
 		},
-		"armv9-4a": []string{
-			"-Z branch-protection=bti,pac-ret",
-			"-Z stack-protector=none",
+		// ARMv9.4-A adds +cssc but it's unstable
+		"armv9-4a": {
+			armv82aFeatures,
+			armv85aFeatures,
+			armv87aFeatures,
 		},
 	}
 )
@@ -63,8 +103,12 @@ func init() {
 	pctx.StaticVariable("Arm64ToolchainLinkFlags", strings.Join(Arm64LinkFlags, " "))
 
 	for variant, rustFlags := range Arm64ArchVariantRustFlags {
-		pctx.StaticVariable("Arm64"+variant+"VariantRustFlags",
-			strings.Join(rustFlags, " "))
+		pctx.VariableFunc("Arm64"+variant+"VariantRustFlags", func(ctx android.PackageVarContext) string {
+			if ctx.Config().ReleaseRustUseArmTargetArchVariant() {
+				return strings.Join(rustFlags, " ")
+			}
+			return ""
+		})
 	}
 
 	pctx.StaticVariable("DEVICE_ARM64_RUSTC_FLAGS", strings.Join(Arm64RustFlags, " "))
@@ -73,6 +117,7 @@ func init() {
 type toolchainArm64 struct {
 	toolchain64Bit
 	toolchainRustFlags string
+	ldflags            string
 }
 
 func (t *toolchainArm64) RustTriple() string {
@@ -81,7 +126,7 @@ func (t *toolchainArm64) RustTriple() string {
 
 func (t *toolchainArm64) ToolchainLinkFlags() string {
 	// Prepend the lld flags from cc_config so we stay in sync with cc
-	return "${config.DeviceGlobalLinkFlags} ${cc_config.Arm64Lldflags} ${config.Arm64ToolchainLinkFlags}"
+	return "${config.DeviceGlobalLinkFlags} " + t.ldflags + " ${config.Arm64ToolchainLinkFlags}"
 }
 
 func (t *toolchainArm64) ToolchainRustFlags() string {
@@ -119,7 +164,10 @@ func Arm64ToolchainFactory(arch android.Arch) Toolchain {
 		toolchainRustFlags = append(toolchainRustFlags, Arm64ArchFeatureRustFlags[feature]...)
 	}
 
+	cc_toolchain := cc_config.FindToolchain(android.Android, arch)
+
 	return &toolchainArm64{
 		toolchainRustFlags: strings.Join(toolchainRustFlags, " "),
+		ldflags:            strings.ReplaceAll(cc_toolchain.Ldflags(), "${config.", "${cc_config."),
 	}
 }

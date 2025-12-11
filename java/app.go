@@ -20,6 +20,7 @@ package java
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/google/blueprint"
@@ -78,14 +79,19 @@ type AppInfo struct {
 	Privileged                    bool
 	OutputFile                    android.Path
 	InstallApkName                string
-	JacocoReportClassesFile       android.Path
+	JacocoInfo                    JacocoInfo
 	Certificate                   Certificate
 	PrivAppAllowlist              android.OptionalPath
 	OverriddenManifestPackageName *string
 	ApkCertsFile                  android.Path
+	JniLibs                       []jniLib
+	JniCoverageOutputs            android.Paths
+	PackedAdditionalOutputs       android.Path
 }
 
 var AppInfoProvider = blueprint.NewProvider[*AppInfo]()
+
+type AppInfos []AppInfo
 
 // AndroidManifest.xml merging
 // package splits
@@ -139,10 +145,6 @@ type appProperties struct {
 	// If set, find and merge all NOTICE files that this module and its dependencies have and store
 	// it in the APK as an asset.
 	Embed_notices *bool
-
-	// cc.Coverage related properties
-	PreventInstall    bool `blueprint:"mutated"`
-	IsCoverageVariant bool `blueprint:"mutated"`
 
 	// It can be set to test the behaviour of default target sdk version.
 	// Only required when updatable: false. It is an error if updatable: true and this is false.
@@ -413,11 +415,18 @@ func (a *AndroidTestHelperApp) GenerateAndroidBuildActions(ctx android.ModuleCon
 		TestOnly: true,
 	})
 	appInfo := &AppInfo{
-		Updatable:     Bool(a.appProperties.Updatable),
-		TestHelperApp: true,
+		Updatable:          Bool(a.appProperties.Updatable),
+		TestHelperApp:      true,
+		JniLibs:            a.jniLibs,
+		JniCoverageOutputs: a.jniCoverageOutputs,
 	}
 	setCommonAppInfo(appInfo, a)
 	android.SetProvider(ctx, AppInfoProvider, appInfo)
+	android.SetProvider(ctx, ApkCertInfoProvider, ApkCertInfo{
+		Certificate: appInfo.Certificate,
+		Name:        appInfo.InstallApkName + ".apk",
+		Test:        true,
+	})
 
 	moduleInfoJSON := ctx.ModuleInfoJSON()
 	moduleInfoJSON.Tags = append(moduleInfoJSON.Tags, "tests")
@@ -427,9 +436,41 @@ func (a *AndroidTestHelperApp) GenerateAndroidBuildActions(ctx android.ModuleCon
 		moduleInfoJSON.CompatibilitySuites = append(moduleInfoJSON.CompatibilitySuites, "null-suite")
 	}
 
-	android.SetProvider(ctx, android.TestSuiteInfoProvider, android.TestSuiteInfo{
-		TestSuites: a.appTestHelperAppProperties.Test_suites,
+	var data []android.DataPath
+	for _, d := range a.extraOutputFiles {
+		data = append(data, android.DataPath{SrcPath: d})
+	}
+	ctx.SetTestSuiteInfo(android.TestSuiteInfo{
+		TestSuites:           a.appTestHelperAppProperties.Test_suites,
+		MainFile:             a.outputFile,
+		MainFileStem:         a.installApkName,
+		MainFileExt:          ".apk",
+		NeedsArchFolder:      true,
+		NonArchData:          data,
+		PerTestcaseDirectory: proptools.Bool(a.appTestHelperAppProperties.Per_testcase_directory),
+		DisableTestConfig:    true,
 	})
+}
+
+func (a *AndroidApp) baseSymbolInfo(ctx android.ModuleContext) *cc.SymbolInfo {
+	return &cc.SymbolInfo{
+		Name:          a.BaseModuleName(),
+		ModuleDir:     ctx.ModuleDir(),
+		Uninstallable: a.IsSkipInstall() || !proptools.BoolDefault(a.properties.Installable, true) || a.NoFullInstall(),
+	}
+}
+
+func (a *AndroidApp) GetJniSymbolInfos(ctx android.ModuleContext, JniSymbolInstallPath android.Path) []*cc.SymbolInfo {
+	infos := []*cc.SymbolInfo{}
+	for _, install := range JNISymbolsInstalls(a.jniLibs, JniSymbolInstallPath.String()) {
+		info := a.baseSymbolInfo(ctx)
+		info.UnstrippedBinaryPath = install.From
+		info.ModuleDir = filepath.Dir(install.To)
+		info.InstalledStem = filepath.Base(install.To)
+
+		infos = append(infos, info)
+	}
+	return infos
 }
 
 func (a *AndroidApp) GenerateAndroidBuildActions(ctx android.ModuleContext) {
@@ -452,15 +493,21 @@ func (a *AndroidApp) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		EmbeddedJNILibs:               embeddedJniLibs,
 		MergedManifestFile:            a.mergedManifest,
 		OverriddenManifestPackageName: &overriddenName,
+		JniLibs:                       a.jniLibs,
+		JniCoverageOutputs:            a.jniCoverageOutputs,
 	}
 	setCommonAppInfo(appInfo, a)
 	android.SetProvider(ctx, AppInfoProvider, appInfo)
+	android.SetProvider(ctx, ApkCertInfoProvider, ApkCertInfo{
+		Certificate: appInfo.Certificate,
+		Name:        appInfo.InstallApkName + ".apk",
+	})
 
 	a.requiredModuleNames = a.getRequiredModuleNames(ctx)
 
 	if a.dexer.proguardDictionary.Valid() {
 		android.SetProvider(ctx, ProguardProvider, ProguardInfo{
-			ModuleName:         ctx.ModuleName(),
+			ModuleName:         android.ModuleNameWithPossibleOverride(ctx),
 			Class:              "APPS",
 			ProguardDictionary: a.dexer.proguardDictionary.Path(),
 			ProguardUsageZip:   a.dexer.proguardUsageZip.Path(),
@@ -490,7 +537,7 @@ func (a *AndroidApp) checkAppSdkVersions(ctx android.ModuleContext) {
 		if !a.SdkVersion(ctx).Stable() {
 			ctx.PropertyErrorf("sdk_version", "Updatable apps must use stable SDKs, found %v", a.SdkVersion(ctx))
 		}
-		if String(a.overridableProperties.Min_sdk_version) == "" {
+		if a.overridableProperties.Min_sdk_version.GetOrDefault(ctx, "") == "" {
 			ctx.PropertyErrorf("updatable", "updatable apps must set min_sdk_version.")
 		}
 
@@ -767,7 +814,6 @@ func (a *AndroidApp) dexBuildActions(ctx android.ModuleContext) (android.Path, a
 	a.dexpreopter.enforceUsesLibs = a.usesLibrary.enforceUsesLibraries(ctx)
 	a.dexpreopter.classLoaderContexts = a.classLoaderContexts
 	a.dexpreopter.manifestFile = a.mergedManifestFile
-	a.dexpreopter.preventInstall = a.appProperties.PreventInstall
 
 	var packageResources = a.exportPackage
 
@@ -779,23 +825,20 @@ func (a *AndroidApp) dexBuildActions(ctx android.ModuleContext) (android.Path, a
 			a.dexer.resourcesInput = android.OptionalPathForPath(protoFile)
 		}
 
-		var extraSrcJars android.Paths
-		var extraClasspathJars android.Paths
-		var extraCombinedJars android.Paths
 		if a.useResourceProcessorBusyBox(ctx) {
 			// When building an app with ResourceProcessorBusyBox enabled ResourceProcessorBusyBox has already
 			// created R.class files that provide IDs for resources in busybox/R.jar.  Pass that file in the
 			// classpath when compiling everything else, and add it to the final classes jar.
-			extraClasspathJars = android.Paths{a.aapt.rJar}
-			extraCombinedJars = android.Paths{a.aapt.rJar}
+			a.Module.extraClasspathJars = append(a.Module.extraClasspathJars, a.aapt.rJar)
+			a.Module.extraCombinedJars = append(a.Module.extraCombinedJars, a.aapt.rJar)
 		} else {
 			// When building an app without ResourceProcessorBusyBox the aapt2 rule creates R.srcjar containing
 			// R.java files for the app's package and the packages from all transitive static android_library
 			// dependencies.  Compile the srcjar alongside the rest of the sources.
-			extraSrcJars = android.Paths{a.aapt.aaptSrcJar}
+			a.Module.extraSrcJars = append(a.Module.extraSrcJars, a.aapt.aaptSrcJar)
 		}
 
-		javaInfo = a.Module.compile(ctx, extraSrcJars, extraClasspathJars, extraCombinedJars, nil)
+		javaInfo = a.Module.compile(ctx)
 		if a.dexProperties.resourceShrinkingEnabled(ctx) {
 			binaryResources := android.PathForModuleOut(ctx, packageResources.Base()+".binary.out.apk")
 			aapt2Convert(ctx, binaryResources, a.dexer.resourcesOutput.Path(), "binary")
@@ -836,9 +879,9 @@ func (a *AndroidApp) jniBuildActions(jniLibs []jniLib, prebuiltJniPackages andro
 	return jniJarFile
 }
 
-func (a *AndroidApp) JNISymbolsInstalls(installPath string) android.RuleBuilderInstalls {
+func JNISymbolsInstalls(jniLibs []jniLib, installPath string) android.RuleBuilderInstalls {
 	var jniSymbols android.RuleBuilderInstalls
-	for _, jniLib := range a.jniLibs {
+	for _, jniLib := range jniLibs {
 		if jniLib.unstrippedFile != nil {
 			jniSymbols = append(jniSymbols, android.RuleBuilderInstall{
 				From: jniLib.unstrippedFile,
@@ -937,11 +980,13 @@ func (a *AndroidApp) createPrivappAllowlist(ctx android.ModuleContext) android.P
 }
 
 func (a *AndroidApp) generateAndroidBuildActions(ctx android.ModuleContext) {
+	a.jacocoInfo.Class = "APPS"
+
 	var apkDeps android.Paths
 
 	apexInfo, _ := android.ModuleProvider(ctx, android.ApexInfoProvider)
 	if !apexInfo.IsForPlatform() {
-		a.hideApexVariantFromMake = true
+		a.HideFromMake()
 	}
 
 	a.aapt.useEmbeddedNativeLibs = a.useEmbeddedNativeLibs(ctx)
@@ -1011,7 +1056,7 @@ func (a *AndroidApp) generateAndroidBuildActions(ctx android.ModuleContext) {
 	a.linter.mergedManifest = a.aapt.mergedManifestFile
 	a.linter.manifest = a.aapt.manifestPath
 	a.linter.resources = a.aapt.resourceFiles
-	a.linter.buildModuleReportZip = ctx.Config().UnbundledBuildApps()
+	a.linter.buildModuleReportZip = ctx.Config().HasUnbundledBuildApps()
 
 	dexJarFile, packageResources, javaInfo := a.dexBuildActions(ctx)
 
@@ -1050,11 +1095,15 @@ func (a *AndroidApp) generateAndroidBuildActions(ctx android.ModuleContext) {
 		noticeFile := android.PathForModuleOut(ctx, "NOTICE.html.gz")
 		android.BuildNoticeHtmlOutputFromLicenseMetadata(
 			ctx, noticeFile, "", "",
-			[]string{
-				a.installDir.String() + "/",
-				android.PathForModuleInstall(ctx).String() + "/",
-				a.outputFile.String(),
-			})
+			android.BuildNoticeFromLicenseDataArgs{
+				StripPrefix: []string{
+					a.installDir.String() + "/",
+					android.PathForModuleInstall(ctx).String() + "/",
+					a.outputFile.String(),
+				},
+			},
+			ctx.ModuleProxy(),
+		)
 		builder := android.NewRuleBuilder(pctx, ctx)
 		builder.Command().Text("cp").
 			Input(noticeFile).
@@ -1079,14 +1128,17 @@ func (a *AndroidApp) generateAndroidBuildActions(ctx android.ModuleContext) {
 	bundleFile := android.PathForModuleOut(ctx, "base.zip")
 	BuildBundleModule(ctx, bundleFile, a.exportPackage, jniJarFile, dexJarFile)
 	a.bundleFile = bundleFile
+	android.SetProvider(ctx, BundleProvider, BundleInfo{Bundle: bundleFile})
 
 	allowlist := a.createPrivappAllowlist(ctx)
+	complianceMetadataInfo := ctx.ComplianceMetadataInfo()
 	if allowlist != nil {
 		a.privAppAllowlist = android.OptionalPathForPath(allowlist)
+		complianceMetadataInfo.AddBuiltFiles(a.privAppAllowlist.Path().String())
 	}
 
 	// Install the app package.
-	shouldInstallAppPackage := (Bool(a.Module.properties.Installable) || ctx.Host()) && apexInfo.IsForPlatform() && !a.appProperties.PreventInstall
+	shouldInstallAppPackage := (Bool(a.Module.properties.Installable) || ctx.Host()) && apexInfo.IsForPlatform()
 	if shouldInstallAppPackage {
 		if a.privAppAllowlist.Valid() {
 			allowlistInstallPath := android.PathForModuleInstall(ctx, "etc", "permissions")
@@ -1115,7 +1167,7 @@ func (a *AndroidApp) generateAndroidBuildActions(ctx android.ModuleContext) {
 				}
 			}
 		}
-		ctx.InstallFile(a.installDir, a.outputFile.Base(), a.outputFile, extraInstalledPaths...)
+		a.installedOutputFile = ctx.InstallFile(a.installDir, a.outputFile.Base(), a.outputFile, extraInstalledPaths...)
 	}
 
 	ctx.CheckbuildFile(a.outputFile)
@@ -1151,6 +1203,19 @@ func (a *AndroidApp) generateAndroidBuildActions(ctx android.ModuleContext) {
 	a.setOutputFiles(ctx)
 
 	buildComplianceMetadata(ctx)
+	if shouldInstallAppPackage && slices.Contains(ctx.Config().UnbundledBuildApps(), a.Name()) {
+		complianceMetadataInfo.SetFilesContained([]string{a.installedOutputFile.String()})
+		complianceMetadataInfo.SetBuildOutputPathsOfFilesContained([]string{a.outputFile.String()})
+		complianceMetadataInfo.AddBuiltFiles(a.outputFile.String())
+	}
+
+	if !a.IsHideFromMake() {
+		if a.embeddedJniLibs {
+			cc.CopySymbolsAndSetSymbolsInfoProvider(ctx, &cc.SymbolInfos{
+				Symbols: a.GetJniSymbolInfos(ctx, a.installPathForJNISymbols),
+			})
+		}
+	}
 }
 
 func (a *AndroidApp) setOutputFiles(ctx android.ModuleContext) {
@@ -1168,8 +1233,8 @@ func (a *AndroidApp) setOutputFiles(ctx android.ModuleContext) {
 }
 
 type appDepsInterface interface {
-	SdkVersion(ctx android.EarlyModuleContext) android.SdkSpec
-	MinSdkVersion(ctx android.EarlyModuleContext) android.ApiLevel
+	SdkVersion(ctx android.ConfigContext) android.SdkSpec
+	MinSdkVersion(ctx android.MinSdkVersionFromValueContext) android.ApiLevel
 	RequiresStableAPIs(ctx android.BaseModuleContext) bool
 }
 
@@ -1323,7 +1388,7 @@ func (a *AndroidApp) buildAppDependencyInfo(ctx android.ModuleContext) {
 
 		// Skip dependencies that are only available to APEXes; they are developed with updatability
 		// in mind and don't need manual approval.
-		if android.OtherModulePointerProviderOrDefault(ctx, to, android.CommonModuleInfoProvider).NotAvailableForPlatform {
+		if android.OtherModuleProviderOrDefault(ctx, to, android.PlatformAvailabilityInfoProvider).NotAvailableToPlatform {
 			return true
 		}
 
@@ -1393,17 +1458,7 @@ func (a *AndroidApp) IsNativeCoverageNeeded(ctx cc.IsNativeCoverageNeededContext
 	return ctx.Device() && ctx.DeviceConfig().NativeCoverageEnabled()
 }
 
-func (a *AndroidApp) SetPreventInstall() {
-	a.appProperties.PreventInstall = true
-}
-
-func (a *AndroidApp) MarkAsCoverageVariant(coverage bool) {
-	a.appProperties.IsCoverageVariant = coverage
-}
-
-func (a *AndroidApp) EnableCoverageIfNeeded() {}
-
-var _ cc.Coverage = (*AndroidApp)(nil)
+var _ cc.UseCoverage = &AndroidApp{}
 
 func (a *AndroidApp) IDEInfo(ctx android.BaseModuleContext, dpInfo *android.IdeInfo) {
 	a.Library.IDEInfo(ctx, dpInfo)
@@ -1423,7 +1478,7 @@ func AndroidAppFactory() android.Module {
 	module := &AndroidApp{}
 
 	module.Module.dexProperties.Optimize.EnabledByDefault = true
-	module.Module.dexProperties.Optimize.Shrink = proptools.BoolPtr(true)
+	module.Module.dexProperties.Optimize.Shrink = proptools.NewSimpleConfigurable(true)
 	module.Module.dexProperties.Optimize.Proguard_compatibility = proptools.BoolPtr(false)
 
 	module.Module.properties.Instrument = true
@@ -1458,7 +1513,7 @@ func AndroidAppFactory() android.Module {
 			return
 		}
 
-		rroPackageName := a.Name() + "__" + strings.ReplaceAll(characteristics, ",", "_") + "__auto_generated_characteristics_rro"
+		rroPackageName := AutogeneratedProductCharacteristicsRroModuleName(ctx, a.Name())
 		rroManifestName := rroPackageName + "_manifest"
 
 		a.appProperties.ProductCharacteristicsRROPackageName = proptools.StringPtr(rroPackageName)
@@ -1511,7 +1566,19 @@ func AndroidAppFactory() android.Module {
 }
 
 func AutogeneratedRroModuleName(ctx android.EarlyModuleContext, moduleName, partition string) string {
-	return fmt.Sprintf("%s__%s__auto_generated_rro_%s", moduleName, ctx.Config().DeviceProduct(), partition)
+	// auto_generated_rro is installed to the product or vendor partition and
+	// are specific to target product. To add the auto_generated_rro to the
+	// required list of the original app module, the target product name is
+	// required.
+	// TODO(b/412526509): Remove the rro dependency from the system partition.
+	// So, the original system module does not need to know the target product
+	// name. Instead, add a reverse dependency from the rro to the original
+	// system module to see if the module exists.
+	return fmt.Sprintf("%s__%s__auto_generated_rro_%s", moduleName, ctx.Config().Getenv("TARGET_PRODUCT"), partition)
+}
+
+func AutogeneratedProductCharacteristicsRroModuleName(ctx android.EarlyModuleContext, moduleName string) string {
+	return moduleName + "__" + strings.ReplaceAll(ctx.Config().ProductAAPTCharacteristics(), ",", "_") + "__auto_generated_characteristics_rro"
 }
 
 type createModuleContext interface {
@@ -1646,6 +1713,12 @@ func (a *AndroidTest) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	}
 	a.generateAndroidBuildActions(ctx)
 
+	android.SetProvider(ctx, ApkCertInfoProvider, ApkCertInfo{
+		Certificate: a.Certificate(),
+		Name:        a.InstallApkName() + ".apk",
+		Test:        true,
+	})
+
 	for _, c := range a.testProperties.Test_options.Tradefed_options {
 		configs = append(configs, c)
 	}
@@ -1663,23 +1736,32 @@ func (a *AndroidTest) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	a.data = append(a.data, android.PathsForModuleSrc(ctx, a.testProperties.Device_first_data)...)
 	a.data = append(a.data, android.PathsForModuleSrc(ctx, a.testProperties.Device_first_prefer32_data)...)
 	a.data = append(a.data, android.PathsForModuleSrc(ctx, a.testProperties.Host_common_data)...)
+	a.data = append(a.data, android.PathsForModuleSrc(ctx, a.testProperties.Host_first_data)...)
 
-	// Install test deps
-	if !ctx.Config().KatiEnabled() {
-		pathInTestCases := android.PathForModuleInstall(ctx, ctx.Module().Name())
-		if a.testConfig != nil {
-			ctx.InstallFile(pathInTestCases, ctx.Module().Name()+".config", a.testConfig)
-		}
-		dynamicConfig := android.ExistentPathForSource(ctx, ctx.ModuleDir(), "DynamicConfig.xml")
-		if dynamicConfig.Valid() {
-			ctx.InstallFile(pathInTestCases, ctx.Module().Name()+".dynamic", dynamicConfig.Path())
-		}
-		testDeps := append(a.data, a.extraTestConfigs...)
-		for _, data := range android.SortedUniquePaths(testDeps) {
-			dataPath := android.DataPath{SrcPath: data}
-			ctx.InstallTestData(pathInTestCases, []android.DataPath{dataPath})
-		}
+	a.data = android.SortedUniquePaths(a.data)
+	a.extraTestConfigs = android.SortedUniquePaths(a.extraTestConfigs)
+
+	var testData []android.DataPath
+	for _, data := range a.data {
+		dataPath := android.DataPath{SrcPath: data}
+		testData = append(testData, dataPath)
 	}
+	for _, d := range a.extraOutputFiles {
+		testData = append(testData, android.DataPath{SrcPath: d})
+	}
+	ctx.SetTestSuiteInfo(android.TestSuiteInfo{
+		TestSuites:                a.testProperties.Test_suites,
+		MainFile:                  a.outputFile,
+		MainFileStem:              a.installApkName,
+		MainFileExt:               ".apk",
+		ConfigFile:                a.testConfig,
+		ExtraConfigs:              a.extraTestConfigs,
+		NonArchData:               testData,
+		CompatibilitySupportFiles: a.data,
+		NeedsArchFolder:           true,
+		PerTestcaseDirectory:      proptools.Bool(a.testProperties.Per_testcase_directory),
+		IsUnitTest:                Bool(a.testProperties.Test_options.Unit_test),
+	})
 
 	android.SetProvider(ctx, tradefed.BaseTestProviderKey, tradefed.BaseTestProviderData{
 		TestcaseRelDataFiles:    testcaseRel(a.data),
@@ -1714,10 +1796,6 @@ func (a *AndroidTest) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		moduleInfoJSON.AutoTestConfig = []string{"true"}
 	}
 	moduleInfoJSON.TestMainlineModules = append(moduleInfoJSON.TestMainlineModules, a.testProperties.Test_mainline_modules...)
-
-	android.SetProvider(ctx, android.TestSuiteInfoProvider, android.TestSuiteInfo{
-		TestSuites: a.testProperties.Test_suites,
-	})
 }
 
 func testcaseRel(paths android.Paths) []string {
@@ -2047,14 +2125,31 @@ func (u *usesLibrary) deps(ctx android.BottomUpMutatorContext, addCompatDeps boo
 	}
 }
 
+func (u *usesLibrary) depsFromLibs(ctx android.BottomUpMutatorContext, libDeps []android.Module) {
+	// For library dependencies that are component libraries (like stubs), add the implementation
+	// as a dependency (dexpreopt needs to be against the implementation library, not stubs).
+	for _, dep := range libDeps {
+		if dep != nil {
+			if component, ok := android.OtherModuleProvider(ctx, dep, SdkLibraryComponentDependencyInfoProvider); ok {
+				if lib := component.OptionalSdkLibraryImplementation; lib != nil {
+					// Add library as optional if it's one of the optional compatibility libs or it's
+					// explicitly listed in the optional_uses_libs property.
+					tag := usesLibReqTag
+					if android.InList(*lib, dexpreopt.OptionalCompatUsesLibs) ||
+						android.InList(*lib, u.usesLibraryProperties.Optional_uses_libs.GetOrDefault(ctx, nil)) {
+						tag = usesLibOptTag
+					}
+					ctx.AddVariationDependencies(nil, tag, *lib)
+				}
+			}
+		}
+	}
+}
+
 // presentOptionalUsesLibs returns optional_uses_libs after filtering out libraries that don't exist in the source tree.
 func (u *usesLibrary) presentOptionalUsesLibs(ctx android.BaseModuleContext) []string {
 	optionalUsesLibs := android.FilterListPred(u.usesLibraryProperties.Optional_uses_libs.GetOrDefault(ctx, nil), func(s string) bool {
-		exists := ctx.OtherModuleExists(s)
-		if !exists && !android.InList(ctx.ModuleName(), ctx.Config().BuildWarningBadOptionalUsesLibsAllowlist()) {
-			fmt.Printf("Warning: Module '%s' depends on non-existing optional_uses_libs '%s'\n", ctx.ModuleName(), s)
-		}
-		return exists
+		return ctx.OtherModuleExists(s)
 	})
 	return optionalUsesLibs
 }
@@ -2085,7 +2180,7 @@ func (u *usesLibrary) classLoaderContextForUsesLibDeps(ctx android.ModuleContext
 		// Skip stub libraries. A dependency on the implementation library has been added earlier,
 		// so it will be added to CLC, but the stub shouldn't be. Stub libraries can be distingushed
 		// from implementation libraries by their name, which is different as it has a suffix.
-		if comp := javaInfo.SdkLibraryComponentDependencyInfo; comp != nil {
+		if comp, ok := android.OtherModuleProvider(ctx, m, SdkLibraryComponentDependencyInfoProvider); ok {
 			if impl := comp.OptionalSdkLibraryImplementation; impl != nil && *impl != dep {
 				return
 			}
@@ -2106,7 +2201,7 @@ func (u *usesLibrary) classLoaderContextForUsesLibDeps(ctx android.ModuleContext
 			}
 			clcMap.AddContext(ctx, tag.sdkVersion, libName, tag.optional,
 				javaInfo.DexJarBuildPath.PathOrNil(), lib.DexJarInstallPath,
-				lib.ClassLoaderContexts)
+				lib.GetClassLoaderContexts())
 		} else if ctx.Config().AllowMissingDependencies() {
 			ctx.AddMissingDependencies([]string{dep})
 		} else {
@@ -2180,6 +2275,10 @@ func (u *usesLibrary) verifyUsesLibraries(ctx android.ModuleContext, inputFile a
 		cmd.FlagWithArg("--missing-optional-uses-library ", lib)
 	}
 
+	for _, lib := range ctx.Config().BootJars() {
+		cmd.FlagWithArg("--bootclasspath-libs ", lib)
+	}
+
 	rule.Build("verify_uses_libraries", "verify <uses-library>")
 	return outputFile
 }
@@ -2206,7 +2305,7 @@ type androidApp interface {
 	Privileged() bool
 	InstallApkName() string
 	OutputFile() android.Path
-	JacocoReportClassesFile() android.Path
+	JacocoInfo() JacocoInfo
 	Certificate() Certificate
 	BaseModuleName() string
 	PrivAppAllowlist() android.OptionalPath
@@ -2220,11 +2319,13 @@ func setCommonAppInfo(appInfo *AppInfo, m androidApp) {
 	appInfo.Privileged = m.Privileged()
 	appInfo.OutputFile = m.OutputFile()
 	appInfo.InstallApkName = m.InstallApkName()
-	appInfo.JacocoReportClassesFile = m.JacocoReportClassesFile()
+	appInfo.JacocoInfo = m.JacocoInfo()
 	appInfo.Certificate = m.Certificate()
 	appInfo.PrivAppAllowlist = m.PrivAppAllowlist()
 }
 
-type AppInfos []AppInfo
+type BundleInfo struct {
+	Bundle android.Path
+}
 
-var AppInfosProvider = blueprint.NewProvider[AppInfos]()
+var BundleProvider = blueprint.NewProvider[BundleInfo]()

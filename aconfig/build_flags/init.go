@@ -56,6 +56,7 @@ var (
 			CommandDeps: []string{
 				"${buildFlagDeclarations}",
 			},
+			Restat: true,
 		}, "intermediates")
 
 	allDeclarationsRuleTextProto = pctx.AndroidStaticRule("All_build_flag_declarations_dump_textproto",
@@ -64,7 +65,28 @@ var (
 			CommandDeps: []string{
 				"${buildFlagDeclarations}",
 			},
+			Restat: true,
 		})
+
+	allReleaseConfigsRule = pctx.AndroidStaticRule("All_release_configs",
+		blueprint.RuleParams{
+			Command: "${releaseConfigInternal} --quiet `cat ${argsFile}` --out_dir ${moduleOut}" +
+				" --pb --textproto --json --inheritance",
+			CommandDeps: []string{
+				"${releaseConfigInternal}",
+			},
+			Restat: true,
+		}, "argsFile", "moduleOut", "product")
+
+	releaseConfigRule = pctx.AndroidStaticRule("Release_config",
+		blueprint.RuleParams{
+			Command: "${releaseConfigInternal} --quiet `cat ${argsFile}` --out_dir ${moduleOut}" +
+				" --container",
+			CommandDeps: []string{
+				"${releaseConfigInternal}",
+			},
+			Restat: true,
+		}, "argsFile", "moduleOut", "product")
 
 	allReleaseConfigContributionsRule = pctx.AndroidStaticRule("all-release-config-contributions-dump",
 		blueprint.RuleParams{
@@ -72,25 +94,33 @@ var (
 			CommandDeps: []string{
 				"${releaseConfigContributions}",
 			},
+			Restat: true,
 		}, "dirs", "format")
-	allReleaseConfigContributionsRuleText = pctx.AndroidStaticRule("all-release-config-contributions-dumptext",
+
+	flagDeclarationsValidationRule = pctx.AndroidStaticRule("flagDeclarationsValidation",
 		blueprint.RuleParams{
-			Command: `${releaseConfigContributions} ${dirs} --format ${format} --output ${out}`,
+			// Get no flags, so that we have no output.
+			Command: `${buildFlagInternal} --maps-file ${in} --quiet --declarations-only get && date > ${out}`,
 			CommandDeps: []string{
-				"${releaseConfigContributions}",
+				"${buildFlagInternal}",
 			},
-		}, "dirs", "format")
+			Restat: true,
+		})
 )
 
 func init() {
 	RegisterBuildComponents(android.InitRegistrationContext)
 	pctx.Import("android/soong/android")
+	pctx.HostBinToolVariable("buildFlagInternal", "build-flag-internal")
 	pctx.HostBinToolVariable("buildFlagDeclarations", "build-flag-declarations")
+	pctx.HostBinToolVariable("releaseConfigInternal", "release-config-internal")
 	pctx.HostBinToolVariable("releaseConfigContributions", "release-config-contributions")
 }
 
 func RegisterBuildComponents(ctx android.RegistrationContext) {
+	ctx.RegisterModuleType("all_release_configs", AllReleaseConfigsFactory)
 	ctx.RegisterModuleType("build_flag_declarations", DeclarationsFactory)
+	ctx.RegisterModuleType("release_config", ReleaseConfigFactory)
 	ctx.RegisterModuleType("release_config_contributions", ReleaseConfigContributionsFactory)
 	ctx.RegisterParallelSingletonType("all_build_flag_declarations", AllBuildFlagDeclarationsFactory)
 }

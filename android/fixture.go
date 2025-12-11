@@ -258,6 +258,7 @@ func FixtureSetTestRunner(testRunner FixtureTestRunner) FixturePreparer {
 func FixtureModifyConfig(mutator func(config Config)) FixturePreparer {
 	return newSimpleFixturePreparer(func(f *fixture) {
 		mutator(f.config)
+		mutator(f.config.genericConfig())
 	})
 }
 
@@ -265,6 +266,7 @@ func FixtureModifyConfig(mutator func(config Config)) FixturePreparer {
 func FixtureModifyConfigAndContext(mutator func(config Config, ctx *TestContext)) FixturePreparer {
 	return newSimpleFixturePreparer(func(f *fixture) {
 		mutator(f.config, f.ctx)
+		mutator(f.config.genericConfig(), f.ctx)
 	})
 }
 
@@ -828,7 +830,10 @@ func (b *baseFixturePreparer) RunTestWithConfig(t *testing.T, config Config) *Te
 	// Ditto with config derived information in the TestContext.
 	ctx := fixture.ctx
 	ctx.config = config
+
+	// SetFs to both normal and generic configs.
 	ctx.SetFs(ctx.config.fs)
+	ctx.SetFs(ctx.config.genericConfigField.fs)
 	if ctx.config.mockBpList != "" {
 		ctx.SetModuleListFile(ctx.config.mockBpList)
 	}
@@ -901,6 +906,13 @@ func (f *fixture) RunTest() CustomTestResult {
 			ctx.SetModuleListFile(ctx.config.mockBpList)
 		}
 	}
+
+	// Generic config has the same configuration values with non-generic configuration except for
+	// some target-specific configuration values. However, we simply copy the non-generic config to
+	// the generic config to avoid duplicated updates for generic and non-generic configurations
+	// for each fixture. So the test fixture cannot test the configuration values of the generic
+	// configuration.
+	f.config.genericConfigField = f.config.config
 
 	// Create and set the Context's NameInterface. It needs to be created here as it depends on the
 	// configuration that has been prepared for this fixture.
@@ -1049,6 +1061,11 @@ func (r *TestResult) Preparer() FixturePreparer {
 // Module returns the module with the specific name and of the specified variant.
 func (r *TestResult) Module(name string, variant string) Module {
 	return r.ModuleForTests(r.fixture.t, name, variant).Module()
+}
+
+// ModuleProxy returns the module with the specific name and of the specified variant.
+func (r *TestResult) ModuleProxy(name string, variant string) ModuleProxy {
+	return r.ModuleForTests(r.fixture.t, name, variant).ModuleProxy()
 }
 
 // CollateErrs adds additional errors to the result and returns true if there is more than one

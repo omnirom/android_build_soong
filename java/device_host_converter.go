@@ -15,8 +15,7 @@
 package java
 
 import (
-	"fmt"
-	"io"
+	"maps"
 
 	"android/soong/android"
 	"android/soong/dexpreopt"
@@ -34,6 +33,7 @@ type DeviceHostConverter struct {
 	implementationJars            android.Paths
 	implementationAndResourceJars android.Paths
 	resourceJars                  android.Paths
+	kSnapshotFiles                map[string]android.Path
 
 	srcJarArgs []string
 	srcJarDeps android.Paths
@@ -97,12 +97,13 @@ func (d *DeviceHostConverter) GenerateAndroidBuildActions(ctx android.ModuleCont
 	if len(d.properties.Libs) < 1 {
 		ctx.PropertyErrorf("libs", "at least one dependency is required")
 	}
+	d.kSnapshotFiles = make(map[string]android.Path)
 
 	var transitiveHeaderJars []depset.DepSet[android.Path]
 	var transitiveImplementationJars []depset.DepSet[android.Path]
 	var transitiveResourceJars []depset.DepSet[android.Path]
 
-	ctx.VisitDirectDepsWithTag(deviceHostConverterDepTag, func(m android.Module) {
+	ctx.VisitDirectDepsProxyWithTag(deviceHostConverterDepTag, func(m android.ModuleProxy) {
 		if dep, ok := android.OtherModuleProvider(ctx, m, JavaInfoProvider); ok {
 			d.headerJars = append(d.headerJars, dep.HeaderJars...)
 			d.implementationJars = append(d.implementationJars, dep.ImplementationJars...)
@@ -115,6 +116,7 @@ func (d *DeviceHostConverter) GenerateAndroidBuildActions(ctx android.ModuleCont
 			transitiveHeaderJars = append(transitiveHeaderJars, dep.TransitiveStaticLibsHeaderJars)
 			transitiveImplementationJars = append(transitiveImplementationJars, dep.TransitiveStaticLibsImplementationJars)
 			transitiveResourceJars = append(transitiveResourceJars, dep.TransitiveStaticLibsResourceJars)
+			maps.Copy(d.kSnapshotFiles, dep.KSnapshotFiles)
 		} else {
 			ctx.PropertyErrorf("libs", "module %q cannot be used as a dependency", ctx.OtherModuleName(m))
 		}
@@ -127,6 +129,7 @@ func (d *DeviceHostConverter) GenerateAndroidBuildActions(ctx android.ModuleCont
 		TransformJarsToJar(ctx, outputFile, "combine", d.implementationAndResourceJars,
 			android.OptionalPath{}, false, nil, nil)
 		d.combinedImplementationJar = outputFile
+		d.addKSnapshot(ctx, outputFile)
 	} else if len(d.implementationAndResourceJars) == 1 {
 		d.combinedImplementationJar = d.implementationAndResourceJars[0]
 	}
@@ -146,6 +149,7 @@ func (d *DeviceHostConverter) GenerateAndroidBuildActions(ctx android.ModuleCont
 		TransitiveStaticLibsHeaderJars:         depset.New(depset.PREORDER, nil, transitiveHeaderJars),
 		TransitiveStaticLibsImplementationJars: depset.New(depset.PREORDER, nil, transitiveImplementationJars),
 		TransitiveStaticLibsResourceJars:       depset.New(depset.PREORDER, nil, transitiveResourceJars),
+		KSnapshotFiles:                         d.kSnapshotFiles,
 		ImplementationAndResourcesJars:         d.implementationAndResourceJars,
 		ImplementationJars:                     d.implementationJars,
 		ResourceJars:                           d.resourceJars,
@@ -158,6 +162,36 @@ func (d *DeviceHostConverter) GenerateAndroidBuildActions(ctx android.ModuleCont
 	setExtraJavaInfo(ctx, d, javaInfo)
 	android.SetProvider(ctx, JavaInfoProvider, javaInfo)
 
+	if ctx.Os() != android.Windows { // Make does not support Windows Java modules
+		if d.combinedImplementationJar != nil {
+			ctx.CheckbuildFile(d.combinedImplementationJar)
+		}
+		if d.combinedHeaderJar != nil {
+			ctx.CheckbuildFile(d.combinedHeaderJar)
+		}
+	}
+
+	moduleInfoJSON := ctx.ModuleInfoJSON()
+	moduleInfoJSON.Class = []string{"JAVA_LIBRARIES"}
+	if d.combinedImplementationJar != nil {
+		moduleInfoJSON.ClassesJar = []string{d.combinedImplementationJar.String()}
+	}
+	moduleInfoJSON.SystemSharedLibs = []string{"none"}
+
+	if d.Os() == android.Windows {
+		// Make does not support Windows Java modules
+		d.HideFromMake()
+	}
+}
+
+func (d *DeviceHostConverter) addKSnapshot(ctx android.ModuleContext, jarFile android.Path) {
+	if jarFile == nil {
+		return
+	}
+	if _, exists := d.kSnapshotFiles[jarFile.String()]; !exists {
+		snapshot := SnapshotJarForKotlin(ctx, jarFile.(android.WritablePath))
+		d.kSnapshotFiles[jarFile.String()] = snapshot
+	}
 }
 
 func (d *DeviceHostConverter) HeaderJars() android.Paths {
@@ -184,25 +218,22 @@ func (d *DeviceHostConverter) ClassLoaderContexts() dexpreopt.ClassLoaderContext
 	return nil
 }
 
-func (d *DeviceHostConverter) JacocoReportClassesFile() android.Path {
-	return nil
-}
-
-func (d *DeviceHostConverter) AndroidMk() android.AndroidMkData {
-	return android.AndroidMkData{
+func (d *DeviceHostConverter) PrepareAndroidMKProviderInfo(config android.Config) *android.AndroidMkProviderInfo {
+	info := &android.AndroidMkProviderInfo{}
+	info.PrimaryInfo = android.AndroidMkInfo{
 		Class:      "JAVA_LIBRARIES",
 		OutputFile: android.OptionalPathForPath(d.combinedImplementationJar),
-		// Make does not support Windows Java modules
-		Disabled: d.Os() == android.Windows,
-		Include:  "$(BUILD_SYSTEM)/soong_java_prebuilt.mk",
-		Extra: []android.AndroidMkExtraFunc{
-			func(w io.Writer, outputFile android.Path) {
-				fmt.Fprintln(w, "LOCAL_UNINSTALLABLE_MODULE := true")
-				fmt.Fprintln(w, "LOCAL_SOONG_HEADER_JAR :=", d.combinedHeaderJar.String())
-				fmt.Fprintln(w, "LOCAL_SOONG_CLASSES_JAR :=", d.combinedImplementationJar.String())
-			},
-		},
+		Include:    "$(BUILD_SYSTEM)/soong_java_prebuilt.mk",
 	}
+	info.PrimaryInfo.SetBool("LOCAL_UNINSTALLABLE_MODULE", true)
+	if d.combinedHeaderJar != nil {
+		info.PrimaryInfo.SetPath("LOCAL_SOONG_HEADER_JAR", d.combinedHeaderJar)
+	}
+	if d.combinedImplementationJar != nil {
+		info.PrimaryInfo.SetPath("LOCAL_SOONG_CLASSES_JAR", d.combinedImplementationJar)
+	}
+
+	return info
 }
 
 // implement the following interface for IDE completion.

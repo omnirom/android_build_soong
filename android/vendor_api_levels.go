@@ -41,11 +41,11 @@ func GetSdkVersionForVendorApiLevel(vendorApiLevel string) (ApiLevel, error) {
 		return NoneApiLevel, fmt.Errorf("The vendor API level %q must be able to be parsed as an integer", vendorApiLevel)
 	}
 	if vendorApiLevelInt < 35 {
-		return uncheckedFinalApiLevel(vendorApiLevelInt), nil
+		return UncheckedFinalApiLevel(vendorApiLevelInt), nil
 	}
 
 	if sdkInt, ok := getSdkVersionOfVendorApiLevel(vendorApiLevelInt); ok {
-		return uncheckedFinalApiLevel(sdkInt), nil
+		return UncheckedFinalApiLevel(sdkInt), nil
 	}
 	return NoneApiLevel, fmt.Errorf("Unknown vendor API level %q. Requires updating the map in vendor_api_level.go?", vendorApiLevel)
 }

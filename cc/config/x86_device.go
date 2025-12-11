@@ -108,7 +108,6 @@ func init() {
 	pctx.StaticVariable("X86ToolchainLdflags", "-m32")
 
 	pctx.StaticVariable("X86Ldflags", strings.Join(x86Ldflags, " "))
-	pctx.StaticVariable("X86Lldflags", strings.Join(x86Ldflags, " "))
 
 	// Clang cflags
 	pctx.StaticVariable("X86Cflags", strings.Join(x86Cflags, " "))
@@ -159,10 +158,6 @@ func (t *toolchainX86) Cppflags() string {
 
 func (t *toolchainX86) Ldflags() string {
 	return "${config.X86Ldflags}"
-}
-
-func (t *toolchainX86) Lldflags() string {
-	return "${config.X86Lldflags}"
 }
 
 func (t *toolchainX86) YasmFlags() string {

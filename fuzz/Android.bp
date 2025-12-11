@@ -6,10 +6,14 @@ bootstrap_go_package {
     name: "soong-fuzz",
     pkgPath: "android/soong/fuzz",
     deps: [
+        "blueprint",
+        "blueprint-gobtools",
+        "blueprint-proptools",
         "soong-android",
     ],
     srcs: [
         "fuzz_common.go",
+        "fuzz_common_gob_enc.go",
     ],
     pluginFor: ["soong_build"],
 }

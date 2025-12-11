@@ -18,8 +18,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
-
-	"github.com/google/blueprint"
 )
 
 func TestSrcIsModule(t *testing.T) {
@@ -983,17 +981,18 @@ func (o outputFilesTestModule) GenerateAndroidBuildActions(ctx ModuleContext) {
 type pathContextAddMissingDependenciesWrapper struct {
 	PathContext
 	OtherModuleProviderContext
+	module      Module
 	missingDeps []string
 }
 
 func (p *pathContextAddMissingDependenciesWrapper) AddMissingDependencies(deps []string) {
 	p.missingDeps = append(p.missingDeps, deps...)
 }
-func (p *pathContextAddMissingDependenciesWrapper) OtherModuleName(module blueprint.Module) string {
+func (p *pathContextAddMissingDependenciesWrapper) OtherModuleName(module ModuleOrProxy) string {
 	return module.Name()
 }
 
-func (p *pathContextAddMissingDependenciesWrapper) Module() Module { return nil }
+func (p *pathContextAddMissingDependenciesWrapper) Module() Module { return p.module }
 
 func (p *pathContextAddMissingDependenciesWrapper) GetOutputFiles() OutputFilesInfo {
 	return OutputFilesInfo{}
@@ -1030,7 +1029,7 @@ func TestOutputFileForModule(t *testing.T) {
 					a: "",
 					b: "empty.txt",
 				}
-		`,
+			`,
 			tag:      "",
 			expected: "empty.txt",
 		},
@@ -1050,7 +1049,7 @@ func TestOutputFileForModule(t *testing.T) {
 			bp: `oft_module {
 				name: "test_module",
 			}
-		`,
+			`,
 			tag:         "missing",
 			expected:    "missing_output_file/test_module",
 			missingDeps: []string{"test_module"},
@@ -1062,13 +1061,16 @@ func TestOutputFileForModule(t *testing.T) {
 
 	for _, tt := range testcases {
 		t.Run(tt.name, func(t *testing.T) {
+			extraBp := `oft_module {
+					name: "other_module"
+				}`
 			result := GroupFixturePreparers(
 				PrepareForTestWithDefaults,
 				FixtureRegisterWithContext(func(ctx RegistrationContext) {
 					ctx.RegisterModuleType("spt_module", sourceProducerTestModuleFactory)
 					ctx.RegisterModuleType("oft_module", outputFilesTestModuleFactory)
 				}),
-				FixtureWithRootAndroidBp(tt.bp),
+				FixtureWithRootAndroidBp(tt.bp+extraBp),
 			).RunTest(t)
 
 			config := TestConfig(buildDir, tt.env, tt.bp, nil)
@@ -1078,6 +1080,7 @@ func TestOutputFileForModule(t *testing.T) {
 			ctx := &pathContextAddMissingDependenciesWrapper{
 				PathContext:                PathContextForTesting(config),
 				OtherModuleProviderContext: result.TestContext.OtherModuleProviderAdaptor(),
+				module:                     result.ModuleForTests(t, "other_module", "").Module(),
 			}
 			got := OutputFileForModule(ctx, result.ModuleForTests(t, "test_module", "").Module(), tt.tag)
 			AssertPathRelativeToTopEquals(t, "expected output path", tt.expected, got)

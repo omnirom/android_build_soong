@@ -1,0 +1,82 @@
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+bootstrap_go_package {
+    name: "soong-test_suites",
+    pkgPath: "android/soong/test_suites",
+    deps: [
+        "blueprint",
+        "blueprint-proptools",
+        "soong",
+        "soong-android",
+        "soong-java",
+        "soong-phony",
+    ],
+    srcs: [
+        "test_suites.go",
+    ],
+    testSrcs: [
+        "test_suites_test.go",
+    ],
+    pluginFor: ["soong_build"],
+}
+
+test_suite_package {
+    name: "performance-tests",
+}
+
+test_suite_package {
+    name: "device-platinum-tests",
+    build_host_shared_libs_zip: true,
+}
+
+test_suite_package {
+    name: "device-tests",
+    include_host_shared_libs_in_main_zip: true,
+    dists: [
+        {
+            targets: ["device-tests"],
+            tag: ".jacoco",
+            only_on_java_coverage_builds: true,
+        },
+    ],
+}
+
+test_suite_package {
+    name: "automotive-sdv-tests",
+}
+
+test_suite_package {
+    name: "al-tests",
+}
+
+test_suite_package {
+    name: "general-tests",
+    include_common_host_shared_libs_symlinks_in_main_zip: true,
+    include_host_shared_libs_in_main_zip: true,
+    host_java_tools: [
+        "compatibility-host-util",
+        "cts-tradefed",
+        "vts-tradefed",
+    ],
+    dists: [
+        {
+            targets: ["general-tests"],
+            tag: ".jacoco",
+            only_on_java_coverage_builds: true,
+        },
+    ],
+}
+
+test_suite_package {
+    name: "host-unit-tests",
+    include_common_host_shared_libs_symlinks_in_main_zip: true,
+    include_host_shared_libs_in_main_zip: true,
+}
+
+test_suite_package {
+    name: "sdv-host-unit-tests",
+    include_common_host_shared_libs_symlinks_in_main_zip: true,
+    include_host_shared_libs_in_main_zip: true,
+}

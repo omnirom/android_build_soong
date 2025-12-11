@@ -22,9 +22,7 @@ message Manifest {
   // A list of commands to run in the sandbox.
   repeated Command commands = 1;
 
-  // If set, GCC-style dependency files from any command that references __SBOX_DEPFILE__ will be
-  // merged into the given output file relative to the $PWD when sbox was started.
-  optional string output_depfile = 2;
+  reserved 2;
 }
 
 // SandboxManifest describes a command to run in the sandbox.
@@ -60,6 +58,9 @@ message Command {
   // replaced or unset by env. If dont_inherit_env is set, no environment variables will be
   // inherited, and instead only the variables in env will be defined.
   optional bool dont_inherit_env = 8;
+
+  // A list of directories to copy before running the sandboxed command.
+  repeated CopyDir copy_dir_before = 9;
 }
 
 message EnvironmentVariable {
@@ -86,6 +87,12 @@ message Copy {
 
   // If true, make the file executable after copying it.
   optional bool executable = 3;
+}
+
+// Copy describes a from-to pair of a directory to copy.
+message CopyDir {
+  required string from = 1;
+  required string to = 2;
 }
 
 // RspFile describes an rspfile that should be copied into the sandbox directory.

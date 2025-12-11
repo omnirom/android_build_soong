@@ -18,8 +18,6 @@ import (
 	"testing"
 
 	"android/soong/android"
-
-	"github.com/google/blueprint"
 )
 
 func TestAconfigValueSet(t *testing.T) {
@@ -90,7 +88,7 @@ func TestAconfigValueSetBpGlob(t *testing.T) {
 		t.Helper()
 		module := result.ModuleForTests(t, name, variant).Module()
 		depFound := false
-		result.VisitDirectDeps(module, func(m blueprint.Module) {
+		result.VisitDirectDeps(module, func(m android.Module) {
 			if m.Name() == dep {
 				depFound = true
 			}

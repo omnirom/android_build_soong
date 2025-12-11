@@ -29,7 +29,8 @@ import (
 func runJavaAndroidMkTest(t *testing.T, bp string) {
 	result := android.GroupFixturePreparers(
 		PrepareForTestWithAconfigBuildComponents,
-		java.PrepareForTestWithJavaDefaultModules).
+		java.PrepareForTestWithJavaDefaultModules,
+		android.PrepareForTestWithAndroidMk).
 		ExtendWithErrorHandler(android.FixtureExpectsNoErrors).
 		RunTestWithBp(t, bp+`
 			aconfig_declarations {
@@ -59,10 +60,10 @@ func runJavaAndroidMkTest(t *testing.T, bp string) {
 
 	module := result.ModuleForTests(t, "my_module", "android_common").Module()
 
-	entry := android.AndroidMkEntriesForTest(t, result.TestContext, module)[0]
+	info := android.AndroidMkInfoForTest(t, result.TestContext, module)
 
-	makeVar := entry.EntryMap["LOCAL_ACONFIG_FILES"]
-	android.EnsureListContainsSuffix(t, makeVar, "android_common/system/aconfig_merged.pb")
+	makeVar := info.PrimaryInfo.EntryMap["LOCAL_ACONFIG_FILES"]
+	android.EnsureListContainsSuffix(t, makeVar, "android_common/merged_aconfig_files/system/aconfig_merged.pb")
 }
 
 func TestAndroidMkJavaLibrary(t *testing.T) {
@@ -242,7 +243,8 @@ func TestUnsupportedMode(t *testing.T) {
 func TestMkEntriesMatchedContainer(t *testing.T) {
 	result := android.GroupFixturePreparers(
 		PrepareForTestWithAconfigBuildComponents,
-		java.PrepareForTestWithJavaDefaultModules).
+		java.PrepareForTestWithJavaDefaultModules,
+		android.PrepareForTestWithAndroidMk).
 		ExtendWithErrorHandler(android.FixtureExpectsNoErrors).
 		RunTestWithBp(t, `
 			aconfig_declarations {
@@ -283,7 +285,7 @@ func TestMkEntriesMatchedContainer(t *testing.T) {
 		`)
 
 	module := result.ModuleForTests(t, "my_module", "android_common").Module()
-	entry := android.AndroidMkEntriesForTest(t, result.TestContext, module)[0]
-	makeVar := entry.EntryMap["LOCAL_ACONFIG_FILES"]
-	android.EnsureListContainsSuffix(t, makeVar, "my_aconfig_declarations_foo/intermediate.pb")
+	info := android.AndroidMkInfoForTest(t, result.TestContext, module)
+	makeVar := info.PrimaryInfo.EntryMap["LOCAL_ACONFIG_FILES"]
+	android.EnsureListContainsSuffix(t, makeVar, "my_aconfig_declarations_foo/aconfig-cache.pb")
 }

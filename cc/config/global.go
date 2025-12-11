@@ -17,6 +17,7 @@ package config
 import (
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 
 	"android/soong/android"
@@ -36,7 +37,6 @@ var (
 		// https://clang.llvm.org/docs/DiagnosticsReference.html
 		"-Wall",
 		"-Wextra",
-		"-Winit-self",
 		"-Wpointer-arith",
 		"-Wunguarded-availability",
 
@@ -44,10 +44,15 @@ var (
 		// See also noOverrideGlobalCflags for errors that cannot be disabled
 		// from Android.bp files.
 
+		// Detects usage of bitwise operators on Boolean values.
+		"-Werror=bool-operation",
 		// Using __DATE__/__TIME__ causes build nondeterminism.
 		"-Werror=date-time",
 		// Detects forgotten */& that usually cause a crash
 		"-Werror=int-conversion",
+		// Detects multi-character constants such as 'abcd', which have
+		// implementation-defined values. Usually typos and may cause bugs.
+		"-Werror=multichar",
 		// Detects unterminated alignment modification pragmas, which often lead
 		// to ABI mismatch between modules and hard-to-debug crashes.
 		"-Werror=pragma-pack",
@@ -57,6 +62,9 @@ var (
 		// Detects dividing an array size by itself, which is a common typo that
 		// leads to bugs.
 		"-Werror=sizeof-array-div",
+		// Detects code like 'memcpy(dest, src, sizeof(src))' where 'src' is a pointer.
+		// This is nearly always a bug that may cause memory corruption.
+		"-Werror=sizeof-pointer-memaccess",
 		// Detects a typo that cuts off a prefix from a string literal.
 		"-Werror=string-plus-int",
 		// Detects for loops that will never execute more than once (for example
@@ -69,6 +77,8 @@ var (
 		// Making deprecated usages an error causes extreme pain when trying to
 		// deprecate anything.
 		"-Wno-error=deprecated-declarations",
+		// http://b/315246135 temporarily disabled
+		"-Wno-error=unused-variable",
 
 		// Warnings disabled by default.
 
@@ -166,18 +176,23 @@ var (
 		"-funwind-tables",
 		"-fstack-protector-strong",
 		"-Wa,--noexecstack",
-		"-D_FORTIFY_SOURCE=2",
+		"-D_FORTIFY_SOURCE=3",
 
-		"-Wstrict-aliasing=2",
-
-		"-Werror=return-type",
+		// Bans classes that have virtual functions and a public non-virtual destructor.
+		// This potentially allows the class to be partially destroyed, causing memory
+		// corruption.
 		"-Werror=non-virtual-dtor",
+		// Detects invalid comparisons involving pointers that always give the same
+		// result. This is almost always a bug.
 		"-Werror=address",
+		// Detects stuff like 'x++ = x++ * x++;', which has undefined effects.
 		"-Werror=sequence-point",
+		// Bans format strings in printf-like functions that are not known at
+		// compile time and cannot be checked against their arguments.
 		"-Werror=format-security",
 	}
 
-	commonGlobalLldflags = []string{
+	commonGlobalLdflags = []string{
 		"-fuse-ld=lld",
 		"-Wl,--icf=safe",
 		"-Wl,--no-demangle",
@@ -188,7 +203,7 @@ var (
 	}
 
 	// Linking flags for device code; not applied to host binaries.
-	deviceGlobalLdflags = []string{
+	deviceGlobalLdflags = slices.Concat([]string{
 		"-Wl,-z,noexecstack",
 		"-Wl,-z,relro",
 		"-Wl,-z,now",
@@ -201,19 +216,14 @@ var (
 		"-Wl,--exclude-libs,libgcc_stripped.a",
 		"-Wl,--exclude-libs,libunwind_llvm.a",
 		"-Wl,--exclude-libs,libunwind.a",
-	}
-
-	deviceGlobalLldflags = append(append(deviceGlobalLdflags, commonGlobalLldflags...),
 		"-Wl,--compress-debug-sections=zstd",
-	)
+	}, commonGlobalLdflags)
 
 	hostGlobalCflags = []string{}
 
 	hostGlobalCppflags = []string{}
 
-	hostGlobalLdflags = []string{}
-
-	hostGlobalLldflags = commonGlobalLldflags
+	hostGlobalLdflags = commonGlobalLdflags
 
 	commonGlobalCppflags = []string{
 		// -Wimplicit-fallthrough is not enabled by -Wall.
@@ -229,7 +239,13 @@ var (
 	// These flags are appended after the module's cflags, so they cannot be
 	// overridden from Android.bp files.
 	//
-	// NOTE: if you need to disable a warning to unblock a compiler upgrade
+	// NOTE: Some warnings are disabled in this section (and
+	// noOverrideExternalGlobalCflags below). If they were disabled in
+	// commonGlobalCflags (and externalCflags below), these disabled flags will
+	// be overridden when modules that opt into`-Wall`, `-Wextra` in their
+	// `cflags`.  (TODO(b/444266638) to remove and forbid these flags from Android.bp.
+	//
+	// If you need to disable a warning to unblock a compiler upgrade
 	// and it is only triggered by third party code, add it to
 	// extraExternalCflags (if possible) or noOverrideExternalGlobalCflags
 	// (if the former doesn't work). If the new warning also occurs in first
@@ -237,45 +253,55 @@ var (
 	// should be the last resort, because it prevents all code in Android from
 	// opting into the warning.
 	noOverrideGlobalCflags = []string{
-		"-Werror=bool-operation",
+		// Force treating some high severity warnings as errors.
+
+		// Detects things like 'int* x = &(a + b)'. This is an error by default,
+		// but we don't want anyone to disable it from Android.bp.
+		"-Werror=address-of-temporary",
+		// Bundle of warnings that detects expressions which create dangling
+		// pointers. They are always bugs with high risk of memory corruption.
 		"-Werror=dangling",
+		// Detects printf-like functions with fewer arguments than required by
+		// the format string. Such calls usually print stack garbage and may crash.
 		"-Werror=format-insufficient-args",
-		"-Werror=implicit-int-float-conversion",
-		"-Werror=int-in-bool-context",
-		"-Werror=int-to-pointer-cast",
-		"-Werror=pointer-to-int-cast",
-		"-Werror=xor-used-as-pow",
-		"-Wimplicit-int-float-conversion",
-		// http://b/161386391 for -Wno-void-pointer-to-enum-cast
-		"-Wno-void-pointer-to-enum-cast",
-		// http://b/161386391 for -Wno-void-pointer-to-int-cast
-		"-Wno-void-pointer-to-int-cast",
-		// http://b/161386391 for -Wno-pointer-to-int-cast
-		"-Wno-pointer-to-int-cast",
+		// Detects some buffer overflow bugs involving C standard library functions.
 		"-Werror=fortify-source",
-		// http://b/315246135 temporarily disabled
-		"-Wno-unused-variable",
+		// Detects assignments between function pointers of incompatible types,
+		// which are allowed by the standard, but are almost always bugs with
+		// memory corruption potential.
+		"-Werror=incompatible-function-pointer-types",
+		// Detects suspicious uses of integers and arithmetic expressions in Boolean
+		// contexts, such as if statements, while loops, the ternary operator ?:, etc.
+		"-Werror=int-in-bool-context",
+		// Detects casts from integers smaller than a pointer to pointers, which
+		// usually indicates address truncation in code that's not 64-bit compatible.
+		"-Werror=int-to-pointer-cast",
+		// Self-explanatory, this is always undefined behavior.
+		"-Werror=null-dereference",
+		// Detects missing or inconsistent return statements in functions.
+		// The function will return garbage, which can lead to crashes and memory
+		// corruption.
+		"-Werror=return-type",
+		// Detects the typos 2^x and 10^x, where x is a decimal constant.
+		"-Werror=xor-used-as-pow",
+
+		// Disable some warnings to unblock compiler upgrades. All of the flags below
+		// should eventually be removed or moved to other sections.
+
 		// Disabled because it produces many false positives. http://b/323050926
 		"-Wno-missing-field-initializers",
 		// http://b/323050889
 		"-Wno-packed-non-pod",
 
-		"-Werror=address-of-temporary",
-		"-Werror=incompatible-function-pointer-types",
-		"-Werror=null-dereference",
-		"-Werror=return-type",
-
 		// http://b/72331526 Disable -Wtautological-* until the instances detected by these
 		// new warnings are fixed.
-		"-Wno-tautological-constant-compare",
-		"-Wno-tautological-type-limit-compare",
+		"-Wno-error=tautological-constant-compare",
 		// http://b/145211066
 		"-Wno-implicit-int-float-conversion",
 		// New warnings to be fixed after clang-r377782.
 		"-Wno-tautological-overlap-compare", // http://b/148815696
 		// New warnings to be fixed after clang-r383902.
 		"-Wno-deprecated-copy",                      // http://b/153746672
-		"-Wno-range-loop-construct",                 // http://b/153747076
 		"-Wno-zero-as-null-pointer-constant",        // http://b/68236239
 		"-Wno-deprecated-anon-enum-enum-conversion", // http://b/153746485
 		"-Wno-deprecated-enum-enum-conversion",
@@ -285,13 +311,14 @@ var (
 		// New warnings to be fixed after clang-r428724
 		"-Wno-align-mismatch", // http://b/193679946
 		// New warnings to be fixed after clang-r433403
-		"-Wno-error=unused-but-set-variable",  // http://b/197240255
 		"-Wno-error=unused-but-set-parameter", // http://b/197240255
 		// New warnings to be fixed after clang-r468909
-		"-Wno-error=deprecated-builtins", // http://b/241601211
-		"-Wno-error=deprecated",          // in external/googletest/googletest
+		"-Wno-error=deprecated", // in external/googletest/googletest
 		// New warnings to be fixed after clang-r522817
 		"-Wno-error=invalid-offsetof",
+		// New warnings to be fixed after clang-r563880
+		"-Wno-nontrivial-memcall",
+		"-Wno-invalid-specialization",
 
 		// Allow using VLA CXX extension.
 		"-Wno-vla-cxx-extension",
@@ -299,6 +326,12 @@ var (
 	}
 
 	noOverride64GlobalCflags = []string{}
+
+	extraTestsCflags = []string{
+		"-Wno-error=unused-but-set-variable",
+		"-Wno-unused-variable",
+		"-Wno-error=range-loop-construct", // http://b/153747076
+	}
 
 	// Extra cflags applied to third-party code (anything for which
 	// IsThirdPartyPath() in build/soong/android/paths.go returns true;
@@ -310,14 +343,6 @@ var (
 		// http://b/72331524 Allow null pointer arithmetic until the instances detected by
 		// this new warning are fixed.
 		"-Wno-null-pointer-arithmetic",
-
-		// Bug: http://b/29823425 Disable -Wnull-dereference until the
-		// new instances detected by this warning are fixed.
-		"-Wno-null-dereference",
-
-		// http://b/145211477
-		"-Wno-pointer-compare",
-		"-Wno-final-dtor-non-final-class",
 
 		// http://b/165945989
 		"-Wno-psabi",
@@ -332,17 +357,16 @@ var (
 		"-Wno-deprecated-non-prototype",
 
 		"-Wno-unused",
+		"-Wno-unused-but-set-variable",
 		"-Wno-deprecated",
-
-		// http://b/315250603 temporarily disabled
-		"-Wno-error=format",
+		"-Wno-tautological-constant-compare",
+		"-Wno-error=range-loop-construct", // http://b/153747076
 	}
 
-	// Similar to noOverrideGlobalCflags, but applies only to third-party code
-	// (see extraExternalCflags).
-	// This section can unblock compiler upgrades when a third party module that
-	// enables -Werror and some group of warnings explicitly triggers newly
-	// added warnings.
+	// This is similar to noOverrideGlobalCflags, but applies only to third-party
+	// code. This section can unblock compiler upgrades when a third party module
+	// that enables -Wall, -Wextra, or a particular warnings explicitly triggers
+	// newly added warnings. See note above noOverrideGlobalCflags.
 	noOverrideExternalGlobalCflags = []string{
 		// http://b/151457797
 		"-fcommon",
@@ -352,17 +376,20 @@ var (
 		// Introduced in response to a critical security vulnerability and
 		// should be a hard error - it requires only whitespace changes to fix.
 		"-Wno-misleading-indentation",
-		// Triggered by old LLVM code in external/llvm. Likely not worth
-		// enabling since it's a cosmetic issue.
-		"-Wno-bitwise-instead-of-logical",
 
 		"-Wno-unused",
 		"-Wno-unused-parameter",
 		"-Wno-unused-but-set-parameter",
+		"-Wno-unused-variable",
 		"-Wno-unqualified-std-cast-call",
 		"-Wno-array-parameter",
 		"-Wno-gnu-offsetof-extensions",
 		"-Wno-pessimizing-move",
+
+		// http://b/161386391 adding -Werror=pointer-to-int-cast, which
+		// also controls -Wvoid-pointer-to-int-cast, -Wpointer-to-enum-cast
+		// and -Wvoid-pointer-to-enum-cast
+		"-Wno-pointer-to-int-cast",
 	}
 
 	llvmNextExtraCommonGlobalCflags = []string{
@@ -376,17 +403,23 @@ var (
 		"-pedantic",
 		"-pedantic-errors",
 		"-Werror=pedantic",
+		"-Wno-all",
+		"-Wno-everything",
 	}
 
 	CStdVersion               = "gnu23"
 	CppStdVersion             = "gnu++20"
-	ExperimentalCStdVersion   = "gnu2x"
+	ExperimentalCStdVersion   = "gnu2y"
 	ExperimentalCppStdVersion = "gnu++2b"
 
 	// prebuilts/clang default settings.
-	ClangDefaultBase         = "prebuilts/clang/host"
-	ClangDefaultVersion      = "clang-r547379"
-	ClangDefaultShortVersion = "20"
+	ClangDefaultBase = "prebuilts/clang/host"
+	// The Clang version used in the trunk branch.
+	// NOTE: This is deprecated and will be removed in a future version, use the getter function instead.
+	ClangDefaultVersion = "clang-r563880c"
+	// The Clang short version used in the trunk branch.
+	// NOTE: This is deprecated and will be removed in a future version, use the getter function instead.
+	ClangDefaultShortVersion = "21"
 
 	// Directories with warnings from Android.bp files.
 	WarningAllowedProjects = []string{
@@ -409,10 +442,8 @@ func init() {
 	pctx.StaticVariable("CommonGlobalAsflags", strings.Join(commonGlobalAsflags, " "))
 	pctx.StaticVariable("DeviceGlobalCppflags", strings.Join(deviceGlobalCppflags, " "))
 	pctx.StaticVariable("DeviceGlobalLdflags", strings.Join(deviceGlobalLdflags, " "))
-	pctx.StaticVariable("DeviceGlobalLldflags", strings.Join(deviceGlobalLldflags, " "))
 	pctx.StaticVariable("HostGlobalCppflags", strings.Join(hostGlobalCppflags, " "))
 	pctx.StaticVariable("HostGlobalLdflags", strings.Join(hostGlobalLdflags, " "))
-	pctx.StaticVariable("HostGlobalLldflags", strings.Join(hostGlobalLldflags, " "))
 
 	pctx.VariableFunc("CommonGlobalCflags", func(ctx android.PackageVarContext) string {
 		flags := slices.Clone(commonGlobalCflags)
@@ -465,6 +496,14 @@ func init() {
 
 	pctx.VariableFunc("NoOverrideGlobalCflags", func(ctx android.PackageVarContext) string {
 		flags := noOverrideGlobalCflags
+		if ClangVersionAtLeast(ctx, 574158) {
+			flags = append(flags, "-Wno-unterminated-string-initialization")
+			flags = append(flags, "-Wno-implicit-int-conversion-on-negation")
+			flags = append(flags, "-Wno-default-const-init-field-unsafe")
+			flags = append(flags, "-Wno-default-const-init-var-unsafe")
+			flags = append(flags, "-Wno-preferred-type-bitfield-enum-conversion")
+			flags = append(flags, "-Wno-implicit-enum-enum-cast")
+		}
 		if ctx.Config().IsEnvTrue("LLVM_NEXT") {
 			flags = append(noOverrideGlobalCflags, llvmNextExtraCommonGlobalCflags...)
 			IllegalFlags = []string{} // Don't fail build while testing a new compiler.
@@ -476,6 +515,7 @@ func init() {
 	pctx.StaticVariable("HostGlobalCflags", strings.Join(hostGlobalCflags, " "))
 	pctx.StaticVariable("NoOverrideExternalGlobalCflags", strings.Join(noOverrideExternalGlobalCflags, " "))
 	pctx.StaticVariable("CommonGlobalCppflags", strings.Join(commonGlobalCppflags, " "))
+	pctx.StaticVariable("TestsCflags", strings.Join(extraTestsCflags, " "))
 	pctx.StaticVariable("ExternalCflags", strings.Join(extraExternalCflags, " "))
 
 	// Everything in these lists is a crime against abstraction and dependency tracking.
@@ -493,15 +533,22 @@ func init() {
 	}
 	pctx.PrefixedExistentPathsForSourcesVariable("CommonGlobalIncludes", "-I", commonGlobalIncludes)
 
-	pctx.StaticVariable("CLANG_DEFAULT_VERSION", ClangDefaultVersion)
-	pctx.StaticVariable("CLANG_DEFAULT_SHORT_VERSION", ClangDefaultShortVersion)
-
 	pctx.StaticVariableWithEnvOverride("ClangBase", "LLVM_PREBUILTS_BASE", ClangDefaultBase)
-	pctx.StaticVariableWithEnvOverride("ClangVersion", "LLVM_PREBUILTS_VERSION", ClangDefaultVersion)
+	pctx.VariableFunc("ClangVersion", func(ctx android.PackageVarContext) string {
+		if override := ctx.Config().Getenv("LLVM_PREBUILTS_VERSION"); override != "" {
+			return override
+		}
+		return ctx.Config().ReleaseBuildClangVersion(ClangDefaultVersion)
+	})
+	pctx.VariableFunc("ClangShortVersion", func(ctx android.PackageVarContext) string {
+		if override := ctx.Config().Getenv("LLVM_RELEASE_VERSION"); override != "" {
+			return override
+		}
+		return ctx.Config().ReleaseBuildClangShortVersion(ClangDefaultShortVersion)
+	})
+
 	pctx.StaticVariable("ClangPath", "${ClangBase}/${HostPrebuiltTag}/${ClangVersion}")
 	pctx.StaticVariable("ClangBin", "${ClangPath}/bin")
-
-	pctx.StaticVariableWithEnvOverride("ClangShortVersion", "LLVM_RELEASE_VERSION", ClangDefaultShortVersion)
 	pctx.StaticVariable("ClangAsanLibDir", "${ClangBase}/linux-x86/${ClangVersion}/lib/clang/${ClangShortVersion}/lib/linux")
 
 	pctx.StaticVariable("WarningAllowedProjects", strings.Join(WarningAllowedProjects, " "))
@@ -556,10 +603,31 @@ func clangPath(ctx android.PathContext) android.SourcePath {
 		if override := ctx.Config().Getenv("LLVM_PREBUILTS_BASE"); override != "" {
 			clangBase = override
 		}
-		clangVersion := ClangDefaultVersion
+		clangVersion := ctx.Config().ReleaseBuildClangVersion(ClangDefaultVersion)
 		if override := ctx.Config().Getenv("LLVM_PREBUILTS_VERSION"); override != "" {
 			clangVersion = override
 		}
 		return android.PathForSource(ctx, clangBase, ctx.Config().PrebuiltOS(), clangVersion)
 	})
+}
+
+func ClangVersion(ctx android.PathContext) string {
+	return ctx.Config().ReleaseBuildClangVersion(ClangDefaultVersion)
+}
+
+func ClangShortVersion(ctx android.PathContext) string {
+	return ctx.Config().ReleaseBuildClangShortVersion(ClangDefaultShortVersion)
+}
+
+// Check if the Clang revision is greater or equal to minRev. Returns false if failed to parse.
+func ClangVersionAtLeast(ctx android.PathContext, minRev int) bool {
+	curRevStr := ClangVersion(ctx)
+	if !strings.HasPrefix(curRevStr, "clang-r") {
+		return false
+	}
+	curRev, err := strconv.Atoi(curRevStr[7:])
+	if err != nil {
+		return false
+	}
+	return curRev >= minRev
 }

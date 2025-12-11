@@ -719,7 +719,7 @@ func TestBootclasspathFragmentContentsNoName(t *testing.T) {
 	info, _ := android.OtherModuleProvider(result, fragment, java.BootclasspathFragmentApexContentInfoProvider)
 
 	checkFragmentExportedDexJar := func(name string, expectedDexJar string) {
-		module := result.Module(name, "android_common_apex10000")
+		module := result.ModuleProxy(name, "android_common_apex10000")
 		dexJar, err := info.DexBootJarPathForContentModule(module)
 		if err != nil {
 			t.Error(err)

@@ -28,6 +28,8 @@ import (
 	"android/soong/etc"
 )
 
+//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+
 var (
 	// Any C flags added by sanitizer which libTooling tools may not
 	// understand also need to be added to ClangLibToolingUnknownCflags in
@@ -176,7 +178,6 @@ func (t SanitizerType) registerMutators(ctx android.RegisterMutatorsContext) {
 	switch t {
 	case cfi, Hwasan, Asan, tsan, Fuzzer, scs, Memtag_stack:
 		sanitizer := &sanitizerSplitMutator{t}
-		ctx.BottomUp(t.variationName()+"_markapexes", sanitizer.markSanitizableApexesMutator)
 		ctx.Transition(t.variationName(), sanitizer)
 	case Memtag_heap, Memtag_globals, intOverflow:
 		// do nothing
@@ -231,6 +232,7 @@ func (t SanitizerType) incompatibleWithCfi() bool {
 	return t == Asan || t == Fuzzer || t == Hwasan
 }
 
+// @auto-generate: gob
 type SanitizeUserProps struct {
 	// Prevent use of any sanitizers on this module
 	Never *bool `android:"arch_variant"`
@@ -394,7 +396,6 @@ type SanitizeProperties struct {
 	SanitizerEnabled bool `blueprint:"mutated"`
 
 	MinimalRuntimeDep bool     `blueprint:"mutated"`
-	BuiltinsDep       bool     `blueprint:"mutated"`
 	UbsanRuntimeDep   bool     `blueprint:"mutated"`
 	InSanitizerDir    bool     `blueprint:"mutated"`
 	Sanitizers        []string `blueprint:"mutated"`
@@ -1146,26 +1147,57 @@ func (m *Module) SanitizableDepTagChecker() SantizableDependencyTagChecker {
 	return IsSanitizableDependencyTag
 }
 
-type sanitizerSplitMutator struct {
-	sanitizer SanitizerType
+// @auto-generate: gob
+type PlatformSanitizeableInfo struct {
+	// IsSanitizerEnabled is a list of enabled flags for each sanitizer in the same order as Sanitizers.
+	// If it is non-nil it will be the same length as Sanitizers.
+	IsSanitizerEnabled []bool
 }
+
+var PlatformSanitizeableInfoProvider = blueprint.NewMutatorProvider[PlatformSanitizeableInfo]("sanitize_markapexes")
 
 // If an APEX is sanitized or not depends on whether it contains at least one
 // sanitized module. Transition mutators cannot propagate information up the
 // dependency graph this way, so we need an auxiliary mutator to do so.
-func (s *sanitizerSplitMutator) markSanitizableApexesMutator(ctx android.BottomUpMutatorContext) {
+func markSanitizableApexesMutator(ctx android.BottomUpMutatorContext) {
 	if sanitizeable, ok := ctx.Module().(Sanitizeable); ok {
-		enabled := sanitizeable.IsSanitizerEnabled(ctx.Config(), s.sanitizer.name())
-		ctx.VisitDirectDeps(func(dep android.Module) {
-			if c, ok := dep.(PlatformSanitizeable); ok && c.IsSanitizerEnabled(s.sanitizer) {
-				enabled = true
+		enabled := make([]bool, len(Sanitizers))
+		for i, sanitizer := range Sanitizers {
+			enabled[i] = sanitizeable.IsSanitizerEnabled(ctx.Config(), sanitizer.name())
+		}
+
+		ctx.VisitDirectDepsProxy(func(dep android.ModuleProxy) {
+			if info, ok := android.OtherModuleProvider(ctx, dep, PlatformSanitizeableInfoProvider); ok &&
+				len(info.IsSanitizerEnabled) > 0 {
+				for i := range Sanitizers {
+					enabled[i] = enabled[i] || info.IsSanitizerEnabled[i]
+				}
 			}
 		})
 
-		if enabled {
-			sanitizeable.EnableSanitizer(s.sanitizer.name())
+		for i, sanitizer := range Sanitizers {
+			if enabled[i] {
+				sanitizeable.EnableSanitizer(sanitizer.name())
+			}
 		}
+	} else if sanitizeable, ok := ctx.Module().(PlatformSanitizeable); ok {
+		var isSanitizerEnabled []bool
+		for i, sanitizer := range Sanitizers {
+			if sanitizeable.IsSanitizerEnabled(sanitizer) {
+				if isSanitizerEnabled == nil {
+					isSanitizerEnabled = make([]bool, len(Sanitizers))
+				}
+				isSanitizerEnabled[i] = true
+			}
+		}
+		android.SetProvider(ctx, PlatformSanitizeableInfoProvider, PlatformSanitizeableInfo{
+			IsSanitizerEnabled: isSanitizerEnabled,
+		})
 	}
+}
+
+type sanitizerSplitMutator struct {
+	sanitizer SanitizerType
 }
 
 func (s *sanitizerSplitMutator) Split(ctx android.BaseModuleContext) []string {
@@ -1354,6 +1386,15 @@ func (c *Module) IsSanitizerExplicitlyDisabled(t SanitizerType) bool {
 	return c.sanitize.isSanitizerExplicitlyDisabled(t)
 }
 
+// SanitizerRuntimeDepInfo is exported from static libraries that have sanitizers enabled that require a runtime.
+// @auto-generate: gob
+type SanitizerRuntimeDepInfo struct {
+	MinimalRuntimeNeeded bool
+	UbsanRuntimeNeeded   bool
+}
+
+var SanitizerRuntimeDepInfoProvider = blueprint.NewMutatorProvider[SanitizerRuntimeDepInfo]("sanitize_runtime_deps")
+
 // Propagate the ubsan minimal runtime dependency when there are integer overflow sanitized static dependencies.
 func sanitizerRuntimeDepsMutator(mctx android.BottomUpMutatorContext) {
 	// Change this to PlatformSanitizable when/if non-cc modules support ubsan sanitizers.
@@ -1361,42 +1402,39 @@ func sanitizerRuntimeDepsMutator(mctx android.BottomUpMutatorContext) {
 		if c.sanitize.Properties.ForceDisable {
 			return
 		}
+
+		var info SanitizerRuntimeDepInfo
+		info.MinimalRuntimeNeeded = enableMinimalRuntime(c.sanitize)
+		info.UbsanRuntimeNeeded = enableUbsanRuntime(c.sanitize)
+
+		// Visit dependencies to determine if any require the runtime to be linked in.
 		isSanitizableDependencyTag := c.SanitizableDepTagChecker()
-		mctx.WalkDeps(func(child, parent android.Module) bool {
-			if !isSanitizableDependencyTag(mctx.OtherModuleDependencyTag(child)) {
-				return false
+		mctx.VisitDirectDepsProxy(func(dep android.ModuleProxy) {
+			if !isSanitizableDependencyTag(mctx.OtherModuleDependencyTag(dep)) {
+				return
 			}
 
-			d, ok := child.(*Module)
-			if !ok || !d.static() {
-				return false
+			if depInfo, ok := android.OtherModuleProvider(mctx, dep, SanitizerRuntimeDepInfoProvider); ok {
+				info.MinimalRuntimeNeeded = info.MinimalRuntimeNeeded || depInfo.MinimalRuntimeNeeded
+				info.UbsanRuntimeNeeded = info.UbsanRuntimeNeeded || depInfo.UbsanRuntimeNeeded
 			}
-			if d.sanitize != nil && !d.sanitize.Properties.ForceDisable {
-				if enableMinimalRuntime(d.sanitize) {
-					// If a static dependency is built with the minimal runtime,
-					// make sure we include the ubsan minimal runtime.
-					c.sanitize.Properties.MinimalRuntimeDep = true
-				} else if enableUbsanRuntime(d.sanitize) {
-					// If a static dependency runs with full ubsan diagnostics,
-					// make sure we include the ubsan runtime.
-					c.sanitize.Properties.UbsanRuntimeDep = true
-				}
-
-				if c.sanitize.Properties.MinimalRuntimeDep &&
-					c.sanitize.Properties.UbsanRuntimeDep {
-					// both flags that this mutator might set are true, so don't bother recursing
-					return false
-				}
-
-				if c.Os() == android.Linux {
-					c.sanitize.Properties.BuiltinsDep = true
-				}
-
-				return true
-			}
-
-			return false
 		})
+
+		if info.MinimalRuntimeNeeded {
+			// If a static dependency is built with the minimal runtime,
+			// make sure we include the ubsan minimal runtime.
+			c.sanitize.Properties.MinimalRuntimeDep = true
+		}
+		if info.UbsanRuntimeNeeded {
+			// If a static dependency runs with full ubsan diagnostics,
+			// make sure we include the ubsan runtime.
+			c.sanitize.Properties.UbsanRuntimeDep = true
+		}
+
+		// If this is a static library with a runtime requirement then re-export the requirement.
+		if c.static() && (info != SanitizerRuntimeDepInfo{}) {
+			android.SetProvider(mctx, SanitizerRuntimeDepInfoProvider, info)
+		}
 	}
 }
 
@@ -1577,9 +1615,6 @@ func sanitizerRuntimeMutator(mctx android.BottomUpMutatorContext) {
 
 		if enableMinimalRuntime(c.sanitize) || c.sanitize.Properties.MinimalRuntimeDep {
 			addStaticDeps(config.UndefinedBehaviorSanitizerMinimalRuntimeLibrary(), true)
-		}
-		if c.sanitize.Properties.BuiltinsDep {
-			addStaticDeps(config.BuiltinsRuntimeLibrary(), true)
 		}
 
 		if runtimeSharedLibrary != "" && (toolchain.Bionic() || toolchain.Musl()) {
@@ -1856,30 +1891,34 @@ func (txt *sanitizerLibrariesTxtModule) DepsMutator(actx android.BottomUpMutator
 func (txt *sanitizerLibrariesTxtModule) getSanitizerLibs(ctx android.ModuleContext) string {
 	var sanitizerLibStems []string
 
-	ctx.VisitDirectDepsIf(func(m android.Module) bool {
-		if !m.Enabled(ctx) {
-			return false
+	ctx.VisitDirectDepsProxy(func(m android.ModuleProxy) {
+		info := android.OtherModuleProviderOrDefault(ctx, m, android.CommonModuleInfoProvider)
+		if !info.Enabled {
+			return
 		}
 
-		ccModule, _ := m.(*Module)
-		if ccModule == nil || ccModule.library == nil || !ccModule.library.shared() {
-			return false
+		if _, ok := android.OtherModuleProvider(ctx, m, SharedLibraryInfoProvider); !ok {
+			return
 		}
 
 		targets := ctx.Config().Targets[android.Android]
 
+		var targetMatches bool
 		for _, target := range targets {
-			if m.Target().Os == target.Os && m.Target().Arch.ArchType == target.Arch.ArchType {
-				return true
+			if info.Target.Os == target.Os && info.Target.Arch.ArchType == target.Arch.ArchType {
+				targetMatches = true
 			}
 		}
 
-		return false
-	}, func(m android.Module) {
-		ccModule, _ := m.(*Module)
-		outputFile := ccModule.outputFile
-		if outputFile.Valid() {
-			sanitizerLibStems = append(sanitizerLibStems, outputFile.Path().Base())
+		if !targetMatches {
+			return
+		}
+
+		outputFiles := android.OutputFilesForModule(ctx, m, "")
+		if len(outputFiles) == 1 {
+			sanitizerLibStems = append(sanitizerLibStems, outputFiles[0].Base())
+		} else if len(outputFiles) > 1 {
+			panic(fmt.Errorf("multiple output files for %s: %s", m, outputFiles.Strings()))
 		}
 	})
 

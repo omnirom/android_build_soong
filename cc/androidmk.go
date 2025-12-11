@@ -16,7 +16,6 @@ package cc
 
 import (
 	"fmt"
-	"io"
 	"path/filepath"
 	"strings"
 
@@ -74,21 +73,12 @@ func (c *Module) subAndroidMk(config android.Config, entries *android.AndroidMkI
 var _ android.AndroidMkProviderInfoProducer = (*Module)(nil)
 
 func (c *Module) PrepareAndroidMKProviderInfo(config android.Config) *android.AndroidMkProviderInfo {
-	if c.hideApexVariantFromMake || c.Properties.HideFromMake {
-		return &android.AndroidMkProviderInfo{
-			PrimaryInfo: android.AndroidMkInfo{
-				Disabled: true,
-			},
-		}
-	}
-
 	providerData := android.AndroidMkProviderInfo{
 		PrimaryInfo: android.AndroidMkInfo{
 			OutputFile:   c.outputFile,
 			Required:     c.Properties.AndroidMkRuntimeLibs,
 			OverrideName: c.BaseModuleName(),
 			Include:      "$(BUILD_SYSTEM)/soong_cc_rust_prebuilt.mk",
-			EntryMap:     make(map[string][]string),
 		},
 	}
 
@@ -212,19 +202,6 @@ func (library *libraryDecorator) androidMkWriteExportedFlags(entries *android.An
 	}
 }
 
-func (library *libraryDecorator) androidMkEntriesWriteAdditionalDependenciesForSourceAbiDiff(entries *android.AndroidMkInfo) {
-	if !library.static() {
-		entries.AddPaths("LOCAL_ADDITIONAL_DEPENDENCIES", library.sAbiDiff)
-	}
-}
-
-// TODO(ccross): remove this once apex/androidmk.go is converted to AndroidMkEntries
-func (library *libraryDecorator) androidMkWriteAdditionalDependenciesForSourceAbiDiff(w io.Writer) {
-	if !library.static() {
-		fmt.Fprintln(w, "LOCAL_ADDITIONAL_DEPENDENCIES +=", strings.Join(library.sAbiDiff.Strings(), " "))
-	}
-}
-
 func (library *libraryDecorator) prepareAndroidMKProviderInfo(config android.Config, ctx AndroidMkContext, entries *android.AndroidMkInfo) {
 	if library.static() {
 		entries.Class = "STATIC_LIBRARIES"
@@ -245,7 +222,6 @@ func (library *libraryDecorator) prepareAndroidMKProviderInfo(config android.Con
 	}
 
 	library.androidMkWriteExportedFlags(entries)
-	library.androidMkEntriesWriteAdditionalDependenciesForSourceAbiDiff(entries)
 
 	if entries.OutputFile.Valid() {
 		_, _, ext := android.SplitFileExt(entries.OutputFile.Path().Base())
@@ -287,6 +263,10 @@ func (library *libraryDecorator) prepareAndroidMKProviderInfo(config android.Con
 }
 
 func (object *objectLinker) prepareAndroidMKProviderInfo(config android.Config, ctx AndroidMkContext, entries *android.AndroidMkInfo) {
+	entries.Class = "STATIC_LIBRARIES"
+}
+
+func (object *deviceForHostLinker) prepareAndroidMKProviderInfo(config android.Config, ctx AndroidMkContext, entries *android.AndroidMkInfo) {
 	entries.Class = "STATIC_LIBRARIES"
 }
 
@@ -391,10 +371,6 @@ func (fuzz *fuzzBinary) prepareAndroidMKProviderInfo(config android.Config, ctx 
 	ctx.subAndroidMk(config, entries, fuzz.binaryDecorator)
 
 	entries.SetBool("LOCAL_IS_FUZZ_TARGET", true)
-	if fuzz.installedSharedDeps != nil {
-		// TOOD: move to install dep
-		entries.AddStrings("LOCAL_FUZZ_INSTALLED_SHARED_DEPS", fuzz.installedSharedDeps...)
-	}
 }
 
 func (test *testLibrary) prepareAndroidMKProviderInfo(config android.Config, ctx AndroidMkContext, entries *android.AndroidMkInfo) {
@@ -418,20 +394,12 @@ func (c *stubDecorator) prepareAndroidMKProviderInfo(config android.Config, ctx 
 	entries.SubName = ndkLibrarySuffix + "." + c.apiLevel.String()
 	entries.Class = "SHARED_LIBRARIES"
 
-	if !c.BuildStubs() {
-		entries.Disabled = true
-		return
-	}
-
 	path, file := filepath.Split(c.installPath.String())
 	stem, suffix, _ := android.SplitFileExt(file)
 	entries.SetString("LOCAL_MODULE_SUFFIX", suffix)
 	entries.SetString("LOCAL_MODULE_PATH", path)
 	entries.SetString("LOCAL_MODULE_STEM", stem)
 	entries.SetBool("LOCAL_NO_NOTICE_FILE", true)
-	if c.parsedCoverageXmlPath.String() != "" {
-		entries.SetString("SOONG_NDK_API_XML", "$(SOONG_NDK_API_XML) "+c.parsedCoverageXmlPath.String())
-	}
 	entries.SetBool("LOCAL_UNINSTALLABLE_MODULE", true) // Stubs should not be installed
 }
 
@@ -460,14 +428,16 @@ func (c *vndkPrebuiltLibraryDecorator) prepareAndroidMKProviderInfo(config andro
 }
 
 func (p *prebuiltLinker) prepareAndroidMKProviderInfo(config android.Config, ctx AndroidMkContext, entries *android.AndroidMkInfo) {
-	if p.properties.Check_elf_files != nil {
-		entries.SetBool("LOCAL_CHECK_ELF_FILES", *p.properties.Check_elf_files)
-	} else {
-		// soong_cc_rust_prebuilt.mk does not include check_elf_file.mk by default
-		// because cc_library_shared and cc_binary use soong_cc_rust_prebuilt.mk as well.
-		// In order to turn on prebuilt ABI checker, set `LOCAL_CHECK_ELF_FILES` to
-		// true if `p.properties.Check_elf_files` is not specified.
-		entries.SetBool("LOCAL_CHECK_ELF_FILES", true)
+	if !config.GetBuildFlagBool("RELEASE_SOONG_CHECK_ELF_FILES") {
+		if p.properties.Check_elf_files != nil {
+			entries.SetBool("LOCAL_CHECK_ELF_FILES", *p.properties.Check_elf_files)
+		} else {
+			// soong_cc_rust_prebuilt.mk does not include check_elf_file.mk by default
+			// because cc_library_shared and cc_binary use soong_cc_rust_prebuilt.mk as well.
+			// In order to turn on prebuilt ABI checker, set `LOCAL_CHECK_ELF_FILES` to
+			// true if `p.properties.Check_elf_files` is not specified.
+			entries.SetBool("LOCAL_CHECK_ELF_FILES", true)
+		}
 	}
 }
 
@@ -475,23 +445,25 @@ func (p *prebuiltLibraryLinker) prepareAndroidMKProviderInfo(config android.Conf
 	ctx.subAndroidMk(config, entries, p.libraryDecorator)
 	if p.shared() {
 		ctx.subAndroidMk(config, entries, &p.prebuiltLinker)
-		androidMkWritePrebuiltOptions(p.baseLinker, entries)
+		androidMkWritePrebuiltOptions(config, p.baseLinker, entries)
 	}
 }
 
 func (p *prebuiltBinaryLinker) prepareAndroidMKProviderInfo(config android.Config, ctx AndroidMkContext, entries *android.AndroidMkInfo) {
 	ctx.subAndroidMk(config, entries, p.binaryDecorator)
 	ctx.subAndroidMk(config, entries, &p.prebuiltLinker)
-	androidMkWritePrebuiltOptions(p.baseLinker, entries)
+	androidMkWritePrebuiltOptions(config, p.baseLinker, entries)
 }
 
-func androidMkWritePrebuiltOptions(linker *baseLinker, entries *android.AndroidMkInfo) {
-	allow := linker.Properties.Allow_undefined_symbols
-	if allow != nil {
-		entries.SetBool("LOCAL_ALLOW_UNDEFINED_SYMBOLS", *allow)
-	}
-	ignore := linker.Properties.Ignore_max_page_size
-	if ignore != nil {
-		entries.SetBool("LOCAL_IGNORE_MAX_PAGE_SIZE", *ignore)
+func androidMkWritePrebuiltOptions(config android.Config, linker *baseLinker, entries *android.AndroidMkInfo) {
+	if !config.GetBuildFlagBool("RELEASE_SOONG_CHECK_ELF_FILES") {
+		allow := linker.Properties.Allow_undefined_symbols
+		if allow != nil {
+			entries.SetBool("LOCAL_ALLOW_UNDEFINED_SYMBOLS", *allow)
+		}
+		ignore := linker.Properties.Ignore_max_page_size
+		if ignore != nil {
+			entries.SetBool("LOCAL_IGNORE_MAX_PAGE_SIZE", *ignore)
+		}
 	}
 }

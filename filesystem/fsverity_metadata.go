@@ -113,6 +113,7 @@ func (f *filesystem) buildFsverityMetadataFiles(
 	rootDir android.OutputPath,
 	rebasedDir android.OutputPath,
 	fullInstallPaths *[]FullInstallPathInfo,
+	platformGeneratedFiles *[]string,
 ) {
 	match := func(path string) bool {
 		for _, pattern := range f.properties.Fsverity.Inputs.GetOrDefault(ctx, nil) {
@@ -280,17 +281,20 @@ func (f *filesystem) buildFsverityMetadataFiles(
 	builder.Command().Text("cp").Input(apkPath).Text(installedApkPath.String())
 	builder.Command().Text("cp").Input(idsigPath).Text(installedIdsigPath.String())
 
+	apkFullInstallPath := android.PathForModuleInPartitionInstall(ctx, f.PartitionType(), fmt.Sprintf("etc/security/fsverity/BuildManifest%s.apk", apkNameSuffix))
 	*fullInstallPaths = append(*fullInstallPaths, FullInstallPathInfo{
 		SourcePath:      apkPath,
-		FullInstallPath: android.PathForModuleInPartitionInstall(ctx, f.PartitionType(), fmt.Sprintf("etc/security/fsverity/BuildManifest%s.apk", apkNameSuffix)),
+		FullInstallPath: apkFullInstallPath,
 	})
 
 	f.appendToEntry(ctx, installedApkPath)
 
+	idsigFullInstallPath := android.PathForModuleInPartitionInstall(ctx, f.PartitionType(), fmt.Sprintf("etc/security/fsverity/BuildManifest%s.apk.idsig", apkNameSuffix))
 	*fullInstallPaths = append(*fullInstallPaths, FullInstallPathInfo{
 		SourcePath:      idsigPath,
-		FullInstallPath: android.PathForModuleInPartitionInstall(ctx, f.PartitionType(), fmt.Sprintf("etc/security/fsverity/BuildManifest%s.apk.idsig", apkNameSuffix)),
+		FullInstallPath: idsigFullInstallPath,
 	})
 
 	f.appendToEntry(ctx, installedIdsigPath)
+	*platformGeneratedFiles = append(*platformGeneratedFiles, apkFullInstallPath.String(), idsigFullInstallPath.String())
 }

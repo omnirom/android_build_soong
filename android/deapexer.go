@@ -153,6 +153,20 @@ type RequiredFilesFromPrebuiltApex interface {
 	UseProfileGuidedDexpreopt() bool
 }
 
+type RequiredFilesFromPrebuiltApexInfo struct {
+	// RequiredFilesFromPrebuiltApex contains a list of the file paths (relative to the root of the
+	// APEX's contents) that the implementing module requires from within a prebuilt .apex file.
+	//
+	// For each file path this will cause the file to be extracted out of the prebuilt .apex file, and
+	// the path to the extracted file will be stored in the DeapexerInfo using the APEX relative file
+	// path as the key, The path can then be retrieved using the PrebuiltExportPath(key) method.
+	RequiredFilesFromPrebuiltApex []string
+	// UseProfileGuidedDexpreopt is true if a transitive dependency of an apex should use a .prof file to guide dexpreopt
+	UseProfileGuidedDexpreopt bool
+}
+
+var RequiredFilesFromPrebuiltApexInfoProvider = blueprint.NewProvider[RequiredFilesFromPrebuiltApexInfo]()
+
 // Marker interface that identifies dependencies on modules that may require files from a prebuilt
 // apex.
 type RequiresFilesFromPrebuiltApexTag interface {

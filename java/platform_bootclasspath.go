@@ -51,16 +51,16 @@ type platformBootclasspathModule struct {
 	properties platformBootclasspathProperties
 
 	// The apex:module pairs obtained from the configured modules.
-	configuredModules []android.Module
+	configuredModules []android.ModuleProxy
 
 	// The apex:module pairs obtained from the fragments.
-	fragments []android.Module
+	fragments []android.ModuleProxy
 
 	// The map of apex to the fragments they contain.
-	apexNameToFragment map[string]android.Module
+	apexNameToFragment map[string]android.ModuleProxy
 
 	// The map of library modules in the bootclasspath to the fragments that contain them.
-	libraryToApex map[android.Module]string
+	libraryToApex map[android.ModuleProxy]string
 
 	// Path to the monolithic hiddenapi-flags.csv file.
 	hiddenAPIFlagsCSV android.OutputPath
@@ -86,15 +86,16 @@ func platformBootclasspathFactory() android.Module {
 	return m
 }
 
-func (b *platformBootclasspathModule) AndroidMkEntries() (entries []android.AndroidMkEntries) {
-	entries = append(entries, android.AndroidMkEntries{
+func (b *platformBootclasspathModule) PrepareAndroidMKProviderInfo(config android.Config) *android.AndroidMkProviderInfo {
+	info := &android.AndroidMkProviderInfo{}
+	info.PrimaryInfo = android.AndroidMkInfo{
 		Class: "FAKE",
 		// Need at least one output file in order for this to take effect.
 		OutputFile: android.OptionalPathForPath(b.hiddenAPIFlagsCSV),
 		Include:    "$(BUILD_PHONY_PACKAGE)",
-	})
-	entries = append(entries, b.classpathFragmentBase().androidMkEntries()...)
-	return
+	}
+	info.ExtraInfo = append(info.ExtraInfo, b.classpathFragmentBase().androidMkInfo())
+	return info
 }
 
 func (b *platformBootclasspathModule) DepsMutator(ctx android.BottomUpMutatorContext) {
@@ -181,8 +182,8 @@ func (b *platformBootclasspathModule) GenerateAndroidBuildActions(ctx android.Mo
 
 	// Do not add implLibModule to allModules as the impl lib is only used to collect the
 	// transitive source files
-	var implLibModule []android.Module
-	ctx.VisitDirectDepsWithTag(platformBootclasspathImplLibDepTag, func(m android.Module) {
+	var implLibModule []android.ModuleProxy
+	ctx.VisitDirectDepsProxyWithTag(platformBootclasspathImplLibDepTag, func(m android.ModuleProxy) {
 		implLibModule = append(implLibModule, m)
 	})
 
@@ -251,7 +252,7 @@ func (b *platformBootclasspathModule) platformJars(ctx android.PathContext) andr
 
 // checkPlatformModules ensures that the non-updatable modules supplied are not part of an
 // apex module.
-func (b *platformBootclasspathModule) checkPlatformModules(ctx android.ModuleContext, modules []android.Module) {
+func (b *platformBootclasspathModule) checkPlatformModules(ctx android.ModuleContext, modules []android.ModuleProxy) {
 	// TODO(satayev): change this check to only allow core-icu4j, all apex jars should not be here.
 	for _, m := range modules {
 		apexInfo, _ := android.OtherModuleProvider(ctx, m, android.ApexInfoProvider)
@@ -266,7 +267,7 @@ func (b *platformBootclasspathModule) checkPlatformModules(ctx android.ModuleCon
 }
 
 // checkApexModules ensures that the apex modules supplied are not from the platform.
-func (b *platformBootclasspathModule) checkApexModules(ctx android.ModuleContext, modules []android.Module) {
+func (b *platformBootclasspathModule) checkApexModules(ctx android.ModuleContext, modules []android.ModuleProxy) {
 	for _, m := range modules {
 		apexInfo, _ := android.OtherModuleProvider(ctx, m, android.ApexInfoProvider)
 		fromUpdatableApex := apexInfo.Updatable
@@ -298,8 +299,10 @@ func (b *platformBootclasspathModule) checkApexModules(ctx android.ModuleContext
 }
 
 // generateHiddenAPIBuildActions generates all the hidden API related build rules.
-func (b *platformBootclasspathModule) generateHiddenAPIBuildActions(ctx android.ModuleContext, modules []android.Module,
-	fragments []android.Module, libraryToApex map[android.Module]string, apexNameToFragment map[string]android.Module) bootDexJarByModule {
+func (b *platformBootclasspathModule) generateHiddenAPIBuildActions(ctx android.ModuleContext, modules []android.ModuleProxy,
+	fragments []android.ModuleProxy, libraryToApex map[android.ModuleProxy]string,
+	apexNameToFragment map[string]android.ModuleProxy) bootDexJarByModule {
+
 	createEmptyHiddenApiFiles := func() {
 		paths := android.OutputPaths{b.hiddenAPIFlagsCSV, b.hiddenAPIIndexCSV, b.hiddenAPIMetadataCSV}
 		for _, path := range paths {

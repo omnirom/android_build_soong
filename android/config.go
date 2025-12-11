@@ -29,8 +29,6 @@ import (
 	"sync"
 	"unicode"
 
-	"android/soong/shared"
-
 	"github.com/google/blueprint"
 	"github.com/google/blueprint/bootstrap"
 	"github.com/google/blueprint/pathtools"
@@ -38,6 +36,7 @@ import (
 
 	"android/soong/android/soongconfig"
 	"android/soong/remoteexec"
+	"android/soong/shared"
 )
 
 // Bool re-exports proptools.Bool for the android package.
@@ -85,10 +84,9 @@ type CmdArgs struct {
 	SoongOutDir    string
 	SoongVariables string
 	KatiSuffix     string
+	KatiEnabled    bool
 
-	ModuleGraphFile   string
-	ModuleActionsFile string
-	DocFile           string
+	DocFile string
 
 	BuildFromSourceStub bool
 
@@ -100,9 +98,6 @@ const (
 	// Don't use bazel at all during module analysis.
 	AnalysisNoBazel SoongBuildMode = iota
 
-	// Create a JSON representation of the module graph and exit.
-	GenerateModuleGraph
-
 	// Generate a documentation file for module type definitions and exit.
 	GenerateDocFile
 )
@@ -110,7 +105,7 @@ const (
 const testKeyDir = "build/make/target/product/security"
 
 func (c Config) genericConfig() Config {
-	return Config{c.config.genericConfig}
+	return Config{c.config.genericConfigField}
 }
 
 // SoongOutDir returns the build output directory for the configuration.
@@ -142,6 +137,8 @@ func (c Config) Subninjas() []string {
 func (c Config) PrimaryBuilderInvocations() []bootstrap.PrimaryBuilderInvocation {
 	return []bootstrap.PrimaryBuilderInvocation{}
 }
+
+func (c Config) IsBootstrap() bool { return false }
 
 // RunningInsideUnitTest returns true if this code is being run as part of a Soong unit test.
 func (c Config) RunningInsideUnitTest() bool {
@@ -185,6 +182,10 @@ func (c Config) CoverageSuffix() string {
 // shared libraries).
 func (c Config) MaxPageSizeSupported() string {
 	return String(c.config.productVariables.DeviceMaxPageSizeSupported)
+}
+
+func (c Config) DeviceCheckPrebuiltMaxPageSize() bool {
+	return Bool(c.config.productVariables.DeviceCheckPrebuiltMaxPageSize)
 }
 
 // NoBionicPageSizeMacro returns true when AOSP is page size agnostic.
@@ -243,6 +244,20 @@ func (c Config) ReleaseAconfigFlagDefaultPermission() string {
 	return c.config.productVariables.ReleaseAconfigFlagDefaultPermission
 }
 
+func (c Config) ReleaseBuildClangVersion(defaultVersion string) string {
+	if val, exists := c.GetBuildFlag("RELEASE_BUILD_CLANG_VERSION"); exists && val != "" {
+		return val
+	}
+	return defaultVersion
+}
+
+func (c Config) ReleaseBuildClangShortVersion(defaultVersion string) string {
+	if val, exists := c.GetBuildFlag("RELEASE_BUILD_CLANG_SHORT_VERSION"); exists && val != "" {
+		return val
+	}
+	return defaultVersion
+}
+
 // The flag indicating behavior for the tree wrt building modules or using prebuilts
 // derived from RELEASE_DEFAULT_MODULE_BUILD_FROM_SOURCE
 func (c Config) ReleaseDefaultModuleBuildFromSource() bool {
@@ -272,21 +287,12 @@ func (c Config) ReleaseNdkAbiMonitored() bool {
 	return c.config.productVariables.GetBuildFlagBool("RELEASE_NDK_ABI_MONITORED")
 }
 
-// Enable read flag from new storage, for C/C++
-func (c Config) ReleaseReadFromNewStorageCc() bool {
-	return c.config.productVariables.GetBuildFlagBool("RELEASE_READ_FROM_NEW_STORAGE_CC")
-}
-
 func (c Config) ReleaseHiddenApiExportableStubs() bool {
 	return c.config.productVariables.GetBuildFlagBool("RELEASE_HIDDEN_API_EXPORTABLE_STUBS") ||
 		Bool(c.config.productVariables.HiddenapiExportableStubs)
 }
 
 // Enable read flag from new storage
-func (c Config) ReleaseReadFromNewStorage() bool {
-	return c.config.productVariables.GetBuildFlagBool("RELEASE_READ_FROM_NEW_STORAGE")
-}
-
 func (c Config) ReleaseCreateAconfigStorageFile() bool {
 	return c.config.productVariables.GetBuildFlagBool("RELEASE_CREATE_ACONFIG_STORAGE_FILE")
 }
@@ -295,12 +301,46 @@ func (c Config) ReleaseUseSystemFeatureBuildFlags() bool {
 	return c.config.productVariables.GetBuildFlagBool("RELEASE_USE_SYSTEM_FEATURE_BUILD_FLAGS")
 }
 
-func (c Config) ReleaseFingerprintAconfigPackages() bool {
-	return c.config.productVariables.GetBuildFlagBool("RELEASE_FINGERPRINT_ACONFIG_PACKAGES")
+func (c Config) ReleaseUseSystemFeatureXmlForUnavailableFeatures() bool {
+	return c.config.productVariables.GetBuildFlagBool("RELEASE_USE_SYSTEM_FEATURE_XML_FOR_UNAVAILABLE_FEATURES")
 }
 
-func (c Config) ReleaseAconfigCheckApiLevel() bool {
-	return c.config.productVariables.GetBuildFlagBool("RELEASE_ACONFIG_CHECK_API_LEVEL")
+func (c Config) ReleaseRustUseArmTargetArchVariant() bool {
+	return c.config.productVariables.GetBuildFlagBool("RELEASE_RUST_USE_ARM_TARGET_ARCH_VARIANT")
+}
+
+func (c Config) ReleaseUseSparseEncoding() bool {
+	return c.config.productVariables.GetBuildFlagBool("RELEASE_SOONG_SPARSE_ENCODING")
+}
+
+func (c Config) ReleaseUseUncompressedFonts() bool {
+	return c.config.productVariables.GetBuildFlagBool("RELEASE_SOONG_UNCOMPRESSED_FONTS")
+}
+
+func (c Config) ReleaseAconfigStorageVersion() string {
+	if val, exists := c.GetBuildFlag("RELEASE_ACONFIG_STORAGE_VERSION"); exists {
+		return val
+	} else {
+		// Default value is 2.
+		return "2"
+	}
+}
+
+// TODO: b/414412266 Remove this flag after feature released.
+func (c Config) ReleaseJarjarFlagsInFramework() bool {
+	return c.GetBuildFlagBool("RELEASE_JARJAR_FLAGS_IN_FRAMEWORK")
+}
+
+func (c Config) ReleaseMainlineBetaNamespaceConfig() string {
+	if val, exists := c.GetBuildFlag("RELEASE_MAINLINE_BETA_NAMESPACE_CONFIG"); exists {
+		return val
+	} else {
+		return ""
+	}
+}
+
+func (c Config) ReleaseRemoveBetaFlagsFromAconfigFlagsPb() bool {
+	return c.GetBuildFlagBool("RELEASE_REMOVE_BETA_FLAGS_FROM_ACONFIG_FLAGS_PB")
 }
 
 // A DeviceConfig object represents the configuration for a particular device
@@ -312,6 +352,14 @@ type DeviceConfig struct {
 
 // VendorConfig represents the configuration for vendor-specific behavior.
 type VendorConfig soongconfig.SoongConfig
+
+// envDeps must be a singleton. non-generic and generic configurations share a single
+// instance of envDeps.
+type envDeps struct {
+	envLock   sync.Mutex
+	envDeps   map[string]string
+	envFrozen bool
+}
 
 // Definition of general build configuration for soong_build. Some of these
 // product configuration values are read from Kati-generated soong.variables.
@@ -351,10 +399,8 @@ type config struct {
 
 	runGoTests bool
 
-	env       map[string]string
-	envLock   sync.Mutex
-	envDeps   map[string]string
-	envFrozen bool
+	env     map[string]string
+	envDeps *envDeps
 
 	// Changes behavior based on whether Kati runs after soong_build, or if soong_build
 	// runs standalone.
@@ -397,33 +443,68 @@ type config struct {
 
 	// Copy of this config struct but some product-specific variables are
 	// replaced with the generic configuration values.
-	genericConfig *config
+	genericConfigField *config
+
+	// modulesForTests stores the list of modules that exist during Soong tests.  It is nil
+	// when not running Soong tests.
+	modulesForTests *modulesForTests
 }
 
 type partialCompileFlags struct {
-	// Whether to use d8 instead of r8
+	// Whether to use d8 instead of r8.
+	// Known issue (b/428178183): Super Partition overflow is probable when
+	// many outputs are built with this flag.
 	Use_d8 bool
 
-	// Whether to disable stub validation.  This is slightly more surgical
-	// than DISABLE_STUB_VALIDATION, in that it only applies to partial
-	// compile builds.
+	// Whether to disable stub validation for partial compile builds.
+	// This is similar to setting `DISABLE_STUB_VALIDATION=true`: the
+	// validation checks are still created, but are not run by default.
+	// To run the validation checks, use `m {MODULE_NAME}-stub-validation`.
 	Disable_stub_validation bool
 
-	// Whether to disable api lint.
-	Disable_api_lint bool
+	// Whether to enable incremental java compilation.
+	Enable_inc_javac bool
+
+	// Whether to use the kotlin-incremental-client when compiling .kt files.
+	Enable_inc_kotlin bool
+
+	// Whether to enable incremental d8
+	Enable_inc_d8 bool
+
+	// Whether to enable passing dependencies incrementally from kotlin to java.
+	Enable_inc_kotlin_java_dep bool
+	// Whether to enable incremental d8 when outside platform builds.
+	Enable_inc_d8_outside_platform bool
 
 	// Add others as needed.
 }
 
-// These are the flags when `SOONG_PARTIAL_COMPILE` is empty or not set.
-var defaultPartialCompileFlags = partialCompileFlags{}
+// These are the flags when `SOONG_PARTIAL_COMPILE=false`.
+var falsePartialCompileFlags = partialCompileFlags{}
 
 // These are the flags when `SOONG_PARTIAL_COMPILE=true`.
-var enabledPartialCompileFlags = partialCompileFlags{
-	Use_d8:                  true,
-	Disable_stub_validation: false,
-	Disable_api_lint:        false,
+var truePartialCompileFlags = partialCompileFlags{
+	Use_d8:                         false,
+	Disable_stub_validation:        true,
+	Enable_inc_kotlin:              true,
+	Enable_inc_javac:               true,
+	Enable_inc_d8:                  true,
+	Enable_inc_kotlin_java_dep:     true,
+	Enable_inc_d8_outside_platform: true,
 }
+
+// These are the flags when `SOONG_PARTIAL_COMPILE=all`.
+// Include everything from `SOONG_PARTIAL_COMPILE=true`, and flags
+// that have known issues.
+var allPartialCompileFlags = func() (flags partialCompileFlags) {
+	flags = truePartialCompileFlags
+	// b/428178183
+	flags.Use_d8 = true
+	return
+}()
+
+// These are the flags when `SOONG_PARTIAL_COMPILE=default`.
+var defaultPartialCompileFlags = falsePartialCompileFlags
 
 type deviceConfig struct {
 	config *config
@@ -445,9 +526,10 @@ type jsonConfigurable interface {
 //
 // The user-facing documentation shows:
 //
-// - empty or not set: "The current default state"
-// - "true" or "on": enable all stable partial compile features.
-// - "false" or "off": disable partial compile completely.
+//   - empty, "false", or "off": disable partial compile completely.
+//   - "default": "The current default state"  This is the value typically assigned in
+//     `${ANDROID_BUILD_ENVIRONMENT_CONFIG_DIR}/${ANDROID_BUILD_ENVIRONMENT_CONFIG}.json`.
+//   - "true" or "on": enable all stable partial compile features.
 //
 // What we actually allow is a comma separated list of tokens, whose first
 // character may be "+" (enable) or "-" (disable).  If neither is present, "+"
@@ -464,19 +546,19 @@ func (c *config) parsePartialCompileFlags(isEngBuild bool) (partialCompileFlags,
 	}
 	value := c.Getenv("SOONG_PARTIAL_COMPILE")
 	if value == "" {
-		return defaultPartialCompileFlags, nil
+		return partialCompileFlags{}, nil
 	}
 
-	ret := defaultPartialCompileFlags
+	ret := partialCompileFlags{}
 	tokens := strings.Split(strings.ToLower(value), ",")
-	makeVal := func(state string, defaultValue bool) bool {
+	makeVal := func(state string) bool {
 		switch state {
-		case "":
-			return defaultValue
 		case "-":
 			return false
 		case "+":
 			return true
+		default:
+			panic(fmt.Errorf("Invalid state %v in parsePartialCompileFlags.makeVal", state))
 		}
 		return false
 	}
@@ -497,31 +579,50 @@ func (c *config) parsePartialCompileFlags(isEngBuild bool) (partialCompileFlags,
 			state = "+"
 		}
 		switch tok {
-		case "all":
-			// Turn on **all** of the flags.
-			ret = partialCompileFlags{
-				Use_d8:                  true,
-				Disable_stub_validation: true,
-				Disable_api_lint:        true,
-			}
-		case "true":
-			ret = enabledPartialCompileFlags
+		// Big toggle switches.
 		case "false":
-			// Set everything to false.
-			ret = partialCompileFlags{}
+			ret = falsePartialCompileFlags
+		case "default":
+			ret = defaultPartialCompileFlags
+		case "true":
+			ret = truePartialCompileFlags
+		case "all":
+			ret = allPartialCompileFlags
 
-		case "api_lint", "enable_api_lint":
-			ret.Disable_api_lint = !makeVal(state, !defaultPartialCompileFlags.Disable_api_lint)
-		case "disable_api_lint":
-			ret.Disable_api_lint = makeVal(state, defaultPartialCompileFlags.Disable_api_lint)
+		// Individual flags.
+		case "inc_d8_outside_platform", "enable_inc_d8_outside_platform":
+			ret.Enable_inc_d8_outside_platform = makeVal(state)
+		case "disable_inc_d8_outside_platform":
+			ret.Enable_inc_d8_outside_platform = !makeVal(state)
+
+		case "inc_d8", "enable_inc_d8":
+			ret.Enable_inc_d8 = makeVal(state)
+		case "disable_inc_d8":
+			ret.Enable_inc_d8 = !makeVal(state)
+
+		case "inc_javac", "enable_inc_javac":
+			ret.Enable_inc_javac = makeVal(state)
+		case "disable_inc_javac":
+			ret.Enable_inc_javac = !makeVal(state)
+
+		case "inc_kotlin", "enable_inc_kotlin":
+			ret.Enable_inc_kotlin = makeVal(state)
+		case "disable_inc_kotlin":
+			ret.Enable_inc_kotlin = !makeVal(state)
+
+		case "inc_kotlin_java_dep", "enable_inc_kotlin_java_dep":
+			ret.Enable_inc_kotlin_java_dep = makeVal(state)
+		case "disable_inc_kotlin_java_dep":
+			ret.Enable_inc_kotlin_java_dep = !makeVal(state)
 
 		case "stub_validation", "enable_stub_validation":
-			ret.Disable_stub_validation = !makeVal(state, !defaultPartialCompileFlags.Disable_stub_validation)
+			ret.Disable_stub_validation = !makeVal(state)
 		case "disable_stub_validation":
-			ret.Disable_stub_validation = makeVal(state, defaultPartialCompileFlags.Disable_stub_validation)
+			ret.Disable_stub_validation = makeVal(state)
 
 		case "use_d8":
-			ret.Use_d8 = makeVal(state, defaultPartialCompileFlags.Use_d8)
+			ret.Use_d8 = makeVal(state)
+
 		default:
 			return partialCompileFlags{}, fmt.Errorf("Unknown SOONG_PARTIAL_COMPILE value: %v", tok)
 		}
@@ -671,9 +772,12 @@ func initConfig(cmdArgs CmdArgs, availableEnv map[string]string) (*config, error
 		moduleListFile: cmdArgs.ModuleListFile,
 		fs:             pathtools.NewOsFs(absSrcDir),
 
+		envDeps: &envDeps{},
 		OncePer: &OncePer{},
 
 		buildFromSourceStub: cmdArgs.BuildFromSourceStub,
+
+		katiEnabled: cmdArgs.KatiEnabled,
 	}
 	variant, ok := os.LookupEnv("TARGET_BUILD_VARIANT")
 	isEngBuild := !ok || variant == "eng"
@@ -702,11 +806,6 @@ func initConfig(cmdArgs CmdArgs, availableEnv map[string]string) (*config, error
 	err = loadConfig(newConfig)
 	if err != nil {
 		return &config{}, err
-	}
-
-	KatiEnabledMarkerFile := filepath.Join(cmdArgs.SoongOutDir, ".soong.kati_enabled")
-	if _, err := os.Stat(absolutePath(KatiEnabledMarkerFile)); err == nil {
-		newConfig.katiEnabled = true
 	}
 
 	determineBuildOS(newConfig)
@@ -771,7 +870,6 @@ func initConfig(cmdArgs CmdArgs, availableEnv map[string]string) (*config, error
 			newConfig.BuildMode = mode
 		}
 	}
-	setBuildMode(cmdArgs.ModuleGraphFile, GenerateModuleGraph)
 	setBuildMode(cmdArgs.DocFile, GenerateDocFile)
 
 	newConfig.productVariables.Build_from_text_stub = boolPtr(newConfig.BuildFromTextStub())
@@ -785,9 +883,9 @@ func initConfig(cmdArgs CmdArgs, availableEnv map[string]string) (*config, error
 // A generic tag may have a string or an int value for the generic configuration.
 // If the value is "unset", generic configuration will unset the variable.
 func overrideGenericConfig(config *config) {
-	config.genericConfig.isGeneric = true
-	type_pv := reflect.TypeOf(config.genericConfig.productVariables)
-	value_pv := reflect.ValueOf(&config.genericConfig.productVariables)
+	config.genericConfigField.isGeneric = true
+	type_pv := reflect.TypeOf(config.genericConfigField.productVariables)
+	value_pv := reflect.ValueOf(&config.genericConfigField.productVariables)
 	for i := range type_pv.NumField() {
 		type_pv_field := type_pv.Field(i)
 		generic_value := type_pv_field.Tag.Get("generic")
@@ -832,10 +930,11 @@ func overrideGenericConfig(config *config) {
 		}
 	}
 
-	// OncePer must be a singleton.
-	config.genericConfig.OncePer = config.OncePer
+	// envDeps and OncePer must be singletons.
+	config.genericConfigField.envDeps = config.envDeps
+	config.genericConfigField.OncePer = config.OncePer
 	// keep the device name to get the install path.
-	config.genericConfig.deviceNameToInstall = config.deviceNameToInstall
+	config.genericConfigField.deviceNameToInstall = config.deviceNameToInstall
 }
 
 // NewConfig creates a new Config object. It also loads the config file, if
@@ -848,7 +947,7 @@ func NewConfig(cmdArgs CmdArgs, availableEnv map[string]string) (Config, error) 
 	}
 
 	// Initialize generic configuration.
-	config.genericConfig, err = initConfig(cmdArgs, availableEnv)
+	config.genericConfigField, err = initConfig(cmdArgs, availableEnv)
 	// Update product specific variables with the generic configuration.
 	overrideGenericConfig(config)
 
@@ -887,6 +986,7 @@ func (c *config) mockFileSystem(bp string, fs map[string][]byte) {
 
 func (c *config) SetAllowMissingDependencies() {
 	c.productVariables.Allow_missing_dependencies = proptools.BoolPtr(true)
+	c.genericConfigField.productVariables.Allow_missing_dependencies = proptools.BoolPtr(true)
 }
 
 // BlueprintToolLocation returns the directory containing build system tools
@@ -968,17 +1068,17 @@ func (c *config) CpPreserveSymlinksFlags() string {
 func (c *config) Getenv(key string) string {
 	var val string
 	var exists bool
-	c.envLock.Lock()
-	defer c.envLock.Unlock()
-	if c.envDeps == nil {
-		c.envDeps = make(map[string]string)
+	c.envDeps.envLock.Lock()
+	defer c.envDeps.envLock.Unlock()
+	if c.envDeps.envDeps == nil {
+		c.envDeps.envDeps = make(map[string]string)
 	}
-	if val, exists = c.envDeps[key]; !exists {
-		if c.envFrozen {
+	if val, exists = c.envDeps.envDeps[key]; !exists {
+		if c.envDeps.envFrozen {
 			panic("Cannot access new environment variables after envdeps are frozen")
 		}
 		val, _ = c.env[key]
-		c.envDeps[key] = val
+		c.envDeps.envDeps[key] = val
 	}
 	return val
 }
@@ -1005,13 +1105,17 @@ func (c *config) TargetsJava21() bool {
 	return c.productVariables.GetBuildFlagBool("RELEASE_TARGET_JAVA_21")
 }
 
+func (c *config) BuildWithJdk25() bool {
+	return c.productVariables.GetBuildFlagBool("RELEASE_BUILD_WITH_JDK_25")
+}
+
 // EnvDeps returns the environment variables this build depends on. The first
 // call to this function blocks future reads from the environment.
 func (c *config) EnvDeps() map[string]string {
-	c.envLock.Lock()
-	defer c.envLock.Unlock()
-	c.envFrozen = true
-	return c.envDeps
+	c.envDeps.envLock.Lock()
+	defer c.envDeps.envLock.Unlock()
+	c.envDeps.envFrozen = true
+	return c.envDeps.envDeps
 }
 
 func (c *config) KatiEnabled() bool {
@@ -1069,9 +1173,23 @@ func (c *config) BuildThumbprintFile(ctx PathContext) Path {
 	return PathForArbitraryOutput(ctx, "target", "product", *c.deviceNameToInstall, String(c.productVariables.BuildThumbprintFile))
 }
 
+func (c *config) BuildDateFile(ctx PathContext) Path {
+	buildDateFile := c.Getenv("BUILD_DATETIME_FILE")
+	relPath, err := filepath.Rel(ctx.Config().OutDir(), buildDateFile)
+	if err != nil {
+		panic("build_date.txt is outside of OUT_DIR")
+	}
+	return PathForArbitraryOutput(ctx, relPath)
+}
+
 // DeviceName returns the name of the current device target.
 // TODO: take an AndroidModuleContext to select the device name for multi-device builds
 func (c *config) DeviceName() string {
+	if c.isGeneric {
+		// The config is called from a context of a module which returns true
+		// from UseGenericConfig(). This is not allowed.
+		panic("The DeviceName() function cannot be called when using the generic configuration. To call DeviceName(), ensure the module's UseGenericConfig() function returns \"false\".")
+	}
 	return *c.productVariables.DeviceName
 }
 
@@ -1080,6 +1198,11 @@ func (c *config) DeviceName() string {
 //
 // NOTE: Do not base conditional logic on this value. It may break product inheritance.
 func (c *config) DeviceProduct() string {
+	if c.isGeneric {
+		// The config is called from a context of a module which returns true
+		// from UseGenericConfig(). This is not allowed.
+		panic("The DeviceProduct() function cannot be called when using the generic configuration. To call DeviceProduct(), ensure the module's UseGenericConfig() function returns \"false\".")
+	}
 	return *c.productVariables.DeviceProduct
 }
 
@@ -1111,7 +1234,7 @@ func (c *config) PlatformVersionName() string {
 }
 
 func (c *config) PlatformSdkVersion() ApiLevel {
-	return uncheckedFinalApiLevel(*c.productVariables.Platform_sdk_version)
+	return UncheckedFinalApiLevel(*c.productVariables.Platform_sdk_version)
 }
 
 func (c *config) PlatformSdkVersionFull() string {
@@ -1167,13 +1290,13 @@ func (c *config) PlatformVersionKnownCodenames() string {
 }
 
 func (c *config) MinSupportedSdkVersion() ApiLevel {
-	return uncheckedFinalApiLevel(21)
+	return UncheckedFinalApiLevel(21)
 }
 
 func (c *config) FinalApiLevels() []ApiLevel {
 	var levels []ApiLevel
 	for i := 1; i <= c.PlatformSdkVersion().FinalOrFutureInt(); i++ {
-		levels = append(levels, uncheckedFinalApiLevel(i))
+		levels = append(levels, UncheckedFinalApiLevel(i))
 	}
 	return levels
 }
@@ -1287,6 +1410,11 @@ func (c *config) DefaultAppCertificate(ctx PathContext) (pem, key SourcePath) {
 	return defaultDir.Join(ctx, "testkey.x509.pem"), defaultDir.Join(ctx, "testkey.pk8")
 }
 
+func (c *config) DefaultSystemDevCertificate(ctx PathContext) (pem, key SourcePath) {
+	dir := String(c.productVariables.DefaultSystemDevCertificate)
+	return PathForSource(ctx, dir+".x509.pem"), PathForSource(ctx, dir+".pk8")
+}
+
 func (c *config) ExtraOtaKeys(ctx PathContext, recovery bool) []SourcePath {
 	var otaKeys []string
 	if recovery {
@@ -1336,6 +1464,15 @@ func (c *config) MainlineSepolicyDevCertificatesDir(ctx ModuleContext) SourcePat
 	return c.DefaultAppCertificateDir(ctx)
 }
 
+// Certificate for the Bluetooth module sepolicy context
+func (c *config) MainlineBluetoothSepolicyDevCertificatesDir(ctx ModuleContext) SourcePath {
+	cert := String(c.productVariables.MainlineBluetoothSepolicyDevCertificates)
+	if cert != "" {
+		return PathForSource(ctx, cert)
+	}
+	return c.DefaultAppCertificateDir(ctx)
+}
+
 // AllowMissingDependencies configures Blueprint/Soong to not fail when modules
 // are configured to depend on non-existent modules. Note that this does not
 // affect missing input dependencies at the Ninja level.
@@ -1350,7 +1487,13 @@ func (c *config) UnbundledBuild() bool {
 
 // Returns true if building apps that aren't bundled with the platform.
 // UnbundledBuild() is always true when this is true.
-func (c *config) UnbundledBuildApps() bool {
+func (c *config) UnbundledBuildApps() []string {
+	return c.productVariables.Unbundled_build_apps
+}
+
+// Returns true if building apps that aren't bundled with the platform.
+// UnbundledBuild() is always true when this is true.
+func (c *config) HasUnbundledBuildApps() bool {
 	return len(c.productVariables.Unbundled_build_apps) > 0
 }
 
@@ -1427,10 +1570,6 @@ func (c *config) Android64() bool {
 	return false
 }
 
-func (c *config) UseGoma() bool {
-	return Bool(c.productVariables.UseGoma)
-}
-
 func (c *config) UseABFS() bool {
 	return Bool(c.productVariables.UseABFS)
 }
@@ -1439,20 +1578,24 @@ func (c *config) UseRBE() bool {
 	return Bool(c.productVariables.UseRBE)
 }
 
+func (c *config) UseREWrapper() bool {
+	return Bool(c.productVariables.UseREWrapper)
+}
+
 func (c *config) UseRBEJAVAC() bool {
-	return Bool(c.productVariables.UseRBEJAVAC)
+	return Bool(c.productVariables.UseRBEJAVAC) && c.UseREWrapper()
 }
 
 func (c *config) UseRBER8() bool {
-	return Bool(c.productVariables.UseRBER8)
+	return Bool(c.productVariables.UseRBER8) && c.UseREWrapper()
 }
 
 func (c *config) UseRBED8() bool {
-	return Bool(c.productVariables.UseRBED8)
+	return Bool(c.productVariables.UseRBED8) && c.UseREWrapper()
 }
 
 func (c *config) UseRemoteBuild() bool {
-	return c.UseGoma() || c.UseRBE()
+	return c.UseRBE() && c.UseREWrapper()
 }
 
 func (c *config) RunErrorProne() bool {
@@ -1653,6 +1796,14 @@ func (c *config) VendorApiLevelFrozen() bool {
 
 func (c *config) katiPackageMkDir() string {
 	return filepath.Join(c.soongOutDir, "kati_packaging"+c.katiSuffix)
+}
+
+func (c *config) DisableNoticeXmlGeneration() bool {
+	return c.IsEnvTrue("DISABLE_NOTICE_XML_GENERATION")
+}
+
+func (c *config) CompatibilityTestcases() map[string]CompatibilityTestcaseJSON {
+	return c.productVariables.CompatibilityTestcases
 }
 
 func (c *deviceConfig) Arches() []Arch {
@@ -1914,7 +2065,7 @@ func findOverrideValue(overrides []string, name string, errorMsg string) (newVal
 			// This shouldn't happen as this is first checked in make, but just in case.
 			panic(fmt.Errorf(errorMsg, o))
 		}
-		if matchPattern(split[0], name) {
+		if MatchPattern(split[0], name) {
 			return substPattern(split[0], split[1], name), true
 		}
 	}
@@ -1998,7 +2149,7 @@ func (c *config) ForceApexSymlinkOptimization() bool {
 }
 
 func (c *config) ApexCompressionEnabled() bool {
-	return Bool(c.productVariables.CompressedApex) && !c.UnbundledBuildApps()
+	return Bool(c.productVariables.CompressedApex) && !c.HasUnbundledBuildApps()
 }
 
 func (c *config) DefaultApexPayloadType() string {
@@ -2103,16 +2254,16 @@ func (c *deviceConfig) BoardSepolicyVers() string {
 	return c.PlatformSepolicyVersion()
 }
 
-func (c *deviceConfig) SystemExtSepolicyPrebuiltApiDir() string {
-	return String(c.config.productVariables.SystemExtSepolicyPrebuiltApiDir)
+func (c *deviceConfig) SystemExtSepolicyPrebuiltApiDirs() []string {
+	return c.config.productVariables.SystemExtSepolicyPrebuiltApiDirs
 }
 
-func (c *deviceConfig) ProductSepolicyPrebuiltApiDir() string {
-	return String(c.config.productVariables.ProductSepolicyPrebuiltApiDir)
+func (c *deviceConfig) ProductSepolicyPrebuiltApiDirs() []string {
+	return c.config.productVariables.ProductSepolicyPrebuiltApiDirs
 }
 
 func (c *deviceConfig) IsPartnerTrebleSepolicyTestEnabled() bool {
-	return c.SystemExtSepolicyPrebuiltApiDir() != "" || c.ProductSepolicyPrebuiltApiDir() != ""
+	return len(c.SystemExtSepolicyPrebuiltApiDirs()) > 0 || len(c.ProductSepolicyPrebuiltApiDirs()) > 0
 }
 
 func createDirsMap(previous map[string]bool, dirs []string) (map[string]bool, error) {
@@ -2146,7 +2297,7 @@ func (c *deviceConfig) ShippingApiLevel() ApiLevel {
 		return NoneApiLevel
 	}
 	apiLevel, _ := strconv.Atoi(*c.config.productVariables.Shipping_api_level)
-	return uncheckedFinalApiLevel(apiLevel)
+	return UncheckedFinalApiLevel(apiLevel)
 }
 
 func (c *deviceConfig) BuildBrokenPluginValidation() []string {
@@ -2193,12 +2344,8 @@ func (c *deviceConfig) BuildBrokenDupSysprop() bool {
 	return c.config.productVariables.BuildBrokenDupSysprop
 }
 
-func (c *config) BuildWarningBadOptionalUsesLibsAllowlist() []string {
-	return c.productVariables.BuildWarningBadOptionalUsesLibsAllowlist
-}
-
-func (c *deviceConfig) GenruleSandboxing() bool {
-	return Bool(c.config.productVariables.GenruleSandboxing)
+func (c *deviceConfig) BuildBrokenPrebuiltELFFiles() bool {
+	return c.config.productVariables.BuildBrokenPrebuiltELFFiles
 }
 
 func (c *deviceConfig) RequiresInsecureExecmemForSwiftshader() bool {
@@ -2257,17 +2404,6 @@ func (c *config) UseHostMusl() bool {
 	return Bool(c.productVariables.HostMusl)
 }
 
-// ApiSurfaces directory returns the source path inside the api_surfaces repo
-// (relative to workspace root).
-func (c *config) ApiSurfacesDir(s ApiSurface, version string) string {
-	return filepath.Join(
-		"build",
-		"bazel",
-		"api_surfaces",
-		s.String(),
-		version)
-}
-
 func (c *config) JavaCoverageEnabled() bool {
 	return c.IsEnvTrue("EMMA_INSTRUMENT") || c.IsEnvTrue("EMMA_INSTRUMENT_STATIC") || c.IsEnvTrue("EMMA_INSTRUMENT_FRAMEWORK")
 }
@@ -2299,6 +2435,10 @@ func (c *config) GetBuildFlag(name string) (string, bool) {
 	return val, ok
 }
 
+func (c *config) GetBuildFlagBool(name string) bool {
+	return c.productVariables.GetBuildFlagBool(name)
+}
+
 func (c *config) UseOptimizedResourceShrinkingByDefault() bool {
 	return c.productVariables.GetBuildFlagBool("RELEASE_USE_OPTIMIZED_RESOURCE_SHRINKING_BY_DEFAULT")
 }
@@ -2317,6 +2457,10 @@ func (c *config) UseR8StoreStoreFenceConstructorInlining() bool {
 
 func (c *config) UseR8GlobalCheckNotNullFlags() bool {
 	return c.productVariables.GetBuildFlagBool("RELEASE_R8_GLOBAL_CHECK_NOT_NULL_FLAGS")
+}
+
+func (c *config) UseR8MinimizedSyntheticNames() bool {
+	return c.productVariables.GetBuildFlagBool("RELEASE_R8_MINIMIZE_SYNTHETIC_NAMES")
 }
 
 func (c *config) UseDexV41() bool {
@@ -2357,6 +2501,7 @@ var (
 		"RELEASE_APEX_CONTRIBUTIONS_SWCODEC":                 "com.android.media.swcodec",
 		"RELEASE_APEX_CONTRIBUTIONS_STATSD":                  "com.android.os.statsd",
 		"RELEASE_APEX_CONTRIBUTIONS_TELEMETRY_TVP":           "",
+		"RELEASE_APEX_CONTRIBUTIONS_TELEPHONY2":              "com.android.telephonycore",
 		"RELEASE_APEX_CONTRIBUTIONS_TZDATA":                  "com.android.tzdata",
 		"RELEASE_APEX_CONTRIBUTIONS_UPROBESTATS":             "com.android.uprobestats",
 		"RELEASE_APEX_CONTRIBUTIONS_UWB":                     "com.android.uwb",
@@ -2392,24 +2537,22 @@ func (c *config) ProductDefaultWifiChannels() []string {
 	return c.productVariables.ProductDefaultWifiChannels
 }
 
-func (c *config) BoardUseVbmetaDigestInFingerprint() bool {
-	return Bool(c.productVariables.BoardUseVbmetaDigestInFingerprint)
-}
-
 func (c *config) OemProperties() []string {
 	return c.productVariables.OemProperties
 }
 
 func (c *config) UseDebugArt() bool {
-	// If the ArtTargetIncludeDebugBuild product variable is set then return its value.
-	if c.productVariables.ArtTargetIncludeDebugBuild != nil {
-		return Bool(c.productVariables.ArtTargetIncludeDebugBuild)
-	}
-
 	// If the RELEASE_APEX_CONTRIBUTIONS_ART build flag is set to use a prebuilt ART apex
 	// then don't use the debug apex.
 	if val, ok := c.GetBuildFlag("RELEASE_APEX_CONTRIBUTIONS_ART"); ok && val != "" {
 		return false
+	}
+
+	// If the ArtTargetIncludeDebugBuild product variable is set then return its value.
+	// The prebuilt APEX check overrides this to be tolerant wrt build logic
+	// that sets PRODUCT_ART_TARGET_INCLUDE_DEBUG_BUILD regardless of module source.
+	if c.productVariables.ArtTargetIncludeDebugBuild != nil {
+		return Bool(c.productVariables.ArtTargetIncludeDebugBuild)
 	}
 
 	// Default to the debug apex for eng builds.
@@ -2483,6 +2626,31 @@ func (c *config) DeviceManifestFiles() []string {
 	return c.productVariables.DeviceManifestFiles
 }
 
+func (c *config) DeviceManifestSkus() []string {
+	return c.productVariables.DeviceManifestSkus
+}
+
 func (c *config) OdmManifestFiles() []string {
 	return c.productVariables.OdmManifestFiles
+}
+
+func (c *config) OdmManifestSkus() []string {
+	return c.productVariables.OdmManifestSkus
+}
+
+func (c *config) EnforceSELinuxTrebleLabeling() bool {
+	return Bool(c.productVariables.EnforceSELinuxTrebleLabeling)
+}
+
+func (c *config) SELinuxTrebleLabelingTrackingListFile(ctx PathContext) Path {
+	path := String(c.productVariables.SELinuxTrebleLabelingTrackingListFile)
+	if path == "" {
+		return nil
+	}
+
+	return PathForSource(ctx, path)
+}
+
+func (c *config) BuildOTAPackage() bool {
+	return Bool(c.productVariables.BuildOTAPackage)
 }

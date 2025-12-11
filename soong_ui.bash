@@ -28,6 +28,7 @@ case $(uname -s) in
 esac
 
 setup_cog_env_if_needed
+set_network_file_system_type_env_var
 
 # Save the current PWD for use in soong_ui
 export ORIGINAL_PWD=${PWD}

@@ -55,12 +55,13 @@ func NewNinjaReader(ctx logger.Logger, status ToolStatus, fifo string) *NinjaRea
 }
 
 type NinjaReader struct {
-	status     ToolStatus
-	fifo       string
-	forceClose chan bool
-	done       chan bool
-	cancelOpen chan bool
-	running    map[uint32]*Action
+	status       ToolStatus
+	fifo         string
+	forceClose   chan bool
+	done         chan bool
+	cancelOpen   chan bool
+	running      map[uint32]*Action
+	hasAnyOutput bool
 }
 
 const NINJA_READER_CLOSE_TIMEOUT = 5 * time.Second
@@ -240,7 +241,8 @@ func (n *NinjaReader) run() {
 					err = fmt.Errorf("exited with code: %d", exitCode)
 				}
 
-				outputWithErrorHint := errorHintGenerator.GetOutputWithErrorHint(msg.EdgeFinished.GetOutput(), exitCode)
+				rawOutput := msg.EdgeFinished.GetOutput()
+				outputWithErrorHint := errorHintGenerator.GetOutputWithErrorHint(rawOutput, exitCode)
 				n.status.FinishAction(ActionResult{
 					Action: started,
 					Output: outputWithErrorHint,
@@ -258,6 +260,8 @@ func (n *NinjaReader) run() {
 						Tags:                       msg.EdgeFinished.GetTags(),
 					},
 				})
+
+				n.hasAnyOutput = n.hasAnyOutput || len(rawOutput) > 0
 			}
 		}
 		if msg.Message != nil {
@@ -279,6 +283,12 @@ func (n *NinjaReader) run() {
 			n.status.Finish()
 		}
 	}
+}
+
+// Returns true if any command run by ninja had any output to stdout/stderr. Be sure to only
+// call this after close() to ensure all commands have been seen.
+func (n *NinjaReader) HasAnyOutput() bool {
+	return n.hasAnyOutput
 }
 
 func readVarInt(r *bufio.Reader) (int, error) {

@@ -133,8 +133,10 @@ func TestJavaSdkLibrary(t *testing.T) {
 	expectedFooExportedComponents := []string{
 		"foo-removed.api.combined.public.latest",
 		"foo-removed.api.combined.system.latest",
+		"foo-removed.api.combined.test.latest",
 		"foo.api.combined.public.latest",
 		"foo.api.combined.system.latest",
+		"foo.api.combined.test.latest",
 		"foo.stubs",
 		"foo.stubs.exportable",
 		"foo.stubs.exportable.system",
@@ -180,11 +182,11 @@ func TestJavaSdkLibrary(t *testing.T) {
 
 	fooImplDexJar := result.ModuleForTests(t, "foo.impl", "android_common").Rule("d8")
 	// tests if kotlinc generated files are NOT excluded from output of foo.impl.
-	android.AssertStringDoesNotContain(t, "foo.impl dex", fooImplDexJar.BuildParams.Args["mergeZipsFlags"], "-stripFile META-INF/*.kotlin_module")
+	android.AssertStringDoesNotContain(t, "foo.impl dex", fooImplDexJar.BuildParams.Args["mergeZipsFlags"], "-stripFile META-INF/**/*.kotlin_module")
 
 	barImplDexJar := result.ModuleForTests(t, "bar.impl", "android_common").Rule("d8")
 	// tests if kotlinc generated files are excluded from output of bar.impl.
-	android.AssertStringDoesContain(t, "bar.impl dex", barImplDexJar.BuildParams.Args["mergeZipsFlags"], "-stripFile META-INF/*.kotlin_module")
+	android.AssertStringDoesContain(t, "bar.impl dex", barImplDexJar.BuildParams.Args["mergeZipsFlags"], "-stripFile META-INF/**/*.kotlin_module")
 }
 
 func TestJavaSdkLibrary_UpdatableLibrary(t *testing.T) {
@@ -992,6 +994,7 @@ func testJavaSdkLibraryImport_Preferred(t *testing.T, prefer string, preparer an
 	// Make sure that dependencies on child modules use the prebuilt when preferred.
 	CheckModuleDependencies(t, result.TestContext, "combined", "android_common", []string{
 		// Each use of :sdklib{...} adds a dependency onto prebuilt_sdklib.
+		`AndroidGlobalLintChecker`,
 		`prebuilt_sdklib`,
 		`prebuilt_sdklib.stubs`,
 		`prebuilt_sdklib.stubs.source`,

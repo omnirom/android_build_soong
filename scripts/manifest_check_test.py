@@ -45,18 +45,17 @@ class EnforceUsesLibrariesTest(unittest.TestCase):
     """Unit tests for add_extract_native_libs function."""
 
     def run_test(self, xml, apk, uses_libraries=(), optional_uses_libraries=(),
-                 missing_optional_uses_libraries=()):  #pylint: disable=dangerous-default-value
+                 missing_optional_uses_libraries=(),
+                 bootclasspath_libs=()):  #pylint: disable=dangerous-default-value
         doc = minidom.parseString(xml)
         try:
             relax = False
             manifest_check.enforce_uses_libraries(
                 doc, uses_libraries, optional_uses_libraries, missing_optional_uses_libraries,
-                relax, False, 'path/to/X/AndroidManifest.xml')
-            manifest_check.enforce_uses_libraries(apk, uses_libraries,
-                                                  optional_uses_libraries,
-                                                  missing_optional_uses_libraries,
-                                                  relax, True,
-                                                  'path/to/X/X.apk')
+                relax, False, 'path/to/X/AndroidManifest.xml', bootclasspath_libs)
+            manifest_check.enforce_uses_libraries(
+                apk, uses_libraries, optional_uses_libraries, missing_optional_uses_libraries,
+                relax, True, 'path/to/X/X.apk', bootclasspath_libs)
             return True
         except manifest_check.ManifestMismatchError:
             return False
@@ -258,6 +257,15 @@ class EnforceUsesLibrariesTest(unittest.TestCase):
             apk,
             uses_libraries=['//x/y/z:foo'],
             optional_uses_libraries=['//x/y/z:bar', '//x/y/z:qux'])
+        self.assertTrue(matches)
+
+    def test_ignore_bootclasspath_libs(self):
+        xml = self.xml_tmpl % (uses_library_xml('foo', required_xml(True)))
+        apk = self.apk_tmpl % (uses_library_apk('foo', required_apk(True)))
+        xml = self.xml_tmpl % (uses_library_xml('bar', required_xml(False)))
+        apk = self.apk_tmpl % (uses_library_apk('bar', required_apk(False)))
+        matches = self.run_test(xml, apk, uses_libraries=[], optional_uses_libraries=[],
+            bootclasspath_libs=['foo', 'bar'])
         self.assertTrue(matches)
 
 

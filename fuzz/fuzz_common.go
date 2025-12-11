@@ -28,6 +28,8 @@ import (
 	"android/soong/android"
 )
 
+//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+
 type Lang string
 
 const (
@@ -452,6 +454,7 @@ type FuzzPackagedModule struct {
 	Data           android.Paths
 }
 
+// @auto-generate: gob
 type FuzzConfigInfo struct {
 	Vector Vector
 	// How privileged the service being fuzzed is.
@@ -474,6 +477,8 @@ type FuzzConfigInfo struct {
 	// Defaults to false.
 	UseForPresubmit bool
 }
+
+// @auto-generate: gob
 type FuzzPackagedModuleInfo struct {
 	FuzzConfig *FuzzConfigInfo
 	Dictionary android.Path
@@ -568,10 +573,10 @@ func IsValid(ctx android.ConfigurableEvaluatorContext, fuzzModule FuzzModule) bo
 
 // TODO(b/397766191): Change the signature to take ModuleProxy
 // Please only access the module's internal data through providers.
-func (s *FuzzPackager) PackageArtifacts(ctx android.SingletonContext, module android.Module, fuzzModule *FuzzPackagedModuleInfo, archDir android.OutputPath, builder *android.RuleBuilder) []FileToZip {
+func (s *FuzzPackager) PackageArtifacts(ctx android.SingletonContext, module android.ModuleProxy, fuzzModule *FuzzPackagedModuleInfo, archDir android.OutputPath, builder *android.RuleBuilder) []FileToZip {
 	// Package the corpora into a zipfile.
 	var files []FileToZip
-	if fuzzModule.Corpus != nil {
+	if len(fuzzModule.Corpus) > 0 {
 		corpusZip := archDir.Join(ctx, module.Name()+"_seed_corpus.zip")
 		command := builder.Command().BuiltTool("soong_zip").
 			Flag("-j").
@@ -582,7 +587,7 @@ func (s *FuzzPackager) PackageArtifacts(ctx android.SingletonContext, module and
 	}
 
 	// Package the data into a zipfile.
-	if fuzzModule.Data != nil {
+	if len(fuzzModule.Data) > 0 {
 		dataZip := archDir.Join(ctx, module.Name()+"_data.zip")
 		command := builder.Command().BuiltTool("soong_zip").
 			FlagWithOutput("-o ", dataZip)
@@ -609,7 +614,7 @@ func (s *FuzzPackager) PackageArtifacts(ctx android.SingletonContext, module and
 
 // TODO(b/397766191): Change the signature to take ModuleProxy
 // Please only access the module's internal data through providers.
-func (s *FuzzPackager) BuildZipFile(ctx android.SingletonContext, module android.Module, fuzzModule *FuzzPackagedModuleInfo, files []FileToZip, builder *android.RuleBuilder, archDir android.OutputPath, archString string, hostOrTargetString string, archOs ArchOs, archDirs map[ArchOs][]FileToZip) ([]FileToZip, bool) {
+func (s *FuzzPackager) BuildZipFile(ctx android.SingletonContext, module android.ModuleOrProxy, fuzzModule *FuzzPackagedModuleInfo, files []FileToZip, builder *android.RuleBuilder, archDir android.OutputPath, archString string, hostOrTargetString string, archOs ArchOs, archDirs map[ArchOs][]FileToZip) ([]FileToZip, bool) {
 	fuzzZip := archDir.Join(ctx, module.Name()+".zip")
 
 	command := builder.Command().BuiltTool("soong_zip").

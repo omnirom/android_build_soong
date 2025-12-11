@@ -86,7 +86,7 @@ func testConfig() Config {
 }
 
 func testCmd() *Cmd {
-	return Command(testContext(), testConfig(), "sandbox_test", "path/to/nsjail")
+	return Command(testContext(), testConfig(), nil, "sandbox_test", "path/to/nsjail")
 }
 
 func isExpectedMountFlag(cmdArgs []string, dirName string, expectedFlag string) bool {

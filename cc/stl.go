@@ -20,8 +20,8 @@ import (
 	"android/soong/android"
 )
 
-func getNdkStlFamily(m LinkableInterface) string {
-	family, _ := getNdkStlFamilyAndLinkType(m)
+func getNdkStlFamily(stl string) string {
+	family, _ := getNdkStlFamilyAndLinkType(stl)
 	return family
 }
 
@@ -35,8 +35,7 @@ func deduplicateStlInput(stl string) string {
 	return stl
 }
 
-func getNdkStlFamilyAndLinkType(m LinkableInterface) (string, string) {
-	stl := m.SelectedStl()
+func getNdkStlFamilyAndLinkType(stl string) (string, string) {
 	switch stl {
 	case "ndk_libc++_shared", "libc++":
 		return "libc++", "shared"
@@ -210,9 +209,9 @@ func (stl *stl) flags(ctx ModuleContext, flags Flags) Flags {
 					// (i.e. to nothing). Disable visibility annotations since
 					// we're using static libc++.
 					"-D_LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS=",
-					"-D_LIBCXXABI_DISABLE_VISIBILITY_ANNOTATIONS=",
-					// Use Win32 threads in libc++.
-					"-D_LIBCPP_HAS_THREAD_API_WIN32=")
+					"-D_LIBCXXABI_DISABLE_VISIBILITY_ANNOTATIONS=")
+				// Use Win32 threads in libc++.
+				flags.Local.CppFlags = append(flags.Local.CppFlags, "-D_LIBCPP_HAS_THREAD_API_WIN32=1")
 			}
 		}
 	case "libstdc++":

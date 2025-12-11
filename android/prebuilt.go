@@ -357,13 +357,15 @@ func IsModulePreferred(module Module) bool {
 	return true
 }
 
-func IsModulePreferredProxy(ctx OtherModuleProviderContext, module ModuleProxy) bool {
-	if OtherModulePointerProviderOrDefault(ctx, module, CommonModuleInfoProvider).ReplacedByPrebuilt {
-		// A source module that has been replaced by a prebuilt counterpart.
-		return false
-	}
-	if p, ok := OtherModuleProvider(ctx, module, PrebuiltModuleInfoProvider); ok {
-		return p.UsePrebuilt
+func IsModulePreferredProxy(ctx OtherModuleProviderContext, module ModuleOrProxy) bool {
+	if info, ok := OtherModuleProvider(ctx, module, PrebuiltInfoProvider); ok {
+		if info.ReplacedByPrebuilt {
+			// A source module that has been replaced by a prebuilt counterpart.
+			return false
+		}
+		if info.IsPrebuilt {
+			return info.UsePrebuilt
+		}
 	}
 	return true
 }
@@ -371,8 +373,13 @@ func IsModulePreferredProxy(ctx OtherModuleProviderContext, module ModuleProxy) 
 // IsModulePrebuilt returns true if the module implements PrebuiltInterface and
 // has been initialized as a prebuilt and so returns a non-nil value from the
 // PrebuiltInterface.Prebuilt() method.
-func IsModulePrebuilt(module Module) bool {
-	return GetEmbeddedPrebuilt(module) != nil
+func IsModulePrebuilt(ctx BaseModuleContext, module ModuleOrProxy) bool {
+	if EqualModules(ctx.Module(), module) {
+		return GetEmbeddedPrebuilt(ctx.Module()) != nil
+	} else {
+		info := OtherModuleProviderOrDefault(ctx, module, PrebuiltInfoProvider)
+		return info.IsPrebuilt
+	}
 }
 
 // GetEmbeddedPrebuilt returns a pointer to the embedded Prebuilt structure or
@@ -396,25 +403,27 @@ func GetEmbeddedPrebuilt(module Module) *Prebuilt {
 // run - any dependency that is registered before that will already reference
 // the right module. This function is only safe to call after all TransitionMutators
 // have run, e.g. in GenerateAndroidBuildActions.
-func PrebuiltGetPreferred(ctx BaseModuleContext, module Module) Module {
-	if !OtherModulePointerProviderOrDefault(ctx, module, CommonModuleInfoProvider).ReplacedByPrebuilt {
-		return module
-	}
-	if _, ok := OtherModuleProvider(ctx, module, PrebuiltModuleInfoProvider); ok {
-		// If we're given a prebuilt then assume there's no source module around.
-		return module
+func PrebuiltGetPreferred(ctx BaseModuleContext, module ModuleProxy) ModuleProxy {
+	if info, ok := OtherModuleProvider(ctx, module, PrebuiltInfoProvider); ok {
+		if !info.ReplacedByPrebuilt {
+			return module
+		}
+		if info.IsPrebuilt {
+			// If we're given a prebuilt then assume there's no source module around.
+			return module
+		}
 	}
 
 	sourceModDepFound := false
-	var prebuiltMod Module
+	var prebuiltMod ModuleProxy
 
 	ctx.WalkDepsProxy(func(child, parent ModuleProxy) bool {
-		if prebuiltMod != nil {
+		if !prebuiltMod.IsNil() {
 			return false
 		}
 		if EqualModules(parent, ctx.Module()) {
 			// First level: Only recurse if the module is found as a direct dependency.
-			sourceModDepFound = child == module
+			sourceModDepFound = EqualModules(child, module)
 			return sourceModDepFound
 		}
 		// Second level: Follow PrebuiltDepTag to the prebuilt.
@@ -424,7 +433,7 @@ func PrebuiltGetPreferred(ctx BaseModuleContext, module Module) Module {
 		return false
 	})
 
-	if prebuiltMod == nil {
+	if prebuiltMod.IsNil() {
 		if !sourceModDepFound {
 			panic(fmt.Errorf("Failed to find source module as a direct dependency: %s", module))
 		} else {
@@ -444,6 +453,7 @@ func RegisterPrebuiltsPreDepsMutators(ctx RegisterMutatorsContext) {
 }
 
 func RegisterPrebuiltsPostDepsMutators(ctx RegisterMutatorsContext) {
+	ctx.BottomUp("prebuilt_provider", prebuiltProviderMutator)
 	ctx.BottomUp("prebuilt_postdeps", PrebuiltPostDepsMutator).UsesReplaceDependencies()
 }
 
@@ -496,15 +506,13 @@ func PrebuiltSourceDepsMutator(ctx BottomUpMutatorContext) {
 
 // checkInvariantsForSourceAndPrebuilt checks if invariants are kept when replacing
 // source with prebuilt. Note that the current module for the context is the source module.
-func checkInvariantsForSourceAndPrebuilt(ctx BaseModuleContext, s, p Module) {
-	if _, ok := s.(OverrideModule); ok {
-		// skip the check when the source module is `override_X` because it's only a placeholder
-		// for the actual source module. The check will be invoked for the actual module.
-		return
-	}
-	if sourcePartition, prebuiltPartition := s.PartitionTag(ctx.DeviceConfig()), p.PartitionTag(ctx.DeviceConfig()); sourcePartition != prebuiltPartition {
-		ctx.OtherModuleErrorf(p, "partition is different: %s(%s) != %s(%s)",
-			sourcePartition, ctx.ModuleName(), prebuiltPartition, ctx.OtherModuleName(p))
+func checkInvariantsForSourceAndPrebuilt(ctx BaseModuleContext, sourcePartition string,
+	prebuiltPartitions, prebuiltModuleNames []string) {
+	for i, prebuiltPartition := range prebuiltPartitions {
+		if sourcePartition != prebuiltPartition {
+			ctx.ModuleErrorf("partition is different: %s(%s) != %s(%s)",
+				sourcePartition, ctx.ModuleName(), prebuiltPartition, prebuiltModuleNames[i])
+		}
 	}
 }
 
@@ -525,7 +533,7 @@ func PrebuiltSelectModuleMutator(ctx BottomUpMutatorContext) {
 		}
 		// Propagate the provider received from `all_apex_contributions`
 		// to the source module
-		ctx.VisitDirectDepsWithTag(AcDepTag, func(am Module) {
+		ctx.VisitDirectDepsProxyWithTag(AcDepTag, func(am ModuleProxy) {
 			psi, _ := OtherModuleProvider(ctx, am, PrebuiltSelectionInfoProvider)
 			SetProvider(ctx, PrebuiltSelectionInfoProvider, psi)
 		})
@@ -533,15 +541,23 @@ func PrebuiltSelectModuleMutator(ctx BottomUpMutatorContext) {
 	} else if s, ok := ctx.Module().(Module); ok {
 		// Use `all_apex_contributions` for source vs prebuilt selection.
 		psi := PrebuiltSelectionInfoMap{}
-		ctx.VisitDirectDepsWithTag(PrebuiltDepTag, func(am Module) {
+		ctx.VisitDirectDepsProxyWithTag(PrebuiltDepTag, func(am ModuleProxy) {
 			// The value of psi gets overwritten with the provider from the last visited prebuilt.
 			// But all prebuilts have the same value of the provider, so this should be idempontent.
 			psi, _ = OtherModuleProvider(ctx, am, PrebuiltSelectionInfoProvider)
 		})
-		ctx.VisitDirectDepsWithTag(PrebuiltDepTag, func(prebuiltModule Module) {
+		ctx.visitDirectDepsWithTag(PrebuiltDepTag, func(prebuiltModule Module) {
 			p := GetEmbeddedPrebuilt(prebuiltModule)
 			if p.usePrebuilt(ctx, s, prebuiltModule) {
-				checkInvariantsForSourceAndPrebuilt(ctx, s, prebuiltModule)
+				// skip the check when the source module is `override_X` because it's only a placeholder
+				// for the actual source module. The check will be invoked for the actual module.
+				if _, isOverride := s.(OverrideModule); !isOverride {
+					sourcePartition := s.PartitionTag(ctx.DeviceConfig())
+					prebuiltPartition := prebuiltModule.PartitionTag(ctx.DeviceConfig())
+					checkInvariantsForSourceAndPrebuilt(ctx, sourcePartition, []string{prebuiltPartition},
+						[]string{ctx.OtherModuleName(prebuiltModule)})
+
+				}
 
 				p.properties.UsePrebuilt = true
 				s.ReplacedByPrebuilt()
@@ -552,11 +568,14 @@ func PrebuiltSelectModuleMutator(ctx BottomUpMutatorContext) {
 		// Add source
 		allModules := []Module{s}
 		// Add each prebuilt
-		ctx.VisitDirectDepsWithTag(PrebuiltDepTag, func(prebuiltModule Module) {
+		ctx.visitDirectDepsWithTag(PrebuiltDepTag, func(prebuiltModule Module) {
 			allModules = append(allModules, prebuiltModule)
 		})
 		hideUnflaggedModules(ctx, psi, allModules)
+	}
 
+	if ac, ok := m.(*apexContributions); ok {
+		ac.setApexContributionsInfoProvider(ctx)
 	}
 
 	// If this is `all_apex_contributions`, set a provider containing
@@ -564,6 +583,33 @@ func PrebuiltSelectModuleMutator(ctx BottomUpMutatorContext) {
 	if am, ok := m.(*allApexContributions); ok {
 		am.SetPrebuiltSelectionInfoProvider(ctx)
 	}
+}
+
+var PrebuiltInfoProvider = blueprint.NewMutatorProvider[PrebuiltInfo]("prebuilt_provider")
+
+type PrebuiltInfo struct {
+	IsPrebuilt           bool
+	PrebuiltSourceExists bool
+	UsePrebuilt          bool
+	// Whether the module has been replaced by a prebuilt
+	ReplacedByPrebuilt bool
+	PartitionTag       string
+}
+
+// prebuiltProviderMutator sets the PrebuiltInfoProvider.
+func prebuiltProviderMutator(ctx BottomUpMutatorContext) {
+	m := ctx.Module()
+
+	info := PrebuiltInfo{}
+
+	if p, ok := m.(PrebuiltInterface); ok && p.Prebuilt() != nil {
+		info.IsPrebuilt = true
+		info.PrebuiltSourceExists = p.Prebuilt().SourceExists()
+		info.UsePrebuilt = p.Prebuilt().UsePrebuilt()
+		info.PartitionTag = p.PartitionTag(ctx.DeviceConfig())
+	}
+	info.ReplacedByPrebuilt = m.IsReplacedByPrebuilt()
+	SetProvider(ctx, PrebuiltInfoProvider, info)
 }
 
 // If any module in this mainline module family has been flagged using apex_contributions, disable every other module in that family
@@ -727,7 +773,7 @@ func (p *Prebuilt) usePrebuilt(ctx BaseModuleContext, source Module, prebuilt Mo
 		// This is a source module, visit any of its prebuilts to get the info
 		psiDepTag = PrebuiltDepTag
 	}
-	ctx.VisitDirectDepsWithTag(psiDepTag, func(am Module) {
+	ctx.VisitDirectDepsProxyWithTag(psiDepTag, func(am ModuleProxy) {
 		psi, _ = OtherModuleProvider(ctx, am, PrebuiltSelectionInfoProvider)
 	})
 
@@ -756,7 +802,7 @@ func (p *Prebuilt) usePrebuilt(ctx BaseModuleContext, source Module, prebuilt Mo
 	// Skip prebuilt modules under unexported namespaces so that we won't
 	// end up shadowing non-prebuilt module when prebuilt module under same
 	// name happens to have a `Prefer` property set to true.
-	if ctx.Config().KatiEnabled() && !prebuilt.ExportedToMake() {
+	if !prebuilt.ExportedToMake() {
 		return false
 	}
 
@@ -765,10 +811,24 @@ func (p *Prebuilt) usePrebuilt(ctx BaseModuleContext, source Module, prebuilt Mo
 		return true
 	}
 
+	// b/137216042 don't use prebuilts when address sanitizer is on, unless the prebuilt has a sanitized source
+	if sanitized, ok := prebuilt.(SanitizedPrebuilt); ok {
+		forceDisable := false
+		forceDisable = forceDisable || (InList("address", ctx.Config().SanitizeDevice()) && !sanitized.HasSanitizedSource("address"))
+		forceDisable = forceDisable || (InList("hwaddress", ctx.Config().SanitizeDevice()) && !sanitized.HasSanitizedSource("hwaddress"))
+		if forceDisable {
+			return false
+		}
+	}
+
 	// TODO: use p.Properties.Name and ctx.ModuleDir to override preference
 	return p.properties.Prefer.GetOrDefault(ctx, false)
 }
 
 func (p *Prebuilt) SourceExists() bool {
 	return p.properties.SourceExists
+}
+
+type SanitizedPrebuilt interface {
+	HasSanitizedSource(sanitizer string) bool
 }

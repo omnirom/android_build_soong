@@ -16,12 +16,12 @@ package cc
 
 import (
 	"fmt"
-
-	"android/soong/android"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
+
+	"android/soong/android"
 )
 
 // This singleton generates CMakeLists.txt files. It does so for each blueprint Android.bp resulting in a cc.Module
@@ -65,10 +65,10 @@ func (c *cmakelistsGeneratorSingleton) GenerateBuildActions(ctx android.Singleto
 	// variant for each project.
 	seenProjects := map[string]bool{}
 
-	ctx.VisitAllModules(func(module android.Module) {
-		if ccModule, ok := module.(*Module); ok {
-			if compiledModule, ok := ccModule.compiler.(CompiledInterface); ok {
-				generateCLionProject(compiledModule, ctx, ccModule, seenProjects)
+	ctx.VisitAllModuleProxies(func(module android.ModuleProxy) {
+		if ccModule, ok := android.OtherModuleProvider(ctx, module, CcInfoProvider); ok {
+			if ccModule.CompilerInfo != nil {
+				generateCLionProject(ctx, module, ccModule, seenProjects)
 			}
 		}
 	})
@@ -117,15 +117,15 @@ func linkAggregateCMakeListsFiles(path string, info os.FileInfo, err error) erro
 	return nil
 }
 
-func generateCLionProject(compiledModule CompiledInterface, ctx android.SingletonContext, ccModule *Module,
+func generateCLionProject(ctx android.SingletonContext, module android.ModuleProxy, ccModule *CcInfo,
 	seenProjects map[string]bool) {
-	srcs := compiledModule.Srcs()
+	srcs := ccModule.CompilerInfo.Srcs
 	if len(srcs) == 0 {
 		return
 	}
 
 	// Only write CMakeLists.txt for the first variant of each architecture of each module
-	clionprojectLocation := getCMakeListsForModule(ccModule, ctx)
+	clionprojectLocation := getCMakeListsForModule(ctx, module)
 	if seenProjects[clionprojectLocation] {
 		return
 	}
@@ -146,7 +146,7 @@ func generateCLionProject(compiledModule CompiledInterface, ctx android.Singleto
 	f.WriteString("# To improve project view in Clion    :\n")
 	f.WriteString("# Tools > CMake > Change Project Root  \n\n")
 	f.WriteString(fmt.Sprintf("cmake_minimum_required(VERSION %s)\n", minimumCMakeVersionSupported))
-	f.WriteString(fmt.Sprintf("project(%s)\n", ccModule.ModuleBase.Name()))
+	f.WriteString(fmt.Sprintf("project(%s)\n", module.Name()))
 	f.WriteString(fmt.Sprintf("set(ANDROID_ROOT %s)\n\n", android.AbsSrcDirForExistingUseCases()))
 
 	pathToCC, _ := evalVariable(ctx, "${config.ClangBin}/")
@@ -163,44 +163,44 @@ func generateCLionProject(compiledModule CompiledInterface, ctx android.Singleto
 
 	// Add all header search path and compiler parameters (-D, -W, -f, -XXXX)
 	f.WriteString("\n# GLOBAL ALL FLAGS:\n")
-	globalAllParameters := parseCompilerParameters(ccModule.flags.Global.CommonFlags, ctx, f)
+	globalAllParameters := parseCompilerParameters(ccModule.GlobalFlags.CommonFlags, ctx, f)
 	translateToCMake(globalAllParameters, f, true, true)
 
 	f.WriteString("\n# LOCAL ALL FLAGS:\n")
-	localAllParameters := parseCompilerParameters(ccModule.flags.Local.CommonFlags, ctx, f)
+	localAllParameters := parseCompilerParameters(ccModule.LocalFlags.CommonFlags, ctx, f)
 	translateToCMake(localAllParameters, f, true, true)
 
 	f.WriteString("\n# GLOBAL CFLAGS:\n")
-	globalCParameters := parseCompilerParameters(ccModule.flags.Global.CFlags, ctx, f)
+	globalCParameters := parseCompilerParameters(ccModule.GlobalFlags.CFlags, ctx, f)
 	translateToCMake(globalCParameters, f, true, true)
 
 	f.WriteString("\n# LOCAL CFLAGS:\n")
-	localCParameters := parseCompilerParameters(ccModule.flags.Local.CFlags, ctx, f)
+	localCParameters := parseCompilerParameters(ccModule.LocalFlags.CFlags, ctx, f)
 	translateToCMake(localCParameters, f, true, true)
 
 	f.WriteString("\n# GLOBAL C ONLY FLAGS:\n")
-	globalConlyParameters := parseCompilerParameters(ccModule.flags.Global.ConlyFlags, ctx, f)
+	globalConlyParameters := parseCompilerParameters(ccModule.GlobalFlags.ConlyFlags, ctx, f)
 	translateToCMake(globalConlyParameters, f, true, false)
 
 	f.WriteString("\n# LOCAL C ONLY FLAGS:\n")
-	localConlyParameters := parseCompilerParameters(ccModule.flags.Local.ConlyFlags, ctx, f)
+	localConlyParameters := parseCompilerParameters(ccModule.LocalFlags.ConlyFlags, ctx, f)
 	translateToCMake(localConlyParameters, f, true, false)
 
 	f.WriteString("\n# GLOBAL CPP FLAGS:\n")
-	globalCppParameters := parseCompilerParameters(ccModule.flags.Global.CppFlags, ctx, f)
+	globalCppParameters := parseCompilerParameters(ccModule.GlobalFlags.CppFlags, ctx, f)
 	translateToCMake(globalCppParameters, f, false, true)
 
 	f.WriteString("\n# LOCAL CPP FLAGS:\n")
-	localCppParameters := parseCompilerParameters(ccModule.flags.Local.CppFlags, ctx, f)
+	localCppParameters := parseCompilerParameters(ccModule.LocalFlags.CppFlags, ctx, f)
 	translateToCMake(localCppParameters, f, false, true)
 
 	f.WriteString("\n# GLOBAL SYSTEM INCLUDE FLAGS:\n")
-	globalIncludeParameters := parseCompilerParameters(ccModule.flags.SystemIncludeFlags, ctx, f)
+	globalIncludeParameters := parseCompilerParameters(ccModule.SystemIncludeFlags, ctx, f)
 	translateToCMake(globalIncludeParameters, f, true, true)
 
 	// Add project executable.
 	f.WriteString(fmt.Sprintf("\nadd_executable(%s ${SOURCE_FILES})\n",
-		cleanExecutableName(ccModule.ModuleBase.Name())))
+		cleanExecutableName(module.Name())))
 }
 
 func cleanExecutableName(s string) string {
@@ -467,12 +467,13 @@ func evalVariable(ctx android.SingletonContext, str string) (string, error) {
 	return "", err
 }
 
-func getCMakeListsForModule(module *Module, ctx android.SingletonContext) string {
+func getCMakeListsForModule(ctx android.SingletonContext, module android.ModuleProxy) string {
+	commonInfo := android.OtherModuleProviderOrDefault(ctx, module, android.CommonModuleInfoProvider)
 	return filepath.Join(android.AbsSrcDirForExistingUseCases(),
 		cLionOutputProjectsDirectory,
 		path.Dir(ctx.BlueprintFile(module)),
-		module.ModuleBase.Name()+"-"+
-			module.ModuleBase.Arch().ArchType.Name+"-"+
-			module.ModuleBase.Os().Name,
+		module.Name()+"-"+
+			commonInfo.Target.Arch.ArchType.Name+"-"+
+			commonInfo.Target.Os.Name,
 		cMakeListsFilename)
 }

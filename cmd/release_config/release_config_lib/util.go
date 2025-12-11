@@ -15,8 +15,10 @@
 package release_config_lib
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -24,6 +26,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/google/blueprint/pathtools"
 	"google.golang.org/protobuf/encoding/prototext"
@@ -31,9 +34,10 @@ import (
 )
 
 var (
-	disableWarnings        bool
-	containerRegexp, _     = regexp.Compile("^[a-z][a-z0-9]*([._][a-z][a-z0-9]*)*$")
-	releaseConfigRegexp, _ = regexp.Compile("^[a-z][a-z0-9]*([._][a-z0-9]*)*$")
+	disableWarnings          bool
+	containerRegexp, _       = regexp.Compile("^[a-z][a-z0-9]*([._][a-z][a-z0-9]*)*$")
+	releaseConfigRegexp, _   = regexp.Compile("^[a-z][a-z0-9]*([._][a-z0-9]*)*$")
+	productReleaseConfigMaps *string
 )
 
 type StringList []string
@@ -45,6 +49,27 @@ func (l *StringList) Set(v string) error {
 
 func (l *StringList) String() string {
 	return fmt.Sprintf("%v", *l)
+}
+
+// Read the stringlist from a file containing one or more lines which contain
+// space separated values to add to the StringList.
+// Processing of a line stops if a "#" is found.
+func (l *StringList) ReadFromFile(fileName string) error {
+	// Do not include this file as part of the hash.  Reading the StringList from
+	// a file is a shorthand for command line arguments, which are not part of the
+	// hash.
+	data, err := os.ReadFile(fileName)
+	if err != nil {
+		return err
+	}
+	for line := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
+		// Allow # comments on lines in the file.
+		line = strings.SplitN(line, "#", 2)[0]
+		for m := range strings.SplitSeq(strings.TrimSpace(line), " ") {
+			l.Set(m)
+		}
+	}
+	return nil
 }
 
 // Write a marshalled message to a file.
@@ -94,7 +119,7 @@ func WriteFormattedMessage(path, format string, message proto.Message) (err erro
 	case "json":
 		data, err = json.MarshalIndent(message, "", "  ")
 	case "pb", "binaryproto", "protobuf":
-		data, err = proto.Marshal(message)
+		data, err = proto.MarshalOptions{Deterministic: true}.Marshal(message)
 	case "textproto":
 		data, err = prototext.MarshalOptions{Multiline: true}.Marshal(message)
 	default:
@@ -104,6 +129,62 @@ func WriteFormattedMessage(path, format string, message proto.Message) (err erro
 		return err
 	}
 	return pathtools.WriteFileIfChanged(path, data, 0644)
+}
+
+type fileHash struct {
+	Path string
+	Hash []byte
+}
+
+var filesUsedChan chan *fileHash
+var filesWg sync.WaitGroup
+var fileHashes []*fileHash
+
+func startFileRecord() {
+	fileHashes = nil
+	filesUsedChan = make(chan *fileHash, 40)
+	filesWg.Add(1)
+	go func() {
+		defer filesWg.Done()
+		for u := range filesUsedChan {
+			fileHashes = append(fileHashes, u)
+		}
+	}()
+}
+
+func finishFileRecord() []byte {
+	close(filesUsedChan)
+	filesWg.Wait()
+
+	slices.SortFunc(fileHashes, func(a, b *fileHash) int {
+		if a.Path == b.Path {
+			panic(fmt.Errorf("duplicate path %s", a.Path))
+		}
+		return cmp.Compare(a.Path, b.Path)
+	})
+
+	h := fnv.New128()
+	for _, fh := range fileHashes {
+		h.Write([]byte(fh.Path))
+		h.Write(fh.Hash)
+	}
+	return h.Sum([]byte{})
+}
+
+func ReadTrackedFile(path string) ([]byte, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if filesUsedChan != nil {
+		h := fnv.New128()
+		h.Write(data)
+		filesUsedChan <- &fileHash{
+			Path: path,
+			Hash: h.Sum([]byte{}),
+		}
+	}
+	return data, err
 }
 
 // Read a message from a file.
@@ -119,7 +200,7 @@ func WriteFormattedMessage(path, format string, message proto.Message) (err erro
 //
 //	error: any error encountered.
 func LoadMessage(path string, message proto.Message) error {
-	data, err := os.ReadFile(path)
+	data, err := ReadTrackedFile(path)
 	if err != nil {
 		return err
 	}
@@ -167,9 +248,13 @@ func warnf(format string, args ...any) (n int, err error) {
 	return 0, nil
 }
 
-func SortedMapKeys(inputMap map[string]bool) []string {
-	ret := []string{}
-	for k := range inputMap {
+// SortedKeys returns the keys of the given map in the ascending order.
+func SortedKeys[T cmp.Ordered, V any](m map[T]V) []T {
+	if len(m) == 0 {
+		return nil
+	}
+	ret := make([]T, 0, len(m))
+	for k := range m {
 		ret = append(ret, k)
 	}
 	slices.Sort(ret)
@@ -229,13 +314,15 @@ func GetDefaultMapPaths(queryMaps bool) (defaultMapPaths StringList, err error) 
 		"vendor/google/release/release_config_map.textproto",
 	}
 	for _, path := range defaultLocations {
-		if _, err = os.Stat(path); err == nil {
+		if _, missing := os.Stat(path); missing == nil {
 			defaultMapPaths = append(defaultMapPaths, path)
 		}
 	}
 
 	var prodMaps string
-	if queryMaps {
+	if productReleaseConfigMaps != nil {
+		prodMaps = *productReleaseConfigMaps
+	} else if queryMaps {
 		getBuildVar := exec.Command("build/soong/soong_ui.bash", "--dumpvar-mode", "PRODUCT_RELEASE_CONFIG_MAPS")
 		var stdout strings.Builder
 		getBuildVar.Stdin = strings.NewReader("")
@@ -250,6 +337,7 @@ func GetDefaultMapPaths(queryMaps bool) (defaultMapPaths StringList, err error) 
 		prodMaps = os.Getenv("PRODUCT_RELEASE_CONFIG_MAPS")
 	}
 	prodMaps = strings.TrimSpace(prodMaps)
+	productReleaseConfigMaps = &prodMaps
 	if len(prodMaps) > 0 {
 		defaultMapPaths = append(defaultMapPaths, strings.Split(prodMaps, " ")...)
 	}

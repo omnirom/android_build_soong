@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -28,13 +29,14 @@ import (
 	"android/soong/android/allowlists"
 	"android/soong/shared"
 
+	androidProtobuf "google.golang.org/protobuf/android"
+
 	"github.com/google/blueprint"
 	"github.com/google/blueprint/bootstrap"
 	"github.com/google/blueprint/deptools"
 	"github.com/google/blueprint/metrics"
 	"github.com/google/blueprint/pathtools"
 	"github.com/google/blueprint/proptools"
-	androidProtobuf "google.golang.org/protobuf/android"
 )
 
 var (
@@ -65,6 +67,7 @@ func init() {
 	flag.StringVar(&cmdlineArgs.OutDir, "out", "", "the ninja builddir directory")
 	flag.StringVar(&cmdlineArgs.ModuleListFile, "l", "", "file that lists filepaths to parse")
 	flag.StringVar(&cmdlineArgs.KatiSuffix, "kati_suffix", "", "the suffix for kati and ninja files, so that different configurations don't clobber each other")
+	flag.BoolVar(&cmdlineArgs.KatiEnabled, "kati_enabled", false, "If the main kati build phase is enabled. False for soong-only builds")
 
 	// Debug flags
 	flag.StringVar(&delveListen, "delve_listen", "", "Delve port to listen on for debugging")
@@ -75,8 +78,6 @@ func init() {
 	flag.BoolVar(&cmdlineArgs.NoGC, "nogc", false, "turn off GC for debugging")
 
 	// Flags representing various modes soong_build can run in
-	flag.StringVar(&cmdlineArgs.ModuleGraphFile, "module_graph_file", "", "JSON module graph file to output")
-	flag.StringVar(&cmdlineArgs.ModuleActionsFile, "module_actions_file", "", "JSON file to output inputs/outputs of actions of modules")
 	flag.StringVar(&cmdlineArgs.DocFile, "soong_docs", "", "build documentation file to output")
 	flag.StringVar(&cmdlineArgs.OutFile, "o", "build.ninja", "the Ninja file to output")
 	flag.StringVar(&cmdlineArgs.SoongVariables, "soong_variables", "soong.variables", "the file contains all build variables")
@@ -88,6 +89,7 @@ func init() {
 	// the time to remove them yet
 	flag.BoolVar(&cmdlineArgs.RunGoTests, "t", false, "build and run go tests during bootstrap")
 	flag.BoolVar(&cmdlineArgs.IncrementalBuildActions, "incremental-build-actions", false, "generate build actions incrementally")
+	flag.StringVar(&cmdlineArgs.IncrementalDebugFile, "incremental-debug-file", "", "incremental debug file")
 
 	// Disable deterministic randomization in the protobuf package, so incremental
 	// builds with unrelated Soong changes don't trigger large rebuilds (since we
@@ -128,7 +130,7 @@ func writeNinjaHint(ctx *android.Context) error {
 	// real long-running jobs cannot run early.
 	// Therefore, the model should be adjusted in this case.
 	// The model should also be adjusted if there are critical false negatives.
-	predicate := func(j *blueprint.JsonModule) (prioritized bool, weight int) {
+	predicate := func(j *blueprint.WeightedOutputsModuleInfo) (prioritized bool, weight int) {
 		prioritized = false
 		weight = 0
 		for prefix, w := range allowlists.HugeModuleTypePrefixMap {
@@ -138,12 +140,7 @@ func writeNinjaHint(ctx *android.Context) error {
 				return
 			}
 		}
-		dep_count := len(j.Deps)
-		src_count := 0
-		for _, a := range j.Module["Actions"].([]blueprint.JSONAction) {
-			src_count += len(a.Inputs)
-		}
-		input_size := dep_count + src_count
+		input_size := j.DepsCount + j.SrcsCount
 
 		// Current threshold is an arbitrary value which only consider recall rather than accuracy.
 		if input_size > allowlists.INPUT_SIZE_THRESHOLD {
@@ -180,16 +177,6 @@ func writeMetrics(configuration android.Config, eventHandler *metrics.EventHandl
 	metricsFile := filepath.Join(metricsDir, "soong_build_metrics.pb")
 	err := android.WriteMetrics(configuration, eventHandler, metricsFile)
 	maybeQuit(err, "error writing soong_build metrics %s", metricsFile)
-}
-
-func writeJsonModuleGraphAndActions(ctx *android.Context, cmdArgs android.CmdArgs) {
-	graphFile, graphErr := os.Create(shared.JoinPath(topDir, cmdArgs.ModuleGraphFile))
-	maybeQuit(graphErr, "graph err")
-	defer graphFile.Close()
-	actionsFile, actionsErr := os.Create(shared.JoinPath(topDir, cmdArgs.ModuleActionsFile))
-	maybeQuit(actionsErr, "actions err")
-	defer actionsFile.Close()
-	ctx.Context.PrintJSONGraphAndActions(graphFile, actionsFile)
 }
 
 func writeDepFile(outputFile string, eventHandler *metrics.EventHandler, ninjaDeps []string) {
@@ -270,8 +257,6 @@ func runSoongOnlyBuild(ctx *android.Context) (string, []string) {
 
 	var stopBefore bootstrap.StopBefore
 	switch ctx.Config().BuildMode {
-	case android.GenerateModuleGraph:
-		stopBefore = bootstrap.StopBeforeWriteNinja
 	case android.GenerateDocFile:
 		stopBefore = bootstrap.StopBeforePrepareBuildActions
 	default:
@@ -283,9 +268,6 @@ func runSoongOnlyBuild(ctx *android.Context) (string, []string) {
 
 	// Convert the Soong module graph into Bazel BUILD files.
 	switch ctx.Config().BuildMode {
-	case android.GenerateModuleGraph:
-		writeJsonModuleGraphAndActions(ctx, cmdlineArgs)
-		return cmdlineArgs.ModuleGraphFile, ninjaDeps
 	case android.GenerateDocFile:
 		// TODO: we could make writeDocs() return the list of documentation files
 		// written and add them to the .d file. Then soong_docs would be re-run
@@ -329,6 +311,12 @@ func parseAvailableEnv() map[string]string {
 func main() {
 	flag.Parse()
 
+	if cmdlineArgs.Memprofile == "" {
+		// Go enables memory profile collection automatically if any references
+		// are linked in to the binary.
+		// Disable collection of memory profiles if we won't save one to disk.
+		runtime.MemProfileRate = 0
+	}
 	soongStartTime := time.Now()
 
 	shared.ReexecWithDelveMaybe(delveListen, delvePath)
@@ -351,11 +339,13 @@ func main() {
 	var configCache *ConfigCache
 	configFile := filepath.Join(topDir, ctx.Config().OutDir(), configCacheFile)
 	incremental := false
-	ctx.SetIncrementalEnabled(cmdlineArgs.IncrementalBuildActions)
-	if cmdlineArgs.IncrementalBuildActions {
+	// Tie incremental analysis to soong-only for now.
+	ctx.SetIncrementalEnabled(cmdlineArgs.IncrementalBuildActions && !cmdlineArgs.KatiEnabled)
+	if ctx.GetIncrementalEnabled() {
 		configCache, incremental = incrementalValid(ctx.Config(), configFile)
 	}
 	ctx.SetIncrementalAnalysis(incremental)
+	ctx.SetIncrementalDebugFile(cmdlineArgs.IncrementalDebugFile)
 
 	ctx.Register()
 	finalOutputFile, ninjaDeps := runSoongOnlyBuild(ctx)

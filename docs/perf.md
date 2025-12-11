@@ -6,7 +6,7 @@
 
 soong_ui has tracing built in, so that every build execution's trace can be
 viewed.  Just open `$OUT_DIR/build.trace.gz` in Chrome's <chrome://tracing>, or
-with [catapult's trace viewer][catapult trace_viewer]. The last few traces are
+with [Perfetto][perfetto]. The last few traces are
 stored in `build.trace.#.gz` (larger numbers are older). The associated logs
 are stored in `soong.#.log` and `verbose.#.log.gz`.
 
@@ -289,6 +289,6 @@ A workaround to get out of this state is to remove the build.ninja entry from
 sed -i "/\/build.ninja/d" $(get_build_var OUT_DIR)/.ninja_log
 ```
 
-[catapult trace_viewer]: https://github.com/catapult-project/catapult/blob/master/tracing/README.md
+[perfetto]: https://ui.perfetto.dev
 [ninja parse optimization]: https://android-review.googlesource.com/c/platform/external/ninja/+/461005
 [blueprint_microfactory]: https://android-review.googlesource.com/q/topic:%22blueprint_microfactory%22+status:merged

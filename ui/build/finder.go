@@ -36,8 +36,8 @@ import (
 // NewSourceFinder returns a new Finder configured to search for source files.
 // Callers of NewSourceFinder should call <f.Shutdown()> when done
 func NewSourceFinder(ctx Context, config Config) (f *finder.Finder) {
-	ctx.BeginTrace(metrics.RunSetupTool, "find modules")
-	defer ctx.EndTrace()
+	e := ctx.BeginTrace(metrics.RunSetupTool, "find modules")
+	defer e.End()
 
 	// Set up the working directory for the Finder.
 	dir, err := os.Getwd()
@@ -63,7 +63,7 @@ func NewSourceFinder(ctx Context, config Config) (f *finder.Finder) {
 	// Set up configuration parameters for the Finder cache.
 	cacheParams := finder.CacheParams{
 		WorkingDirectory: dir,
-		RootDirs:         androidBpSearchDirs(config),
+		RootDirs:         []string{"."},
 		FollowSymlinks:   config.environ.IsEnvTrue("ALLOW_BP_UNDER_SYMLINKS"),
 		ExcludeDirs:      []string{".git", ".repo"},
 		PruneFiles:       pruneFiles,
@@ -83,6 +83,10 @@ func NewSourceFinder(ctx Context, config Config) (f *finder.Finder) {
 			"TEST_MAPPING",
 			// METADATA file of packages
 			"METADATA",
+			// Release config contributions.
+			"release_config_map.textproto",
+			// Release config allowed duplicate flag declarations.
+			"duplicate_allowlist.txt",
 		},
 		IncludeSuffixes: []string{
 			// .mk files for product/board configuration.
@@ -100,15 +104,6 @@ func NewSourceFinder(ctx Context, config Config) (f *finder.Finder) {
 		ctx.Fatalf("Could not create module-finder: %v", err)
 	}
 	return f
-}
-
-func androidBpSearchDirs(config Config) []string {
-	dirs := []string{"."} // always search from root of source tree.
-	if config.searchApiDir {
-		// Search in out/api_surfaces
-		dirs = append(dirs, config.ApiSurfacesOutDir())
-	}
-	return dirs
 }
 
 func findProductAndBoardConfigFiles(entries finder.DirEntries) (dirNames []string, fileNames []string) {
@@ -193,6 +188,25 @@ func FindSources(ctx Context, config Config, f *finder.Finder) {
 	err = dumpListToFile(ctx, config, metadataFiles, filepath.Join(dumpDir, "METADATA.list"))
 	if err != nil {
 		ctx.Fatalf("Could not find METADATA: %v", err)
+	}
+
+	// Recursively look for all release_config_map.textproto files.
+	releaseConfigMaps := f.FindNamedAt(".", "release_config_map.textproto")
+	err = dumpListToFile(ctx, config, releaseConfigMaps, filepath.Join(dumpDir, "release_config_map.list"))
+	if err != nil {
+		ctx.Fatalf("Could not find release_config_map.textproto: %v", err)
+	}
+
+	// Recursively look for all duplicate_allowlist.txt files where we found release_config_map.textproto.
+	var duplicateAllowlists []string
+	for _, mapPath := range releaseConfigMaps {
+		// The only `duplicate_allowlist.txt` files we care about are in the same directory
+		// as `release_config_map.textproto`.
+		duplicateAllowlists = append(duplicateAllowlists, f.FindNamedAt(filepath.Dir(mapPath), "duplicate_allowlist.txt")...)
+	}
+	err = dumpListToFile(ctx, config, duplicateAllowlists, filepath.Join(dumpDir, "duplicate_allowlist.list"))
+	if err != nil {
+		ctx.Fatalf("Could not find duplicate_allowlist.txt: %v", err)
 	}
 
 	// Recursively look for all TEST_MAPPING files.

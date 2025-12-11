@@ -77,8 +77,6 @@ func (p *prebuiltEtcXml) timestampFilePath(ctx android.ModuleContext) android.Wr
 }
 
 func (p *prebuiltEtcXml) GenerateAndroidBuildActions(ctx android.ModuleContext) {
-	p.PrebuiltEtc.GenerateAndroidBuildActions(ctx)
-
 	if p.properties.Schema != nil {
 		schema := android.PathForModuleSrc(ctx, proptools.String(p.properties.Schema))
 
@@ -94,7 +92,6 @@ func (p *prebuiltEtcXml) GenerateAndroidBuildActions(ctx android.ModuleContext) 
 					"dtd": schema.String(),
 				},
 			})
-			break
 		case ".xsd":
 			ctx.Build(pctx, android.BuildParams{
 				Rule:        xmllintXsd,
@@ -106,7 +103,6 @@ func (p *prebuiltEtcXml) GenerateAndroidBuildActions(ctx android.ModuleContext) 
 					"xsd": schema.String(),
 				},
 			})
-			break
 		default:
 			ctx.PropertyErrorf("schema", "not supported extension: %q", schema.Ext())
 		}
@@ -121,6 +117,8 @@ func (p *prebuiltEtcXml) GenerateAndroidBuildActions(ctx android.ModuleContext) 
 	}
 
 	p.SetAdditionalDependencies([]android.Path{p.timestampFilePath(ctx)})
+
+	p.PrebuiltEtc.GenerateAndroidBuildActions(ctx)
 }
 
 func PrebuiltEtcXmlFactory() android.Module {

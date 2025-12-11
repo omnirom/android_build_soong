@@ -60,7 +60,7 @@ func (a *aconfigDecorator) GenerateSource(ctx rust.ModuleContext, deps rust.Path
 	generatedDir := android.PathForModuleGen(ctx)
 	generatedSource := android.PathForModuleGen(ctx, "src", "lib.rs")
 
-	declarationsModules := ctx.GetDirectDepsWithTag(rustDeclarationsTag)
+	declarationsModules := ctx.GetDirectDepsProxyWithTag(rustDeclarationsTag)
 
 	if len(declarationsModules) != 1 {
 		panic(fmt.Errorf("Exactly one aconfig_declarations property required"))

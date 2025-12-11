@@ -139,7 +139,7 @@ type soongConfigModuleTypeImportProperties struct {
 //     }
 //
 // If an acme BoardConfig.mk file contained:
-//     $(call add_sonng_config_namespace, acme)
+//     $(call add_soong_config_namespace, acme)
 //     $(call add_soong_config_var_value, acme, board, soc_a)
 //     $(call add_soong_config_var_value, acme, feature, true)
 //     $(call add_soong_config_var_value, acme, width, 200)

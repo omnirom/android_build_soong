@@ -19,6 +19,7 @@ package {
 blueprint_go_binary {
     name: "soong_zip",
     deps: [
+        "soong-response",
         "soong-zip",
     ],
     srcs: [

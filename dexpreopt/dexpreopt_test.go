@@ -120,6 +120,10 @@ func TestDexPreopt(t *testing.T) {
 
 	android.AssertStringListContains(t, "", rule.Inputs().RelativeToTop().Strings(),
 		"out/soong/dexpreopt_test/uffd_gc_flag.txt")
+	android.AssertStringListContains(t, "", rule.Inputs().RelativeToTop().Strings(),
+		"out/soong/dexpreopt_test/assume_value_flags.txt")
+	android.AssertStringListContains(t, "", rule.Inputs().RelativeToTop().Strings(),
+		"out/soong/dexpreopt_test/allow_profile_code_flag.txt")
 }
 
 func TestDexPreoptSystemOther(t *testing.T) {

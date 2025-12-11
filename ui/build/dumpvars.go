@@ -62,6 +62,7 @@ func DumpMakeVars(ctx Context, config Config, goals, vars []string) (map[string]
 		defer os.RemoveAll(tmpDir)
 
 		SetupLitePath(ctx, config, tmpDir)
+		SetProductReleaseConfigMaps(ctx, config, QueryProductReleaseConfigMaps(ctx, config))
 
 		ret, err = dumpMakeVars(ctx, config, goals, makeVars, false, tmpDir)
 		if err != nil {
@@ -81,8 +82,8 @@ func DumpMakeVars(ctx Context, config Config, goals, vars []string) (map[string]
 }
 
 func dumpMakeVars(ctx Context, config Config, goals, vars []string, write_soong_vars bool, tmpDir string) (map[string]string, error) {
-	ctx.BeginTrace(metrics.RunKati, "dumpvars")
-	defer ctx.EndTrace()
+	e := ctx.BeginTrace(metrics.RunKati, "dumpvars")
+	defer e.End()
 
 	tool := ctx.Status.StartTool()
 	if write_soong_vars {
@@ -92,7 +93,7 @@ func dumpMakeVars(ctx Context, config Config, goals, vars []string, write_soong_
 	}
 	defer tool.Finish()
 
-	cmd := Command(ctx, config, "dumpvars",
+	cmd := Command(ctx, config, e, "dumpvars",
 		config.KatiBin(),
 		"-f", "build/make/core/config.mk",
 		"--color_warnings",
@@ -112,7 +113,7 @@ func dumpMakeVars(ctx Context, config Config, goals, vars []string, write_soong_
 	cmd.Stdout = &output
 	pipe, err := cmd.StderrPipe()
 	if err != nil {
-		ctx.Fatalln("Error getting output pipe for ckati:", err)
+		ctx.Fatalln("Error getting output pipe for kati:", err)
 	}
 	cmd.StartOrFatal()
 	// TODO: error out when Stderr contains any content
@@ -182,6 +183,22 @@ func Banner(config Config, make_vars map[string]string) string {
 			fmt.Fprintf(b, "%s=%s\n", name, make_vars[name])
 		}
 	}
+
+	if use, _ := config.environ.Get("SOONG_USE_PARTIAL_COMPILE"); use == "true" {
+		if partialCompile, ok := config.environ.Get("SOONG_PARTIAL_COMPILE"); ok {
+			fmt.Fprintf(b, "SOONG_PARTIAL_COMPILE=%s\n", partialCompile)
+		}
+	}
+
+	// Only show USE_RBE and USE_REWRAPPER when the user has explicitly set SOONG_NINJA
+	if config.ninjaCommand != NINJA_DEFAULT {
+		fmt.Fprintf(b, "SOONG_NINJA=%s\n", config.ninjaCommand.String())
+		fmt.Fprintf(b, "USE_RBE=%t\n", config.UseRBE())
+		fmt.Fprintf(b, "USE_REWRAPPER=%t\n", config.UseRewrapper())
+	}
+
+	// Normally config.soongOnlyRequested already takes into account PRODUCT_SOONG_ONLY,
+	// except when doing `get_build_var report_config`, which is run during envsetup.
 	if config.skipKatiControlledByFlags {
 		fmt.Fprintf(b, "SOONG_ONLY=%t\n", config.soongOnlyRequested)
 	} else { // default for this product
@@ -289,6 +306,9 @@ func runMakeProductConfig(ctx Context, config Config) {
 		"BUILD_BROKEN_USES_BUILD_STATIC_JAVA_LIBRARY",
 		"BUILD_BROKEN_USES_BUILD_STATIC_LIBRARY",
 		"RELEASE_BUILD_EXECUTION_METRICS",
+		"RELEASE_SRC_DIR_IS_READ_ONLY",
+		"RELEASE_USE_RKATI",
+		"RELEASE_BUILD_WITH_JDK_25",
 	}, exportEnvVars...), BannerVars...)
 
 	makeVars, err := dumpMakeVars(ctx, config, config.Arguments(), allVars, true, "")
@@ -306,12 +326,17 @@ func runMakeProductConfig(ctx Context, config Config) {
 		}
 	}
 
+	config.useJdk25 = makeVars["RELEASE_BUILD_WITH_JDK_25"] == "true"
+	if config.useJdk25 {
+		ConfigJavaEnvironment(ctx, config.configImpl)
+	}
+
 	config.SetKatiArgs(strings.Fields(makeVars["KATI_GOALS"]))
 	config.SetNinjaArgs(strings.Fields(makeVars["NINJA_GOALS"]))
 	config.SetTargetDevice(makeVars["TARGET_DEVICE"])
 	config.SetTargetDeviceDir(makeVars["TARGET_DEVICE_DIR"])
-	config.sandboxConfig.SetSrcDirIsRO(makeVars["BUILD_BROKEN_SRC_DIR_IS_WRITABLE"] == "false")
-	config.sandboxConfig.SetSrcDirRWAllowlist(strings.Fields(makeVars["BUILD_BROKEN_SRC_DIR_RW_ALLOWLIST"]))
+	config.useRkati = makeVars["RELEASE_USE_RKATI"] == "true" || os.Getenv("SOONG_USE_RKATI") == "true"
+	config.setupSandboxConfig(ctx, makeVars)
 
 	config.SetBuildBrokenDupRules(makeVars["BUILD_BROKEN_DUP_RULES"] == "true")
 	config.SetBuildBrokenUsesNetwork(makeVars["BUILD_BROKEN_USES_NETWORK"] == "true")
@@ -326,6 +351,8 @@ func runMakeProductConfig(ctx Context, config Config) {
 			config.skipKatiNinja = true
 		}
 	}
+
+	ctx.Metrics.SetSoongOnly(config.soongOnlyRequested)
 
 	// Print the banner like make did
 	if !env.IsEnvTrue("ANDROID_QUIET_BUILD") {

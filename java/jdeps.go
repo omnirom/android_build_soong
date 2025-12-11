@@ -100,7 +100,7 @@ func (j *jdepsGeneratorSingleton) GenerateBuildActions(ctx android.SingletonCont
 		Rule:   android.Touch,
 		Output: jfpath,
 	})
-	ctx.DistForGoals([]string{"general-tests", "dist_files"}, j.outputPath)
+	ctx.DistForGoals([]string{"general-tests", "dist_files", "module-info"}, j.outputPath)
 }
 
 func createJsonFile(moduleInfos map[string]android.IdeInfo, jfpath android.WritablePath) error {

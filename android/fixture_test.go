@@ -24,8 +24,11 @@ func TestFixtureDedup(t *testing.T) {
 	list := []string{}
 
 	appendToList := func(s string) FixturePreparer {
-		return FixtureModifyConfig(func(_ Config) {
-			list = append(list, s)
+		return FixtureModifyConfig(func(config Config) {
+			// Skip generic config to avoid duplicated calls
+			if !config.isGeneric {
+				list = append(list, s)
+			}
 		})
 	}
 

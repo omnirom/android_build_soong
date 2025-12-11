@@ -10,6 +10,7 @@ bootstrap_go_package {
         "blueprint-proptools",
         "soong",
         "soong-android",
+        "soong-genrule",
         "soong-java",
     ],
     srcs: ["system_features.go"],

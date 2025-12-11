@@ -28,6 +28,8 @@ import (
 	"android/soong/remoteexec"
 )
 
+//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+
 // lint checks automatically enforced for modules that have different min_sdk_version than
 // sdk_version
 var updatabilityChecks = []string{"NewApi"}
@@ -196,6 +198,7 @@ var allLintDatabasefiles = map[android.SdkKind]lintDatabaseFiles{
 
 var LintProvider = blueprint.NewProvider[*LintInfo]()
 
+// @auto-generate: gob
 type LintInfo struct {
 	HTML              android.Path
 	Text              android.Path
@@ -222,6 +225,8 @@ func (l *linter) deps(ctx android.BottomUpMutatorContext) {
 	if extraCheckModulesEnv := ctx.Config().Getenv("ANDROID_LINT_CHECK_EXTRA_MODULES"); extraCheckModulesEnv != "" {
 		extraCheckModules = append(extraCheckModules, strings.Split(extraCheckModulesEnv, ",")...)
 	}
+
+	extraCheckModules = append(extraCheckModules, "AndroidGlobalLintChecker")
 
 	ctx.AddFarVariationDependencies(ctx.Config().BuildOSCommonTarget.Variations(),
 		extraLintCheckTag, extraCheckModules...)
@@ -408,9 +413,6 @@ func (l *linter) lint(ctx android.ModuleContext) {
 		}
 	}
 
-	l.extraLintCheckJars = append(l.extraLintCheckJars, android.PathForSource(ctx,
-		"prebuilts/cmdline-tools/AndroidGlobalLintChecker.jar"))
-
 	var baseline android.OptionalPath
 	if l.properties.Lint.Baseline_filename != nil {
 		baseline = android.OptionalPathForPath(android.PathForModuleSrc(ctx, *l.properties.Lint.Baseline_filename))
@@ -436,7 +438,7 @@ func (l *linter) lint(ctx android.ModuleContext) {
 			android.PathForModuleOut(ctx, "lint.sbox.textproto")).
 		SandboxInputs()
 
-	if ctx.Config().UseRBE() && ctx.Config().IsEnvTrue("RBE_LINT") {
+	if ctx.Config().UseREWrapper() && ctx.Config().IsEnvTrue("RBE_LINT") {
 		pool := ctx.Config().GetenvWithDefault("RBE_LINT_POOL", "java16")
 		rule.Remoteable(android.RemoteRuleSupports{RBE: true})
 		rule.Rewrapper(&remoteexec.REParams{
@@ -480,7 +482,7 @@ func (l *linter) lint(ctx android.ModuleContext) {
 
 	cmd := rule.Command()
 
-	cmd.Flag(`JAVA_OPTS="-Xmx4096m --add-opens java.base/java.util=ALL-UNNAMED"`).
+	cmd.Flag(`JAVA_OPTS="-Xmx8192m --add-opens java.base/java.util=ALL-UNNAMED"`).
 		FlagWithArg("ANDROID_SDK_HOME=", lintPaths.homeDir.String()).
 		FlagWithInput("SDK_ANNOTATIONS=", annotationsZipPath).
 		FlagWithInput("LINT_OPTS=-DLINT_API_DATABASE=", apiVersionsXMLPath)
@@ -580,8 +582,30 @@ func BuildModuleLintReportZips(ctx android.ModuleContext, depSets LintDepSets, v
 	xmlZip := android.PathForModuleOut(ctx, "lint-report-xml.zip")
 	lintZip(ctx, xmlList, xmlZip, validations)
 
+	android.SetProvider(ctx, ModuleLintReportZipsProvider, ModuleLintReportZipsInfo{
+		HtmlZip: htmlZip,
+		TextZip: textZip,
+		XmlZip:  xmlZip,
+	})
+
 	return android.Paths{htmlZip, textZip, xmlZip}
 }
+
+type ModuleLintReportZipsInfo struct {
+	HtmlZip android.Path
+	TextZip android.Path
+	XmlZip  android.Path
+}
+
+func (i *ModuleLintReportZipsInfo) AllReports() android.Paths {
+	return android.Paths{
+		i.HtmlZip,
+		i.TextZip,
+		i.XmlZip,
+	}
+}
+
+var ModuleLintReportZipsProvider = blueprint.NewProvider[ModuleLintReportZipsInfo]()
 
 type lintSingleton struct {
 	htmlZip              android.WritablePath
@@ -652,19 +676,20 @@ func copiedLintDatabaseFilesPath(ctx android.PathContext, name string) android.W
 }
 
 func (l *lintSingleton) generateLintReportZips(ctx android.SingletonContext) {
+	// Dists of lint reports in unbundled builds is handled by unbundled_builder in unbundled.go
 	if ctx.Config().UnbundledBuild() {
 		return
 	}
 
 	var outputs []*LintInfo
-	var dirs []string
 	ctx.VisitAllModuleProxies(func(m android.ModuleProxy) {
 		commonInfo := android.OtherModulePointerProviderOrDefault(ctx, m, android.CommonModuleInfoProvider)
+		platformAvailabilitInfo := android.OtherModuleProviderOrDefault(ctx, m, android.PlatformAvailabilityInfoProvider)
 		if ctx.Config().KatiEnabled() && !commonInfo.ExportedToMake {
 			return
 		}
 
-		if commonInfo.IsApexModule && commonInfo.NotAvailableForPlatform {
+		if commonInfo.IsApexModule && platformAvailabilitInfo.NotAvailableToPlatform {
 			apexInfo, _ := android.OtherModuleProvider(ctx, m, android.ApexInfoProvider)
 			if apexInfo.IsForPlatform() {
 				// There are stray platform variants of modules in apexes that are not available for
@@ -677,8 +702,6 @@ func (l *lintSingleton) generateLintReportZips(ctx android.SingletonContext) {
 			outputs = append(outputs, lintInfo)
 		}
 	})
-
-	dirs = android.SortedUniqueStrings(dirs)
 
 	zip := func(outputPath android.WritablePath, get func(*LintInfo) android.Path) {
 		var paths android.Paths
@@ -705,10 +728,7 @@ func (l *lintSingleton) generateLintReportZips(ctx android.SingletonContext) {
 	zip(l.referenceBaselineZip, func(l *LintInfo) android.Path { return l.ReferenceBaseline })
 
 	ctx.Phony("lint-check", l.htmlZip, l.textZip, l.xmlZip, l.referenceBaselineZip)
-
-	if !ctx.Config().UnbundledBuild() {
-		ctx.DistForGoal("lint-check", l.htmlZip, l.textZip, l.xmlZip, l.referenceBaselineZip)
-	}
+	ctx.DistForGoal("lint-check", l.htmlZip, l.textZip, l.xmlZip, l.referenceBaselineZip)
 }
 
 func init() {

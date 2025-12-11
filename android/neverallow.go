@@ -55,6 +55,7 @@ func init() {
 	AddNeverAllowRules(createJavaDeviceForHostRules()...)
 	AddNeverAllowRules(createCcSdkVariantRules()...)
 	AddNeverAllowRules(createUncompressDexRules()...)
+	AddNeverAllowRules(createArtDataZipsRule())
 	AddNeverAllowRules(createInstallInRootAllowingRules()...)
 	AddNeverAllowRules(createProhibitFrameworkAccessRules()...)
 	AddNeverAllowRules(createCcStubsRule())
@@ -67,6 +68,7 @@ func init() {
 	AddNeverAllowRules(createPrebuiltEtcBpDefineRule())
 	AddNeverAllowRules(createAutogenRroBpDefineRule())
 	AddNeverAllowRules(createNoSha1HashRule())
+	AddNeverAllowRules(createNoPrebuiltSystemImageRule())
 }
 
 // Add a NeverAllow rule to the set of rules to apply.
@@ -238,6 +240,14 @@ func createUncompressDexRules() []Rule {
 	}
 }
 
+func createArtDataZipsRule() Rule {
+	return NeverAllow().
+		ModuleType("test_suite_package").
+		WithMatcher("art_data_zips", isSetMatcherInstance).
+		NotIn("art").
+		Because("art_data_zips is a specialized property for ART's needs and can only be used within the art/ directory.")
+}
+
 func createInstallInRootAllowingRules() []Rule {
 	return []Rule{
 		NeverAllow().
@@ -253,6 +263,7 @@ func createInstallInRootAllowingRules() []Rule {
 			NotModuleType("prebuilt_first_stage_ramdisk").
 			NotModuleType("prebuilt_res").
 			NotModuleType("prebuilt_any").
+			NotModuleType("prebuilt_lib").
 			Because("install_in_root is only for init_first_stage or librecovery_ui_ext."),
 	}
 }
@@ -349,6 +360,17 @@ func createNoSha1HashRule() Rule {
 		ModuleType("filesystem", "android_system_image").
 		With("avb_hash_algorithm", "sha1").
 		Because("sha1 is discouraged")
+}
+
+func createNoPrebuiltSystemImageRule() Rule {
+	return NeverAllow().
+		ModuleType(
+			"filesystem",
+			"android_filesystem",
+			"android_system_image",
+		).
+		WithMatcher("prebuilt_module_name", isSetMatcherInstance).
+		Because("in development and must not be used")
 }
 
 func createKotlinPluginRule() []Rule {
@@ -741,7 +763,7 @@ func (r *rule) appliesToDirectDeps(ctx BottomUpMutatorContext) bool {
 	}
 
 	matches := false
-	ctx.VisitDirectDeps(func(m Module) {
+	ctx.VisitDirectDepsProxy(func(m ModuleProxy) {
 		if !matches {
 			name := ctx.OtherModuleName(m)
 			matches = r.directDeps[name]

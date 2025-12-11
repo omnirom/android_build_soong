@@ -6,9 +6,11 @@ import (
 	"slices"
 
 	"github.com/google/blueprint"
-	"github.com/google/blueprint/gobtools"
 )
 
+//go:generate go run ../../blueprint/gobtools/codegen/gob_gen.go
+
+// @auto-generate: gob
 type CoreModuleInfoJSON struct {
 	RegisterName       string   `json:"-"`
 	Path               []string `json:"path,omitempty"`                // $(sort $(ALL_MODULES.$(m).PATH))
@@ -21,6 +23,7 @@ type CoreModuleInfoJSON struct {
 	Required           []string `json:"required,omitempty"`            // $(sort $(ALL_MODULES.$(m).REQUIRED_FROM_TARGET))
 }
 
+// @auto-generate: gob
 type ExtraModuleInfoJSON struct {
 	SubName             string   `json:"-"`
 	Uninstallable       bool     `json:"-"`
@@ -53,6 +56,7 @@ type ExtraModuleInfoJSON struct {
 	ModuleNameOverride        string   `json:"-"`
 }
 
+// @auto-generate: gob
 type ModuleInfoJSON struct {
 	core CoreModuleInfoJSON
 	ExtraModuleInfoJSON
@@ -115,26 +119,6 @@ func encodeModuleInfoJSON(w io.Writer, moduleInfoJSON *ModuleInfoJSON) error {
 	return encoder.Encode(combinedModuleInfoJSON{&moduleInfoJSONCopy.core, &moduleInfoJSONCopy.ExtraModuleInfoJSON})
 }
 
-func (p *ModuleInfoJSON) ToGob() *combinedModuleInfoJSON {
-	return &combinedModuleInfoJSON{
-		CoreModuleInfoJSON:  &p.core,
-		ExtraModuleInfoJSON: &p.ExtraModuleInfoJSON,
-	}
-}
-
-func (p *ModuleInfoJSON) FromGob(data *combinedModuleInfoJSON) {
-	p.core = *data.CoreModuleInfoJSON
-	p.ExtraModuleInfoJSON = *data.ExtraModuleInfoJSON
-}
-
-func (m *ModuleInfoJSON) GobEncode() ([]byte, error) {
-	return gobtools.CustomGobEncode[combinedModuleInfoJSON](m)
-}
-
-func (m *ModuleInfoJSON) GobDecode(data []byte) error {
-	return gobtools.CustomGobDecode[combinedModuleInfoJSON](data, m)
-}
-
 func (m *ModuleInfoJSON) GetInstalled() []string {
 	return m.core.Installed
 }
@@ -143,4 +127,9 @@ func (m *ModuleInfoJSON) GetClass() []string {
 	return m.Class
 }
 
-var ModuleInfoJSONProvider = blueprint.NewProvider[[]*ModuleInfoJSON]()
+// @auto-generate: gob
+type ModuleInfoJSONInfo struct {
+	Data []*ModuleInfoJSON
+}
+
+var ModuleInfoJSONProvider = blueprint.NewProvider[ModuleInfoJSONInfo]()

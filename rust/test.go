@@ -121,7 +121,7 @@ func NewRustTest(hod android.HostOrDeviceSupported) (*Module, *testDecorator) {
 	return module, test
 }
 
-func (test *testDecorator) compilerProps() []interface{} {
+func (test *testDecorator) compilerProps() []any {
 	return append(test.binaryDecorator.compilerProps(), &test.Properties)
 }
 
@@ -134,11 +134,11 @@ func (test *testDecorator) install(ctx ModuleContext) {
 
 	var configs []tradefed.Config
 	if Bool(test.Properties.Require_root) {
-		configs = append(configs, tradefed.Object{"target_preparer", "com.android.tradefed.targetprep.RootTargetPreparer", nil})
+		configs = append(configs, tradefed.Object{Type: "target_preparer", Class: "com.android.tradefed.targetprep.RootTargetPreparer", Options: nil})
 	} else {
 		var options []tradefed.Option
 		options = append(options, tradefed.Option{Name: "force-root", Value: "false"})
-		configs = append(configs, tradefed.Object{"target_preparer", "com.android.tradefed.targetprep.RootTargetPreparer", options})
+		configs = append(configs, tradefed.Object{Type: "target_preparer", Class: "com.android.tradefed.targetprep.RootTargetPreparer", Options: options})
 	}
 
 	test.testConfig = tradefed.AutoGenTestConfig(ctx, tradefed.AutoGenTestConfigOptions{
@@ -195,7 +195,7 @@ func (test *testDecorator) install(ctx ModuleContext) {
 
 	// default relative install path is module name
 	if !Bool(test.Properties.No_named_install_directory) {
-		test.baseCompiler.relative = ctx.ModuleName()
+		test.relative = ctx.ModuleName()
 	} else if String(test.baseCompiler.Properties.Relative_install_path) == "" {
 		ctx.PropertyErrorf("no_named_install_directory", "Module install directory may only be disabled if relative_install_path is set")
 	}
@@ -204,31 +204,20 @@ func (test *testDecorator) install(ctx ModuleContext) {
 		test.Properties.Test_options.Unit_test = proptools.BoolPtr(true)
 	}
 
-	if !ctx.Config().KatiEnabled() { // TODO(spandandas): Remove the special case for kati
-		// Install the test config in testcases/ directory for atest.
-		r, ok := ctx.Module().(*Module)
-		if !ok {
-			ctx.ModuleErrorf("Not a rust test module")
-		}
-		// Install configs in the root of $PRODUCT_OUT/testcases/$module
-		testCases := android.PathForModuleInPartitionInstall(ctx, "testcases", ctx.ModuleName()+r.SubName())
-		if ctx.PrimaryArch() {
-			if test.testConfig != nil {
-				ctx.InstallFile(testCases, ctx.ModuleName()+".config", test.testConfig)
-			}
-			dynamicConfig := android.ExistentPathForSource(ctx, ctx.ModuleDir(), "DynamicConfig.xml")
-			if dynamicConfig.Valid() {
-				ctx.InstallFile(testCases, ctx.ModuleName()+".dynamic", dynamicConfig.Path())
-			}
-		}
-		// Install tests and data in arch specific subdir $PRODUCT_OUT/testcases/$module/$arch
-		testCases = testCases.Join(ctx, ctx.Target().Arch.ArchType.String())
-		ctx.InstallTestData(testCases, test.data)
-		testPath := ctx.RustModule().OutputFile().Path()
-		ctx.InstallFile(testCases, testPath.Base(), testPath)
-	}
+	// Install the test config in testcases/ directory for atest.
+	mainFile := ctx.RustModule().OutputFile().Path()
+	ctx.SetTestSuiteInfo(android.TestSuiteInfo{
+		NameSuffix:      ctx.RustModule().SubName(),
+		TestSuites:      test.Properties.Test_suites,
+		MainFile:        mainFile,
+		MainFileStem:    mainFile.Base(),
+		ConfigFile:      test.testConfig,
+		Data:            test.data,
+		NeedsArchFolder: true,
+		IsUnitTest:      Bool(test.Properties.Test_options.Unit_test),
+	})
 
-	test.binaryDecorator.installTestData(ctx, test.data)
+	test.installTestData(ctx, test.data)
 	test.binaryDecorator.install(ctx)
 }
 
@@ -267,18 +256,28 @@ func RustTestFactory() android.Module {
 	// rustTestHostMultilib load hook to set MultilibFirst for the
 	// host target.
 	android.AddLoadHook(module, rustTestHostMultilib)
+
+	// Windows tests are currently unsupported, so disable them.
+	// To support Windows test modules, we likely need to switch
+	// to panic=unwind.
+	android.AddLoadHook(module, rustTestDisableWindows)
 	module.testModule = true
 	return module.Init()
 }
 
 func RustTestHostFactory() android.Module {
 	module, _ := NewRustTest(android.HostSupported)
+
+	// Windows tests are unsupported, so disable them.
+	// To support Windows test modules, we likely need to switch
+	// to panic=unwind.
+	android.AddLoadHook(module, rustTestDisableWindows)
 	module.testModule = true
 	return module.Init()
 }
 
-func (test *testDecorator) stdLinkage(device bool) RustLinkage {
-	return RlibLinkage
+func (test *testDecorator) stdLinkage(device bool) StdLinkage {
+	return RlibStd
 }
 
 func (test *testDecorator) compilerDeps(ctx DepsContext, deps Deps) Deps {
@@ -320,10 +319,6 @@ func (test *testDecorator) moduleInfoJSON(ctx ModuleContext, moduleInfoJSON *and
 	} else {
 		moduleInfoJSON.CompatibilitySuites = append(moduleInfoJSON.CompatibilitySuites, "null-suite")
 	}
-
-	android.SetProvider(ctx, android.TestSuiteInfoProvider, android.TestSuiteInfo{
-		TestSuites: test.Properties.Test_suites,
-	})
 }
 
 func rustTestHostMultilib(ctx android.LoadHookContext) {
@@ -336,5 +331,18 @@ func rustTestHostMultilib(ctx android.LoadHookContext) {
 	}
 	p := &props{}
 	p.Target.Host.Compile_multilib = proptools.StringPtr("first")
+	ctx.AppendProperties(p)
+}
+
+func rustTestDisableWindows(ctx android.LoadHookContext) {
+	type props struct {
+		Target struct {
+			Windows struct {
+				Enabled bool
+			}
+		}
+	}
+	p := &props{}
+	p.Target.Windows.Enabled = false
 	ctx.AppendProperties(p)
 }

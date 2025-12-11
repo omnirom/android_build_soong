@@ -23,13 +23,17 @@ import (
 	"android/soong/android"
 	"android/soong/cc"
 	cc_config "android/soong/cc/config"
+	"android/soong/rust/config"
 )
 
 var (
-	defaultBindgenFlags = []string{""}
+	defaultBindgenFlags = []string{
+		"--blocklist-type",
+		"max_align_t",
+	}
 
 	// bindgen should specify its own Clang revision so updating Clang isn't potentially blocked on bindgen failures.
-	bindgenClangVersion = "clang-r530567"
+	bindgenClangVersion = "clang-r563880"
 
 	_ = pctx.VariableFunc("bindgenClangVersion", func(ctx android.PackageVarContext) string {
 		if override := ctx.Config().Getenv("LLVM_BINDGEN_PREBUILTS_VERSION"); override != "" {
@@ -258,9 +262,10 @@ func (b *bindgenDecorator) GenerateSource(ctx ModuleContext, deps PathDeps) andr
 	}
 
 	bindgenFlags := defaultBindgenFlags
+	bindgenFlags = append(bindgenFlags, "--rust-target", config.GetRustVersion(ctx))
 	bindgenFlags = append(bindgenFlags, esc(b.Properties.Bindgen_flags)...)
 	if Bool(b.Properties.Handle_static_inline) {
-		outputStaticFnsFile := android.PathForModuleOut(ctx, b.BaseSourceProvider.getStem(ctx)+".c")
+		outputStaticFnsFile := android.PathForModuleOut(ctx, b.getStem(ctx)+".c")
 		implicitOutputs = append(implicitOutputs, outputStaticFnsFile)
 		validations = append(validations, outputStaticFnsFile)
 		bindgenFlags = append(bindgenFlags, []string{"--experimental", "--wrap-static-fns", "--wrap-static-fns-path=" + outputStaticFnsFile.String()}...)
@@ -300,12 +305,16 @@ func (b *bindgenDecorator) GenerateSource(ctx ModuleContext, deps PathDeps) andr
 	// it cannot recognize. Turn off unknown warning flags warning.
 	cflags = append(cflags, "-Wno-unknown-warning-option")
 
+	// The main file for bindgen usually is header where #pragma once is actually best practice.
+	// Don't pollute the build log with unnecessary warnings.
+	cflags = append(cflags, "-Wno-pragma-once-outside-header")
+
 	// Suppress warnings while testing a new compiler.
 	if ctx.Config().IsEnvTrue("LLVM_NEXT") {
 		cflags = append(cflags, "-Wno-everything")
 	}
 
-	outputFile := android.PathForModuleOut(ctx, b.BaseSourceProvider.getStem(ctx)+".rs")
+	outputFile := android.PathForModuleOut(ctx, b.getStem(ctx)+".rs")
 
 	var cmd, cmdDesc string
 	if b.Properties.Custom_bindgen != "" {
@@ -333,19 +342,19 @@ func (b *bindgenDecorator) GenerateSource(ctx ModuleContext, deps PathDeps) andr
 		},
 	})
 
-	b.BaseSourceProvider.OutputFiles = android.Paths{outputFile}
+	b.OutputFiles = android.Paths{outputFile}
 
 	// Append any additional implicit outputs after the entry point source.
 	// We append any generated .c file here so it can picked up by cc_library_static modules.
 	// Those CC modules need to be sure not to pass any included .rs files to Clang.
 	// We don't have to worry about the additional .c files for Rust modules as only the entry point
 	// is passed to rustc.
-	b.BaseSourceProvider.OutputFiles = append(b.BaseSourceProvider.OutputFiles, implicitOutputs.Paths()...)
+	b.OutputFiles = append(b.OutputFiles, implicitOutputs.Paths()...)
 
 	return outputFile
 }
 
-func (b *bindgenDecorator) SourceProviderProps() []interface{} {
+func (b *bindgenDecorator) SourceProviderProps() []any {
 	return append(b.BaseSourceProvider.SourceProviderProps(),
 		&b.Properties, &b.ClangProperties)
 }

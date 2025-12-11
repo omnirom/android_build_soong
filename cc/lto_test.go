@@ -19,23 +19,11 @@ import (
 	"testing"
 
 	"android/soong/android"
-
-	"github.com/google/blueprint"
 )
 
 var LTOPreparer = android.GroupFixturePreparers(
 	prepareForCcTest,
 )
-
-func hasDep(result *android.TestResult, m android.Module, wantDep android.Module) bool {
-	var found bool
-	result.VisitDirectDeps(m, func(dep blueprint.Module) {
-		if dep == wantDep {
-			found = true
-		}
-	})
-	return found
-}
 
 func TestThinLtoDeps(t *testing.T) {
 	t.Parallel()
@@ -73,22 +61,22 @@ func TestThinLtoDeps(t *testing.T) {
 	libLto := result.ModuleForTests(t, "lto_enabled", "android_arm64_armv8-a_shared").Module()
 
 	libFoo := result.ModuleForTests(t, "foo", "android_arm64_armv8-a_static").Module()
-	if !hasDep(result, libLto, libFoo) {
+	if !android.HasDirectDep(result, libLto, libFoo) {
 		t.Errorf("'lto_enabled' missing dependency on the default variant of 'foo'")
 	}
 
 	libBaz := result.ModuleForTests(t, "baz", "android_arm64_armv8-a_static").Module()
-	if !hasDep(result, libFoo, libBaz) {
+	if !android.HasDirectDep(result, libFoo, libBaz) {
 		t.Errorf("'foo' missing dependency on the default variant of transitive dep 'baz'")
 	}
 
 	libNeverLto := result.ModuleForTests(t, "lib_never_lto", "android_arm64_armv8-a_static").Module()
-	if !hasDep(result, libLto, libNeverLto) {
+	if !android.HasDirectDep(result, libLto, libNeverLto) {
 		t.Errorf("'lto_enabled' missing dependency on the default variant of 'lib_never_lto'")
 	}
 
 	libBar := result.ModuleForTests(t, "bar", "android_arm64_armv8-a_shared").Module()
-	if !hasDep(result, libLto, libBar) {
+	if !android.HasDirectDep(result, libLto, libBar) {
 		t.Errorf("'lto_enabled' missing dependency on the default variant of 'bar'")
 	}
 
@@ -142,12 +130,12 @@ func TestThinLtoOnlyOnStaticDep(t *testing.T) {
 	libRootLtoNever := result.ModuleForTests(t, "root_no_lto", "android_arm64_armv8-a_shared").Module()
 
 	libFoo := result.ModuleForTests(t, "foo", "android_arm64_armv8-a_static")
-	if !hasDep(result, libRoot, libFoo.Module()) {
+	if !android.HasDirectDep(result, libRoot, libFoo.Module()) {
 		t.Errorf("'root' missing dependency on the default variant of 'foo'")
 	}
 
 	libFooNoLto := result.ModuleForTests(t, "foo", "android_arm64_armv8-a_static_lto-none")
-	if !hasDep(result, libRootLtoNever, libFooNoLto.Module()) {
+	if !android.HasDirectDep(result, libRootLtoNever, libFooNoLto.Module()) {
 		t.Errorf("'root_no_lto' missing dependency on the lto_none variant of 'foo'")
 	}
 
@@ -157,7 +145,7 @@ func TestThinLtoOnlyOnStaticDep(t *testing.T) {
 	}
 
 	libBaz := result.ModuleForTests(t, "baz", "android_arm64_armv8-a_static")
-	if !hasDep(result, libFoo.Module(), libBaz.Module()) {
+	if !android.HasDirectDep(result, libFoo.Module(), libBaz.Module()) {
 		t.Errorf("'foo' missing dependency on the default variant of transitive dep 'baz'")
 	}
 

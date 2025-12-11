@@ -30,3 +30,32 @@ message ReleaseConfigContributionsArtifacts {
   // The artifacts
   repeated ReleaseConfigContributionsArtifact release_config_contributions_artifact_list = 1;
 }
+
+message ProductReleaseConfig {
+  // The TARGET_PRODUCTs for which this is valid.
+  repeated string products = 1;
+
+  // The value of PRODUCT_RELEASE_CONFIG_MAPS.
+  optional string ps_maps_value = 2;
+
+  // Map from TARGET_BUILD_VARIANT to file with the ReleaseConfigsArtifact.
+  // Key is TARGET_BUILD_VARIANT (one of "user". "userdebug", or "eng").
+  map <string,string> release_configs_artifact_path_map = 3;
+
+  // The path of the inheritance graph.
+  optional string inheritance_graph_path = 4;
+
+}
+
+message ProductReleaseConfigsInfo {
+  // Map of TARGET_PRODUCT to tag for artifact_map.
+  map <string,string> product_to_tag_map = 1;
+
+  // Map of PRODUCT_RELEASE_CONFIG_MAPS to tag for artifact map.
+  map <string,string> ps_maps_to_tag_map = 2;
+
+  // Release configs for each group of products.
+  // All of the products in each group have the same value for
+  // PRODUCT_RELEASE_CONFIG_MAPS.
+  map <string, ProductReleaseConfig> tag_to_artifact_map = 3;
+}

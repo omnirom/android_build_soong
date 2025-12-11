@@ -8,6 +8,7 @@ bootstrap_go_package {
     deps: [
         "soong-android",
         "soong-cc-config",
+        "soong-remoteexec",
     ],
     srcs: [
         "arm_device.go",
@@ -22,6 +23,7 @@ bootstrap_go_package {
         "x86_linux_host.go",
         "x86_device.go",
         "x86_64_device.go",
+        "x86_windows_host.go",
         "arm64_linux_host.go",
     ],
     visibility: [

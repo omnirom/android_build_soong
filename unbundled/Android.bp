@@ -1,0 +1,28 @@
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+bootstrap_go_package {
+    name: "soong-unbundled",
+    pkgPath: "android/soong/unbundled",
+    deps: [
+        "blueprint",
+        "blueprint-pathtools",
+        "soong",
+        "soong-android",
+        "soong-cc",
+        "soong-java",
+        "soong-filesystem",
+    ],
+    srcs: [
+        "unbundled.go",
+    ],
+    testSrcs: [
+        "unbundled_test.go",
+    ],
+    pluginFor: ["soong_build"],
+}
+
+unbundled_builder {
+    name: "unbundled_builder",
+}

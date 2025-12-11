@@ -16,6 +16,7 @@ package libbpf_prog
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"android/soong/android"
@@ -67,4 +68,58 @@ func TestLibbpfProgSourceName(t *testing.T) {
 	prepareForLibbpfProgTest.ExtendWithErrorHandler(android.FixtureExpectsOneErrorPattern(
 		`invalid character '_' in source name`)).
 		RunTestWithBp(t, bp)
+}
+
+func TestLibbpfProgVendor(t *testing.T) {
+	bp := `
+		libbpf_prog {
+			name: "bpf.bpf",
+			srcs: ["bpf.c"],
+			vendor: true,
+			relative_install_path: "prefix",
+		}
+	`
+
+	result := prepareForLibbpfProgTest.RunTestWithBp(t, bp)
+	module := result.ModuleForTests(t, "bpf.bpf", "android_vendor_arm64_armv8-a").Module().(*libbpfProg)
+	data := android.AndroidMkDataForTest(t, result.TestContext, module)
+	name := module.BaseModuleName()
+	var builder strings.Builder
+	data.Custom(&builder, name, "", "", data)
+	androidMk := android.StringRelativeToTop(result.Config, builder.String())
+
+	expected := "LOCAL_MODULE_PATH := $(TARGET_OUT_VENDOR_ETC)/bpf/prefix"
+	if !strings.Contains(androidMk, expected) {
+		t.Errorf("%q is not found in %q", expected, androidMk)
+	}
+}
+
+func TestLibbpfProgGeneratedHeaderLib(t *testing.T) {
+	bp := `
+		libbpf_prog {
+			name: "bpf.bpf",
+			srcs: ["bpf.c"],
+			header_libs: ["foo_headers"],
+		}
+
+		cc_library_headers {
+			name: "foo_headers",
+			generated_headers: ["gen_headers"],
+			export_generated_headers: ["gen_headers"],
+		}
+
+		genrule {
+			name: "gen_headers",
+			out: ["gen.h"],
+			cmd: "touch $(out)",
+		}
+	`
+
+	result := prepareForLibbpfProgTest.RunTestWithBp(t, bp)
+
+	bpfCc := result.ModuleForTests(t, "bpf.bpf", "android_arm64_armv8-a").Rule("libbpfProgCcRule")
+	android.AssertPathsRelativeToTopEquals(t, "expected implicit deps", []string{
+		"out/soong/.intermediates/libbpf_headers/libbpf_headers/gen/foo.h",
+		"out/soong/.intermediates/gen_headers/gen/gen.h",
+	}, bpfCc.Implicits)
 }
